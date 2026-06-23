@@ -1,261 +1,256 @@
-# Clippy Vision V1.0
+﻿# Clippy Vision V1.0
 
 ## Motivation
 
-When creating projects, I dont just code...I juggle between reading lots of articles, products similar to my idea, seeing documentations, seeing how to debug a code and so on. Now, when I have to ask LLM chatbots like ChatGPT or Claude about how to debug this error, or does my project idea sound good, I need to explain it eveything, what my idea is, what I have researched so far, or when debugging, what I already tried and so on. This gets more frustrating, when the conversation thread gets too long, and when you create a new session, though they dont forget about you or what you are working on, but the intermediate context is gone. And finally, if at all claude or chatGPT found a way to solve this, they would never be able to make it 100% local. Your data is not private, we all know that. Companies nowadays openly claim that they would use this data for refining the model, which is very much needed to build better models. MORE DATA = BETTER MODEL.
+When building projects, I don't just write code...I juggle between reading articles, studying similar products, diving into documentation, and figuring out how to debug issues. Every time I turn to an LLM like ChatGPT or Claude for help, I have to re-explain everything: my idea, what I've already researched, what I've already tried. This gets exhausting fast. And when a conversation thread grows too long and you start a new session, all that intermediate context is gone, and the model has no idea where you left off.
 
-But, some things are needed to be kept private, for example, when you share a overly personal thing on these AI assistants, you never know if your data is being captured by some other party or not. You are leaking out information, and that is a serious privacy threat.
+Even if these tools did manage to answer your questions, they will never be able to do it with full privacy. Your data is not truly private; companies openly acknowledge using it to improve their models, which makes sense: **MORE DATA = BETTER MODELS**. But some things need to stay private. When you share something deeply personal with an AI assistant, there's no guarantee that data isn't being captured, logged, or seen by other parties. That's a real privacy threat.
 
-This is why I created Clippy Vision, it solves all the problems about context, it watches your work passively 24 by 7, so you have an assistant that knows all about you at all times. More importantly, the entire infrastructure, from database to model gateway to the LLM is all local, so no risk of data leakage. It constantly learns from you, the more you interact with it, the more the model knows you and can answer better for you, just like a journey from a stranger to a friend. But, friend might forget you, this never does that, it remembers every single detail about you and answers all your question without you explicitly providing any context.
+This is why I built Clippy Vision. It solves the context problem entirely. It watches your work passively, 24/7, so you always have an assistant that knows exactly what you've been doing. More importantly, the entire infrastructure (database, model gateway, and the LLM itself) runs locally. No cloud. No data leakage. It learns continuously from your interactions; the more you use it, the better it understands you. Think of it as going from a stranger to a close companion, except this one never forgets a single detail about you and answers every question without you needing to provide any context upfront.
 
 ## Tech Stack
 
-1. Ollama: I used ollama to act as a gateway between the local LLM and Clippy Vision. I used qwen3:8b model as my main brain for this project, which handles classification, summarization, SQL generation and question answering.
+1. **Ollama**: Used as the local model gateway between Clippy Vision and the LLMs.
+   - `qwen3:8b` - the main reasoning brain: handles classification, summarization, SQL generation, and question answering.
+   - `qwen3-vl:4b` - handles vision classification and OCR.
+   - `nomic-embed-text` - converts text into vector embeddings.
 
-I used qwen3-vl:4b model for vision classification and OCR
+2. **Pywin32**: Captures high-level on-screen signals on Windows - foreground window title, process name, clipboard contents, and more.
 
-I also used nomic-embed-text as embedding model to convert text into vector embeddings
+3. **SQLite**: A lightweight, fully local database efficient enough to handle large volumes of data. Stores events, summaries, agent memories/facts, and conversation history.
 
+## Architecture of Clippy Vision
 
-2. Pywin32: I used this to capture high level on-screen details on Windows OS, like the foreground window title, process name, clipboard contents, etc.
-
-3. SQLlite: I used sqllite as it functions locally, and also is efficient enough to handle large volume of data. We store events, summaries, agent memories/facts, and user-agent conversations.
-
-## Working/ Architecture of Clippy Vision
-
+---
 
 ## Segment 1: Data Capture
 
-This is one of the most critical segment of the entire architecture, as it builds the foundation by capturing the on-screen data and is the doorway to all other segments. 
+This is the most critical segment of the entire architecture. It builds the foundation by capturing on-screen data and acts as the entry point for every downstream component.
 
 ### What is Captured?
 
-In Version 1, we are capturing the following data:
+In Version 1, the following data is captured:
 
-1. Active foreground window (Title, Process Name, active urls if any)
-2. Clipboard contents (Copy events, and paste events)
-3. Context switch (change in foreground window)
-4. Keystroke Dynamics with adaptive baseline (Key bursts, deviation from baseline)
-5. screen shots (description, text from OCR is only stored in database - raw screenshots are kept on disk)
+1. Active foreground window (title, process name, active URLs if any)
+2. Clipboard contents (copy and paste events)
+3. Context switches (foreground window changes)
+4. Keystroke dynamics with adaptive baseline (key bursts, deviation from baseline)
+5. Screenshots (description and OCR text are stored in the database; raw images are kept on disk)
 
-Following versions are aimed to capture more:
+Planned for future versions:
 
-1. Mouse events (clicks, movement for idle detection)
-2. File watcher (actively looks for modifications in file user is working)
-3. On-demand continuous screen capture (screen sharing)
+1. Mouse events (clicks and movement for idle detection)
+2. File watcher (actively monitors file modifications as the user works)
+3. On-demand continuous screen capture (screen sharing mode)
 4. On-demand audio capture
 
-## How is it captured
+### How is it Captured?
 
-- `core/screen_capture.py`, starts the daemon, to capture and store the events.
-- For each detected event, we assign an interesting score (0 to 10) and a threshold decides if the event is interesting or not.
+- `core/screen_capture.py` starts the capture daemon, which detects and stores events.
+- Each detected event is assigned an **interest score** (0–10). A threshold determines whether the event is interesting enough to process further.
+- Every event passes through a **three-tier classification pipeline** before being stored in the database.
 
-- The event goes through a three tier classification pipeline as follows before getting stored in the database:
+---
 
-### 1. Tier 0: Rule based
+### Tier 0: Rule-Based
 
-- Here we define small rules which instantly shows high signals of whether the event is interesting or not.
-- Rules:
- (a) If typing burst has fewer than 2 words OR character-to-keypress ratio < 0.30 (i.e., mostly modifier/arrow keys) --> NOT INTERESTING (score=0)
- (b) if the window switches to a known background system process (eg: msiexec.exe, SearchHost.exe) --> NOT INTERESTING (score=0)
- (c) Duplicate context change (title same even after tab switch) --> NOT INTERESTING (score=0)
- (d) Pasted clipboard content is less than 3 words --> NOT INTERESTING (score=1)
- (e) high deviation shown in typing from the baseline --> INTERESTING (score=9)
+Fast, deterministic rules that immediately flag high-confidence signals.
 
- ### 2. Tier 1: Feature based:
+- **(a)** Typing burst has fewer than 2 words **OR** character-to-keypress ratio < 0.30 (mostly modifier/arrow keys) → **NOT INTERESTING** (score = 0)
+- **(b)** Window switches to a known background system process (e.g., `msiexec.exe`, `SearchHost.exe`) → **NOT INTERESTING** (score = 0)
+- **(c)** Duplicate context switch (title unchanged after tab switch) → **NOT INTERESTING** (score = 0)
+- **(d)** Pasted clipboard content is fewer than 3 words → **NOT INTERESTING** (score = 1)
+- **(e)** High deviation detected in typing from the established baseline → **INTERESTING** (score = 9)
 
- - We start form a neutral score (i.e 5) and look at multiple features and provide scores for each observed feature, and finally the thresholds, (i.e INTERESTING_THRESHOLD = 7 and NOT_INTERESTING_THRESHOLD = 4 decides whether the events are interesting or not)
- - In simple language, if score > 7 --> INTERESTING,
- if score < 4 --> NOT INTERESTING
+---
 
- Features observed and scoring:
+### Tier 1: Feature-Based
 
- (a) If deviation in typing is detected, an is:
- (i) greater than 1.5 --> score+=2
- (ii) less than 1 --> score-=3
+Scoring starts at a neutral value of 5. Multiple features are evaluated and scores are added or subtracted. Two thresholds decide the final label:
+- `INTERESTING_THRESHOLD = 7` → score > 7 = **INTERESTING**
+- `NOT_INTERESTING_THRESHOLD = 4` → score < 4 = **NOT INTERESTING**
 
-(b) Context novelty (How many times the process was seen in last 7 days)
+**Features and scoring:**
 
-(i) Never seen --> score+=2.5
-(ii) seen < 5 --> score+=1.5
-(iii) seen < 50 and >=5 --> score+=1
-(iv) else, seen>=50 --> score+=0.5 (tiny boost)
+**(a) Typing deviation**
+- > 1.5 → score += 2
+- < 1.0 → score -= 3
 
-(c) Typing intensity
+**(b) Context novelty** (how many times this process was seen in the last 7 days)
+- Never seen → score += 2.5
+- Seen < 5 times → score += 1.5
+- Seen 5–49 times → score += 1.0
+- Seen ≥ 50 times → score += 0.5 (minor boost)
 
-- This compares current typing speed with baseline:
+**(c) Typing intensity** (compared against the per-app baseline)
 
-`wpm_z = current typing speed - mean typing speed (baseline) / standard deviation of typing speed (baseline)`
+WPM z-score:
+```
+wpm_z = (current WPM − baseline mean WPM) / baseline WPM std dev
+```
+- wpm_z > 1.5 → score += 2 (unusually fast)
+- wpm_z < −1.5 → score += 1.5 (unusually slow)
+- No stable baseline, but WPM > 0 → score += 0.5 (minor boost)
 
-(i) if wpm_z > 1.5 --> score+=2 (unusually fast)
-(ii) if wpm_z < -1.5 --> score+=1.5 (unusually slow)
-(iii) else if current wpm > 0, no stable baseline --> score+=0.5 (tiny boost)
+Revision z-score:
+```
+rev_z = (current revision ratio − baseline mean) / baseline std dev
+```
+- rev_z > 1.5 → score += 1.5 (unusually high revision)
+- Current revision ratio > 0.3 → score += 0.5 (minor boost)
 
-`rev_z = (current revision ratio - mean revision ratio (baseline)) / standard deviation of revision ratio`
+**(d) Clipboard/paste content length**
+- Word count > 50 → score += 2
+- Word count > 15 → score += 1
 
-(i) rev_z > 1.5 --> score+=1.5 (unusually high revision)
-(ii) else if current revision ratio > 0.3 --> score += 0.5 (tiny boost)
+---
 
-(d) Clipboard/paste content length
+### Tier 2: LLM Classification Fallback
 
-(i) if word count > 50 --> score+=2
-(ii) if word_count > 15 --> score+=1
+Events that fall in the ambiguous range (score 4–7) cannot be reliably labeled by rules or features alone, typically because each event is classified in isolation, without surrounding context. Tier 2 resolves this by feeding the **last N=3 events** alongside the current event to the LLM, giving it enough context to make a confident decision.
 
-### Tier 2: LLM classification fallback
+The LLM always outputs one of three labels:
+- **INTERESTING**
+- **NOT INTERESTING**
+- **NEEDS_VISION** - the event is forwarded to the vision model for further analysis
 
-- If the events are not able to be classified by tier0 and tier 1, then they come to tier 2, where they always recieve a classification label (interesting, not interesting, needs_vision).
-
-- The events with score between 4 and 7 only come to tier 2
-
-- The reason, the events that come to tier 2 recieve an ambiguous score between 4 to 7, is typically because of lack of context (as each events are individually classified by tier 0 and 1 classifiers) and strict constraints set by tier 1.
-
-- Tier 2, solves this problem by feeding last N=3 events along with the current event to determine if it is interesting or not interesting.
-
-- If it still feels, the events are ambiguous, then it labels the event as needs_vision, and the event is transferred to vision model for classification
+---
 
 ### Tier 2.5: Vision Classification
 
-- As all events, cannot be determined interesting and not interesting solely by looking at basic signals as described ago. 
+Not every event can be classified by signals alone; sometimes you need to actually see the screen. This tier handles those cases.
 
-- One critical problem which this tier faces, is that it cannot capture a screenshot when the tier 2 transfers the event to vision model. Becuase if it did that, it captures wrong screenshot (i.e current screen) whereas the event has already been passed. We cannot click screenshots, when each event is recorded, as it would become too expensive for storage.
+**The timing problem:** A screenshot cannot be taken at the moment Tier 2 routes an event to vision, because by then the screen has already moved on. Capturing a screenshot per event would also be prohibitively expensive in storage.
 
-- Solution is to pre-determine, which events could potentially need vision. For example, screenshots are captured when a type burst is detected (not 1, but 3 screenshots with exponential delay, to look what happens after).
+**The solution:** Screenshots are pre-captured proactively, specifically when a typing burst is detected. Three screenshots are taken with exponential delay, capturing what happens right after. When the vision model needs to analyze an event, it matches the event timestamp to the nearest pre-captured screenshot and uses that for classification.
 
-- Now, we can match the timestamp of the screenshot to that when the event was recorded, and the closest screenshot is picked and given to vision model for analysis/classification. 
+> **Note:** The model used, `qwen3-vl:4b`, only supports one image per prompt, so multi-screenshot context is not possible with it. The architecture is designed to support multiple images, and models with that capability can be swapped in.
 
-> **Note:** The model I used, `qwen3-vl:4b`, only supports one image per prompt, hence multiple screenshots for better context could not be done. The architecture supports the use of multiple screenshots, and other models which support more than one image can be used.
+---
 
+## Typing Dynamics
 
-## Typing dynamics
+Typing baselines are tracked **per application**, not as a single global average. This matters because people type very differently depending on what they're doing: coding is not the same as messaging a friend on WhatsApp.
 
-- We record typing patterns of user in each process or app.
-- This is because everyone types differently when using different apps, and capturing a single baseline typing pattern seemed less accurate. We type differently, when we are coding than when we are chatting with our friend on whatsapp/instagram.
+Metrics tracked:
+- Typing speed (WPM)
+- Average dwell time
+- Average inter-key interval (IKI)
+- Revision ratio
+- Max pause duration
 
-- We store metrics like, typing speed, average dwell time, average inter-key interval (IKI), revision ratio and max pause duration.
+The baseline updates continuously using an **exponential moving average** with `alpha = 0.05`, meaning each new typing sample nudges the baseline slightly without overwriting it. The baseline only activates after **30 samples**, a threshold found to be the sweet spot where deviation scores begin to stabilize.
 
-- Alpha, that is the rate at which the baseline gets changed is set to 0.05. So whenever, new typing data comes in, it changes the baseline for that process/app with a factor of 0.05
-
-- The baseline is used by system when we have enough samples, i.e 30 as it turned out to be a sweet spot after which deviation started to stabalize.
-
-Deviation is calculated as follows:
+Deviation is calculated as:
 
 ```
- overall_deviation =  round(math.sqrt(sum(z**2 for z in z_scores.values()) / len(z_scores)), 2)
+overall_deviation = round(math.sqrt(sum(z**2 for z in z_scores.values()) / len(z_scores)), 2)
 ```
 
-- If overall_deviation > 2.0 --> We mark it as anomaly
+- `overall_deviation > 2.0` → flagged as an anomaly
 
-- In next version, I am also planning to introduce a personal baseline, which is an overall baseline, and captures more metrics. This would be used when sample size for a particular process is less than the threshold (30).
+A **global personal baseline** is also planned for future versions, serving as a fallback when a per-app sample count hasn't yet reached the 30-sample threshold.
+
+---
 
 ## Segment 2: Summarization
 
-- As we saw in segment 1, there are lots of events that get recorded, and for an average user who spends 5-6 hours on PC actively working on something would easily have thousands of events or maybe more getting recorded. 
+Thousands of raw events accumulate quickly for an average user working 5–6 hours a day. To keep this manageable, events are summarized every 5 minutes using `qwen3:8b`.
 
-- Hence, we summarize events every 5 minutes using LLM (qwen3:8b)
+To avoid wasted LLM calls, the summarizer only runs if there are **more than 3 interesting events** in the pipeline:
+- **A)** A 5-minute window with zero interesting events has nothing worth summarizing.
+- **B)** 1–2 events alone don't provide enough signal to justify a summary.
 
-- One threshold or constraint I added here on top of this is, the summarizer runs only if it has more than 3 interesting events in pipeline ready to be summarized. This is because:
-A) If there are no interesting events in pipeline in 5 minute window, then there is no point in summarizing events that are not interesting
+The summarizer runs in **two passes per tick**:
+- **Pass 1:** Immediately summarizes all pending events without waiting for vision classification to complete.
+- **Pass 2:** Goes back and re-summarizes any sessions where vision has since finished, overwriting the earlier summary with richer, vision-informed data.
 
-B) If there are only 1 or 2 events, it forfeits the purpose of running a summarizer.
+**Why not wait for vision?**
+- The vision model takes 40–60+ seconds per image depending on the device, and waiting for it creates a growing backlog.
+- Tier 2 provides classification labels almost instantly, so the first pass is cheap and fast.
+- The two-pass approach gives the best of both worlds: immediate availability and eventual accuracy.
 
-- Another thing to note here is, the summarizer runs in two passes per tick. Pass 1 summarizes all pending events immediately, without waiting for vision classification to complete — it does not block. Pass 2 then goes back and re-summarizes any sessions where vision has since finished, overwriting the earlier summary with richer data.
-
-- Why do we not wait for vision before summarizing?
--> If summarizer waits for the vision model to run (which takes around 40-60 seconds or more depending on device), it creates an overhead in summarization over time.
--> Tier 2 takes significantly less time to compute than the vision model, and instantly provides us with labels, creating very little overhead.
--> Hence, for instant availability of data, we summarize events without waiting for vision classification to be completed, and once vision arrives, we rewrite the summary with the new information.
+---
 
 ## Segment 3: Distiller
 
-- Summarizer solved the memory problem with events, but notice how summaries itself can get more in volume a few times after the events.
+Summaries solve the raw event volume problem, but summaries themselves can pile up over time. The Distiller adds another level of abstraction, running every 5 sessions to extract high-level facts and behavioral patterns from recent summaries.
 
-- To make another hierarchy of data to capture events in high level context, we have a distiller that runs every 5 sessions to extract meaningful facts/patterns to store.
+**Session definition:**
+- (i) Consecutive summaries must be less than 30 minutes apart
+- (ii) A session cannot contain more than 20 summaries
+- (iii) *(Planned)* Sessions will eventually break based on detected shifts in user activity
 
-- Each session is defined as following:
+**How facts are stored:**
 
-(i) The consecutive time between each summary should be less than 30 minutes
-(ii) There should not be more than 20 summaries in one session
-(iii) To be added in future versions: We break each session depending on user's activity.
+Each extracted fact is vector-embedded and compared against existing cluster centroids. If similarity exceeds `CLUSTER_THRESHOLD = 0.75`, the fact is routed to the closest cluster; otherwise a new cluster is created.
 
-- The facts extracted by distiller are stored in form of clusters. Meaning, each fact is vector embedded, and compared to the vector embedding of existing cluster centroids. If the similarity is greater than CLUSTER_THRESHOLD = 0.75, then we route it to the closest existing cluster, otherwise we create a new cluster.
+Routing alone isn't enough. Once a matching cluster is found, a second LLM call decides what to do with the fact:
+- **(i) ADD** - new information not yet captured
+- **(ii) UPDATE** - refines or replaces an existing fact
+- **(iii) NOOP** - fact is already present; no action needed
 
-- But just routing a fact to an existing cluster is not enough. Once a matching cluster is found, a second LLM call decides what to actually do with it:
-(i) ADD the fact as new information, 
-(ii) UPDATE an existing fact in the cluster, 
-(iii) or NOOP if the fact is already captured. 
-This is what keeps the memory clean and non-redundant.
+This keeps memory clean, non-redundant, and up to date.
 
-- Clusters are important to merge existing facts. If in later runs, we get similar facts, they can simply suppress the older fact(s) and our memory stays clean with non-duplicate facts.
+The Distiller also runs after the second pass of the summarizer (post-vision re-summarization), not only on the regular 5-session schedule.
 
-- The distiller also runs after the second pass of the summarizer (re-summarization with vision data), not just on the regular 5-session schedule.
+> **Known limitation:** If a newly extracted fact directly contradicts an existing one, there is currently no resolution mechanism. This is a priority for a future version.
 
-- Major issue to address in future version: If one fact directly contradicts another fact, there is no way currently to resolve such cases.
+---
 
 ## Segment 4: The Agent
 
-- Another critical component of this system is the agent, which is the interaction gateway between the user and the events. 
+The agent is the interface between the user and everything Clippy Vision has learned. It's built as a **ReAct agent with function calling**, giving it the ability to reason across raw events, summaries, and memory before answering.
 
-- I developed a ReAct Agent equipped with function calling to make all of this work.
+**Tools available to the model:**
 
-- Functions available to model:
+| Tool | Description |
+|---|---|
+| `search_sessions` | Generates and executes SQL queries on the summaries table |
+| `search_events` | Generates and executes SQL queries on the events table |
+| `recall_memory` | Lists all memory cluster labels and descriptions - a directory of what Clippy knows about you |
+| `fetch_cluster` | Fetches relevant memory facts from a cluster |
+| `save_identity` | Saves the user's autobiographical details |
+| `save_note` | Saves explicit information the user asks to remember |
 
-(1) search_sessions : Generates and executes SQL queries on summaries table
-(2) search_events:   Generates and executes SQL queries on events table
-(3) recall_memory:   Lists all memory cluster labels and descriptions — a directory of what Clippy knows about you
-(4) fetch_cluster: Fetches relvant memory facts from cluster
-(5) save_identity: Saves user's autobiographical details
-(6) save_note: Saves explicit infromation user asks to remember
+**Prompt components:**
 
-- Components of prompt given to the model:
+**(1) Conversation history** - provided in two tiers:
+- **Tier 1 (always included):** Last 2 rolling summaries + last 8 turns (4 full exchanges). Every 5 saved messages, the conversation is summarized and its vector embedding is stored.
+- **Tier 2 (deep conversations):** Tier 1 + 2 most semantically relevant summaries retrieved via embedding search.
 
-(1) Conversation history:
+**(2) User Profile** - autobiographical information about the user, injected directly into context.
 
-- The history of coversation is provided in two tiers:
-(i) Tier 1: Always included -> last 2 rolling summaries + last 8 turns (4 full exchanges)
-    - Rolling summaries: Every 5 saved messages we summarize the conversation and store the vector embeddings of the summary
+**(3) Memory Context** - the user query is embedded and the top 8 most relevant memory facts are retrieved using `MEMORY_MIN_SIM = 0.30` as the minimum similarity threshold.
 
-(ii) Tier 2: When conversation is deep -> Tier 1 + retrieve 2 most relevant summaries
+**(4) Tool/function calling** - the model is explicitly prompted to call tools when it needs more information. A correction loop handles failures: if SQL generation fails, the error is fed back and the model retries. If a tool returns `None` or irrelevant data, the model is prompted to call additional tools.
 
-(2) User Profile
+The ReAct loop is capped at `MAX_STEPS = 10` to prevent hallucination or infinite loops.
 
-- Here we inject all the autobiographical information of the user
+When the user chats with the agent, the conversation is also passed to the Distiller to extract new facts using the same clustering algorithm. If a fact from conversation conflicts with one extracted passively, **the agent's version always takes precedence**.
 
-(3) Memory Context
-
-- Here we embed the user query and find top_k = 8 relevant memory facts, with the threshold of MEMORY_MIN_SIM   = 0.30 and load all into the context
-
-(4) Tool/function calling
-
-- We explicitly ask the LLM, to call any tool, when needed to get more information. It is also equipped with a correction loop, so when sql generation fails, it retries by providing the error it got, or when it returns None or get irrelevant information, it calls more tools.
-
-- The reAct loop is set to run for MAX_STEPS = 10, so it does not halluciante or gets stuck in a loop and provides final answer.
-
-- One important thing to note is, when user chats with the agent, the conversation is sent to distiller to extract facts with same algorithm as stated above. If the facts clash, then agent is always given preference over the facts extracted by distiller.
-
+---
 
 ## Segment 5: SQLite Database
 
-- All the information, which the agent can access to, is stored here.
+All data accessible to the agent is stored locally in SQLite. See `core/storage.py` for full table schemas.
 
-- refer to `core/storage.py` for table schemas of :
-1) events : raw events (typing bursts, clipboard, window title...), 
-2) sessions: summary of the events,
-3) memory clusters,
-4) memory_meta: Autobiographical memory, and metadata of distiller
-5) memory_facts
-6) conversation
+**Tables:**
+1. `events` - raw captured events (typing bursts, clipboard, window title, etc.)
+2. `sessions` - summaries of events
+3. `memory_clusters` - cluster metadata
+4. `memory_meta` - autobiographical memory and distiller metadata
+5. `memory_facts` - individual facts within clusters
+6. `conversation` - full conversation history
 
-and virtual tables for events and sessions to perform searching (in future versions)
+Virtual tables for `events` and `sessions` support full-text search (planned for future versions).
 
-We have two kinds of storages:
+**Memory types:**
 
-1) persistent memory: Never expires
+**1. Persistent memory** - never expires
+- `conversations`, `memory_clusters`, `memory_meta`, `memory_facts`
+- Data is never deleted, though it can be updated.
 
-- conversations, memory_clusters, memory_meta and memory facts fall under persistent memory, where the data is never deleted then can still be updated.
-
-2) Non-persistent memory: each memory has a TTL (time-to-live) associated with them
-
-- events and sessions have an expiry date after which they get deleted from the database
-- Raw Events have TTL of 7 days and sessions have TTL of 90 days
-
-
+**2. Non-persistent memory** - each record has a TTL (time-to-live)
+- `events` expire after **7 days**
+- `sessions` expire after **90 days**
