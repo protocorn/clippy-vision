@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Clippy_Vision"
+version = "0.1.0"
+
+# Add this section below to handle the flat layout
+[tool.setuptools.packages.find]
+where = ["."]  # Look in the root directory
+include = ["core*", "classifier*", "agent*"]  # Explicitly include these directories

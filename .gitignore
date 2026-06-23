@@ -1,0 +1,5 @@
+core/data/*
+__pycache__/
+.cursor/
+tests/*
+bench/*

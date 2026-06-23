@@ -1,0 +1,8 @@
+win32gui
+win32api
+uiautomation
+mss
+Pillow
+pynput
+psutil
+pywin32
