@@ -78,18 +78,25 @@ def apply_verdict(event_id: str, verdict: dict, needs_vision: bool = False):
     conn.commit()
 
 def apply_vision_verdict(event_id: str, verdict: dict):
-    # Vision enriches only — does not override the text-tier verdict
+    # Vision verdict is authoritative — it can see the screen, so it overrides text-tier classification
+    interesting = 0 if verdict["verdict"] == "not_interesting" else 1
     conn.execute(
         """UPDATE events
            SET vision_ocr_text=?,
                vision_activity=?,
                vision_suggested_action=?,
+               interesting=?,
+               interest_score=?,
+               interest_reason=?,
                classification_status='done'
            WHERE event_id=?""",
         (
             verdict.get("ocr_text"),
             verdict.get("user_activity"),
             verdict.get("suggested_action"),
+            interesting,
+            verdict.get("score"),
+            verdict.get("reason"),
             event_id,
         ),
     )
@@ -226,7 +233,7 @@ def vision_worker_loop():
                       previous_process_name, previous_window_title,
                       summary, payload
                FROM events
-               WHERE classification_status = 'awaiting_vision'
+               WHERE classification_status IN ('awaiting_vision', 'screenshot_only')
                ORDER BY timestamp DESC
                LIMIT 5"""
         ).fetchall()

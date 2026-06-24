@@ -6,3 +6,5 @@ Pillow
 pynput
 psutil
 pywin32
+imagehash
+mcp
