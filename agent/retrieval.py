@@ -86,6 +86,8 @@ Date helpers (always use 'localtime'):
 Rules:
 - SELECT only columns needed to answer the question — never SELECT *.
 - For keyword searches use: summary, current_window_title, active_url, vision_ocr_text, interest_reason.
+- For any question about what the user was doing, reading, working on, or looking at — always include
+  vision_activity and vision_ocr_text in the SELECT list alongside summary (they may be NULL but include them).
 - Use OR between search conditions, not AND.
 - Prefer interesting=1 rows unless the question requires all events.
 - LIMIT 20.

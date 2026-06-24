@@ -44,7 +44,13 @@ def generate_summary(event: Event) -> str:
         case "paste":
             return f"Pasted content: {payload['pasted_content']} in {window_context['process_name']} on {window_context['active_url'] or window_context['current_window_title']}"
         case "context_change":
-            return (f"Switched to {window_context['process_name']} - {window_context['current_window_title']} from {previous_window_context['process_name']} - {previous_window_context['current_window_title']}")
+            dwell_s = round(payload.get("dwell_ms", 0) / 1000)
+            dwell_str = f" after {dwell_s}s" if dwell_s > 0 else ""
+            prev_url = payload.get("previous_url")
+            curr_url = payload.get("current_url")
+            from_desc = prev_url or f"{previous_window_context['process_name']} - {previous_window_context['current_window_title']}"
+            to_desc   = curr_url or f"{window_context['process_name']} - {window_context['current_window_title']}"
+            return f"Switched to {to_desc} from {from_desc}{dwell_str}"
         case "deviation":
             return (f"Anomalous typing in {payload['context_key']}: "
                 f"overall deviation {payload['overall_deviation']}σ")

@@ -51,7 +51,8 @@ def purge_expired_screenshots() -> None:
     cutoff_ms = int(time.time() * 1000) - SCREENSHOT_TTL_MS
     for path in _SCREENSHORT_DIR.glob("*.jpg"):
         try:
-            if int(path.stem) < cutoff_ms:
+            ts_part = path.stem.split("_")[0]
+            if int(ts_part) < cutoff_ms:
                 path.unlink()
         except ValueError:
             continue

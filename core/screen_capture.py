@@ -28,6 +28,7 @@ import win32clipboard
 
 from summarizer import start_summarizer
 from distil import should_distil, distil
+from screenshot_processor import start_screenshot_processor
 
 #-----------------------------------------------------#
 # Currently launched only once at the start of -------#
@@ -39,6 +40,7 @@ purge_expired()
 start_worker()
 start_vision_daemon()
 start_summarizer()
+start_screenshot_processor()
 if should_distil():
     print("[startup] Distillation threshold reached — running distil...")
     distil()
@@ -468,6 +470,8 @@ t.start()
 last_hwnd = None
 metadata: Optional[WindowMetadata] = None
 last_window_context: Optional[WindowMetadata] = None
+last_context_change_time: float = time.time()
+
 while True:
     try:
         hwnd = win32gui.GetForegroundWindow()
@@ -479,6 +483,11 @@ while True:
                     last_hwnd = hwnd
                     continue
                 burst_detector.flush_on_context_change()
+
+                now = time.time()
+                dwell_ms = round((now - last_context_change_time) * 1000)
+                last_context_change_time = now
+
                 event = Event(
                     event_id=str(uuid.uuid4()),
                     session_id=get_session_id(),
@@ -486,7 +495,11 @@ while True:
                     event_type="context_change",
                     window_context=metadata,
                     previous_window_context=last_window_context,
-                    payload={},
+                    payload={
+                        "dwell_ms": dwell_ms,
+                        "previous_url": last_window_context.get("active_url") if last_window_context else None,
+                        "current_url": metadata.get("active_url")
+                    },
                     summary=None,
                     vector_embedding=None,
                     interest_score=None,
