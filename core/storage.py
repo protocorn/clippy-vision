@@ -116,6 +116,23 @@ CREATE TABLE IF NOT EXISTS memory_meta (
 conn.commit()
 
 #-------------------------------------#
+#-------- CONFLICT TABLE ------------#
+#-------------------------------------#
+
+conn.execute("""
+CREATE TABLE IF NOT EXISTS memory_conflicts (
+    conflict_id  TEXT PRIMARY KEY,
+    fact_id_a    TEXT NOT NULL,   -- existing fact that was already stored
+    fact_id_b    TEXT NOT NULL,   -- incoming fact that contradicts it
+    cluster_id   TEXT NOT NULL,
+    created_at   REAL NOT NULL,
+    resolved_at  REAL,            -- NULL = unresolved
+    resolution   TEXT             -- 'kept_a', 'kept_b', 'dismissed'
+)
+""")
+conn.commit()
+
+#-------------------------------------#
 #------- CONVERSATION TABLE ----------#
 #-------------------------------------#
 
