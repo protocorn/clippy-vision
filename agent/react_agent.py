@@ -11,6 +11,7 @@ from agent.conversation import (
     save_chat, maybe_summarize,
     get_recent_chats, get_recent_summaries, get_relevant_summaries,
 )
+from core.memory_store import get_unresolved_conflicts
 
 MODEL     = "qwen3:8b"
 MAX_STEPS = 10
@@ -32,6 +33,9 @@ Current date and time: {datetime}
 </user_profile>
 
 <memory_context>
+[Long-term facts about who the user is — identity, skills, projects, preferences.
+This does NOT contain their activity log. Do not use it to answer questions about
+what they did, when, or for how long. Use the activity tools for that.]
 {memory_context}
 </memory_context>
 
@@ -40,17 +44,22 @@ Core Rules:
 - Do not invent activity history, timestamps, files, websites, apps, or user intentions.
 - If evidence is weak, partial, or missing, say so plainly.
 - Address the user naturally. Use their name occasionally, not repeatedly.
+- When the user asks a follow-up that references something established earlier in the conversation (e.g. a time, place, or calculation), use that context directly — do not say evidence is unavailable if it is already in <conversation_history>.
 
 Tool Policy:
 - <memory_context> above is already pre-retrieved. If it answers the question, answer directly — do NOT call recall_memory or fetch_cluster again.
 - recall_memory / fetch_cluster: use ONLY when the question needs a cluster not visible in <memory_context>, or the user asks about something not covered there.
+- Activity questions require tools — no exceptions: any question containing time references (this morning, last night, yesterday, today, after midnight, this week, recently, etc.) or asking what the user did, worked on, or was doing MUST call search_sessions first. <memory_context> does not substitute for this — it contains identity facts, not events.
+- If the user asks for detail, specifics, or "everything" about an activity period, always follow up with search_events — session summaries are too high-level for detailed answers.
 - Activity search — choose the right tool first, then escalate if needed:
   • search_sessions → broad time windows, daily/weekly overviews, project topics, "what did I work on"
   • search_events  → specific messages, OCR text, URLs, clipboard, app-level detail, WhatsApp/email content
   • If a tool returns "no matching records" or its result does not contain the answer, call the OTHER tool before giving up.
   • Read the result header — it tells you which table was searched and how many rows matched. Use that to decide whether to escalate.
 - Save tools: use immediately when the user asks you to remember something or shares personal identity information.
+- Delete tools: use immediately when the user asks you to forget or delete something.
 - Do not call activity tools for casual chat or general advice that requires no evidence.
+- Data retention limits: raw events expire after 7 days, session summaries after 90 days. If the user asks about activity outside these windows, tell them the data no longer exists rather than searching and returning empty results.
 - If both tools return no useful results, say so plainly — do not invent an answer.
 
 Response Style:
@@ -94,6 +103,17 @@ def _build_conversation_history(conversation_id: str, user_message: str) -> str:
     return "\n\n".join(parts) if parts else "No conversation history yet."
 
 
+def _build_conflict_notice() -> str:
+    """Return a formatted notice of unresolved memory conflicts, or empty string if none."""
+    conflicts = get_unresolved_conflicts(limit=3)
+    if not conflicts:
+        return ""
+    lines = ["[Unresolved memory conflicts — ask the user to clarify if relevant:]"]
+    for c in conflicts:
+        lines.append(f'  • "{c["fact_a"]}"  ↔  "{c["fact_b"]}"')
+    return "\n".join(lines)
+
+
 def _build_system_prompt(conversation_id: str, user_message: str = "") -> str:
     now    = time.localtime()
     dt_str = time.strftime("%A %B %d, %Y at %H:%M", now)
@@ -101,6 +121,10 @@ def _build_system_prompt(conversation_id: str, user_message: str = "") -> str:
     mem_ctx = semantic_memory_context(user_message) if user_message else ""
     if not mem_ctx:
         mem_ctx = "No relevant memory found for this query."
+
+    conflict_notice = _build_conflict_notice()
+    if conflict_notice:
+        mem_ctx = mem_ctx + "\n\n" + conflict_notice
 
     history = _build_conversation_history(conversation_id, user_message) if user_message else "No conversation history yet."
 

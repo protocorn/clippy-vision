@@ -56,6 +56,21 @@ def _set_meta(key: str, value):
     )
     conn.commit()
 
+def save_note_to_memory(note: str) -> str:
+    """Route a user-written note directly into the memory cluster system.
+    Runs synchronously since it's called from an agent tool — uses INTERACTIVE priority."""
+    try:
+        embedding = gateway.embed(note, embed_model=EMBED_MODEL, priority=Priority.INTERACTIVE)
+    except Exception as e:
+        return f"Failed to embed note: {e}"
+
+    cluster_id, sim = _route_fact(embedding)
+    if cluster_id and sim >= CLUSTER_THRESHOLD:
+        _merge_into_cluster(cluster_id, note, embedding, source="agent")
+    else:
+        _create_cluster(note, embedding, source="agent")
+
+    return f"Note saved to memory: {note[:80]}{'...' if len(note) > 80 else ''}"
 
 def should_distil() -> bool:
     return count_sessions_since_last_distil() >= DISTIL_EVERY_N_SESSIONS
@@ -217,16 +232,19 @@ _WRITE_SYS = (
     "You maintain a list of durable facts about a user. Given a NEW fact and the most "
     "SIMILAR existing facts (each with its index), choose ONE action:\n"
     "- NOOP: the new fact is already represented (exact duplicate or paraphrase).\n"
-    "- UPDATE: the new fact supersedes or refines exactly one existing fact; set "
-    "target_index to that fact's index and text to the single best up-to-date fact.\n"
-    "- ADD: the new fact is genuinely new information.\n"
+    "- UPDATE: the new fact supersedes or refines exactly one existing fact (same topic, "
+    "more recent or more specific). Set target_index to that fact's index.\n"
+    "- CONFLICT: the new fact directly contradicts an existing fact (same topic, "
+    "incompatible values — e.g. different job, different city, different name). "
+    "Set target_index to the conflicting fact's index. Do NOT silently overwrite — flag it.\n"
+    "- ADD: the new fact is genuinely new information with no overlap.\n"
     "Return JSON {\"action\", \"target_index\", \"text\"}. For ADD use target_index null and "
     "text = the new fact. Never invent facts."
 )
 _WRITE_SCHEMA = {
     "type": "object",
     "properties": {
-        "action": {"type": "string", "enum": ["ADD", "UPDATE", "NOOP"]},
+        "action": {"type": "string", "enum": ["ADD", "UPDATE", "NOOP", "CONFLICT"]},
         "target_index": {"type": ["integer", "null"]},
         "text": {"type": "string"},
     },
@@ -262,6 +280,23 @@ def _merge_into_cluster(cluster_id: str, fact: str, embedding: list, source: str
     text = result.get("text") or fact
 
     if action == "NOOP":
+        return
+
+    if action == "CONFLICT" and isinstance(target, int) and 0 <= target < len(rows):
+        conflicting_fact_id = rows[target][0]
+        # Store the incoming fact as a new active fact — do NOT suppress either side
+        new_fact_id = str(uuid.uuid4())
+        _insert_fact(cluster_id, fact, embedding, fact_id=new_fact_id, source=source)
+        # Record the conflict for later user resolution
+        conn.execute(
+            """INSERT INTO memory_conflicts
+               (conflict_id, fact_id_a, fact_id_b, cluster_id, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (str(uuid.uuid4()), conflicting_fact_id, new_fact_id, cluster_id, time.time())
+        )
+        conn.commit()
+        _recompute_centroid(cluster_id)
+        print(f"  [DISTIL] CONFLICT flagged — '{rows[target][1]}' ↔ '{fact}'")
         return
     
     if action == "UPDATE" and isinstance(target, int) and 0 <= target < len(rows):
@@ -355,19 +390,23 @@ You will receive:
 1. CURRENT PROFILE — what we already know (field: value pairs, may be empty)
 2. NEW MESSAGE — something the person just wrote
 
-Decide what to ADD or UPDATE in the profile.
+Decide what to ADD or UPDATE in the profile using these operations:
+- op "set"          : for scalar facts with one answer (name, current_location, current_university, current_job, goal).
+                      Only use this for fields that have a single value at a time.
+- op "add_items"    : for additive list facts (hobbies, skills, languages, tools, preferences, previous_jobs, previous_universities, previous_locations).
+                      Use this when the message adds to an existing list — do NOT replace the whole list.
+- op "remove_items" : when the user explicitly says they no longer have/like/do something in a list.
+- op "override"     : ONLY when the user explicitly corrects a fact (uses words like "actually",
+                      "I meant", "correction", "I was wrong", "not X, it's Y").
 
-Rules for what belongs in the profile:
-- Durable facts: who they are, where they live/study/work, what they are good at,
+Rules:
+- Durable facts only: who they are, where they live/study/work, what they are good at,
   what they like or dislike, their goals, background, relationships, major life events.
 - NOT situational: skip "currently debugging X", "asked about Y today", one-off tasks.
-- If the new message refines or contradicts an existing field, return the updated value.
-- If it adds genuinely new biographical info, create a new field.
-- Use concise snake_case field names you invent yourself (e.g. current_role, university,
-  location, skills, hobbies, goal, native_language, preferred_tools).
+- Use concise snake_case field names (e.g. current_role, university, location, skills, hobbies).
 - If nothing biographical is present, return an empty array.
 
-Return JSON {"updates": [{"field": "...", "value": "..."}]}.
+turn JSON {"updates": [{"field": "...", "value": "..."}]}.
 """
 _BIO_UPDATE_SCHEMA = {
     "type": "object",
@@ -378,9 +417,16 @@ _BIO_UPDATE_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "field": {"type": "string"},
-                    "value": {"type": "string"},
+                    "op":    {"type": "string", "enum": ["set", "add_items", "remove_items", "override"]},
+                    "value": {"type": ["string", "null"]},
+                    "items": {
+                        "oneOf": [
+                            {"type": "array", "items": {"type": "string"}},
+                            {"type": "null"}
+                        ]
+                    },
                 },
-                "required": ["field", "value"],
+                "required": ["field", "op"],
             },
         }
     },
@@ -415,10 +461,16 @@ def _update_profile_from_message(user_message: str) -> None:
     saved = []
     for item in updates:
         field = (item.get("field") or "").strip().lower().replace(" ", "_")
+        op    = (item.get("op")    or "set").strip().lower()
+        items = item.get("items") or []
         value = (item.get("value") or "").strip()
-        if field and value:
-            save_identity_field(field, value, source="agent")
+        
+        if op in ("set", "override") and value:
+            save_identity_field(field, value=value, source="distiller", op=op)
             saved.append(field)
+        elif op in ("add_items", "remove_items") and items:
+            save_identity_field(field, source="distiller", op=op, items=items)
+            saved.append(f"{field}[{op}]")
 
     if saved:
         print(f"\n  [DISTIL/profile] updated: {', '.join(saved)}")

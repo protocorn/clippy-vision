@@ -1,10 +1,13 @@
 import time
 import math
+from typing import Optional
 
 from core.memory_store import (
     get_identity, get_introduction, get_all_clusters,
     get_active_facts, save_identity_field
 )
+
+from core.distil import save_note_to_memory
 from core.llm_gateway import gateway, Priority
 
 EMBED_MODEL      = "nomic-embed-text"
@@ -128,10 +131,39 @@ def fetch_cluster(label: str) -> str:
         return f"Cluster '{label}' exists but has no active facts."
     return "\n".join(f"- {f}" for f in facts)
 
-def save_identity(field: str, value: str) -> str:
-    return save_identity_field(field, value, source="agent")
+def save_identity(field: str, value: str, op: str="set", items: Optional[list[str]]=None) -> str:
+    return save_identity_field(field, value=value, source="agent", op=op, items=items)
 
 def save_note(note: str) -> str:
-    # stub until we wire save_note through the cluster merge path
-    # for now store as a special identity field
-    return save_identity_field(f"note_{int(time.time())}", note, source="agent")
+    return save_note_to_memory(note)
+
+def delete_note(note_text: str) -> str:
+    """Suppress a memory fact whose text matches note_text (case-insensitive substring).
+    Marks the fact as valid_to=now so it no longer appears in retrieval."""
+    import json, os, sys
+    _CORE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core")
+    if _CORE_DIR not in sys.path:
+        sys.path.insert(0, _CORE_DIR)
+    from storage import conn as _conn
+
+    needle = note_text.strip().lower()
+    rows = _conn.execute(
+        "SELECT fact_id, text FROM memory_facts WHERE valid_to IS NULL"
+    ).fetchall()
+
+    matched = [
+        fact_id for fact_id, text in rows
+        if needle in text.lower()
+    ]
+
+    if not matched:
+        return f"No active memory found matching: '{note_text}'"
+
+    now = time.time()
+    for fact_id in matched:
+        _conn.execute(
+            "UPDATE memory_facts SET valid_to = ? WHERE fact_id = ?",
+            (now, fact_id)
+        )
+    _conn.commit()
+    return f"Deleted {len(matched)} memory fact(s) matching '{note_text}'."

@@ -1,5 +1,5 @@
 from agent.retrieval import search_sessions, search_events
-from agent.memory import recall_memory, fetch_cluster, save_identity, save_note
+from agent.memory import recall_memory, fetch_cluster, save_identity, save_note, delete_note
 
 
 TOOLS = {
@@ -9,6 +9,7 @@ TOOLS = {
     "fetch_cluster":   fetch_cluster,
     "save_identity":   save_identity,
     "save_note":       save_note,
+    "delete_note":     delete_note,
 }
 
 TOOL_SCHEMAS = [
@@ -77,15 +78,24 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "save_identity",
-            "description": "Save a personal fact about the user: name, location, job, education, preferences, etc.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "field": {"type": "string", "description": "Field name, e.g. 'name', 'location', 'job'"},
-                    "value": {"type": "string", "description": "The value to store."}
-                },
-                "required": ["field", "value"],
+                "name": "save_identity",
+    "description": (
+        "Save a personal fact about the user. "
+        "Use op='set' for scalar facts (name, location, job). "
+        "Use op='add_items' with items=[] for adding to a list (hobbies, skills). "
+        "Use op='override' only when the user explicitly corrects a previous fact."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "field": {"type": "string", "description": "Field name, e.g. 'name', 'hobbies'"},
+            "value": {"type": "string", "description": "Value for scalar fields (set/override). Leave empty for list ops."},
+            "op":    {"type": "string", "enum": ["set", "add_items", "remove_items", "override"],
+                      "description": "Operation type. Default is 'set'."},
+            "items": {"type": "array", "items": {"type": "string"},
+                      "description": "List of items for add_items or remove_items ops."}
+        },
+        "required": ["field", "op"],
             },
         },
     },
@@ -100,6 +110,24 @@ TOOL_SCHEMAS = [
                     "note": {"type": "string", "description": "The note or reminder text to store."}
                 },
                 "required": ["note"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_note",
+            "description": (
+                "Delete a note or memory fact the user wants forgotten. "
+                "Use when the user says 'forget', 'delete', 'remove', or 'don't remember that'. "
+                "Matches by substring — pass the key phrase or exact text from the note."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "note_text": {"type": "string", "description": "The text or key phrase of the note to delete."}
+                },
+                "required": ["note_text"],
             },
         },
     },
