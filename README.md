@@ -126,6 +126,14 @@ Not every event can be classified by signals alone; sometimes you need to actual
 
 > **Note:** The model used, `qwen3-vl:4b`, only supports one image per prompt, so multi-screenshot context is not possible with it. The architecture is designed to support multiple images, and models with that capability can be swapped in.
 
+**Screenshot processor (`core/screenshot_processor.py`):**
+
+A background daemon runs every 10 seconds to process accumulated screenshots. Rather than running the vision model on every screenshot individually, it first computes a **perceptual hash (pHash)** for each image and groups visually identical screenshots using Union-Find (bit distance ≤ 2 = same screen). Vision runs once on the most recent screenshot in each group (the representative), and its verdict is copied to all duplicates in the group — avoiding redundant LLM calls on screens that haven't changed.
+
+Each processed screenshot is matched to the nearest event in the database (within ±10 seconds). If no event exists at that timestamp, a new `screenshot_analysis` event is created automatically so no vision output is ever orphaned.
+
+The processor also prioritises recent screenshots (within the last 60 seconds) over older ones to keep classification latency low during active use, while still working through the backlog when idle.
+
 ---
 
 ## Typing Dynamics
@@ -189,12 +197,13 @@ Routing alone isn't enough. Once a matching cluster is found, a second LLM call 
 - **(i) ADD** - new information not yet captured
 - **(ii) UPDATE** - refines or replaces an existing fact
 - **(iii) NOOP** - fact is already present; no action needed
+- **(iv) CONFLICT** - new fact directly contradicts an existing one; both are preserved and flagged for resolution
 
 This keeps memory clean, non-redundant, and up to date.
 
 The Distiller also runs after the second pass of the summarizer (post-vision re-summarization), not only on the regular 5-session schedule.
 
-> **Known limitation:** If a newly extracted fact directly contradicts an existing one, there is currently no resolution mechanism. This is a priority for a future version.
+> **Conflict resolution:** When a newly extracted fact directly contradicts an existing one, the incoming fact is stored as a new active fact and a record is written to the `memory_conflicts` table (both sides are preserved — neither is silently dropped). Unresolved conflicts are surfaced to the agent at query time so the user can decide which version to keep. When the user explicitly corrects a fact via `save_identity` with `op=override`, all open conflicts involving that fact are automatically closed.
 
 ---
 
@@ -241,7 +250,8 @@ All data accessible to the agent is stored locally in SQLite. See `core/storage.
 3. `memory_clusters` - cluster metadata
 4. `memory_meta` - autobiographical memory and distiller metadata
 5. `memory_facts` - individual facts within clusters
-6. `conversation` - full conversation history
+6. `memory_conflicts` - unresolved contradictions between facts (flagged for user resolution)
+7. `conversation` - full conversation history
 
 Virtual tables for `events` and `sessions` support full-text search (planned for future versions).
 
