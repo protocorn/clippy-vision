@@ -7,6 +7,7 @@ const path       = require('path')
 const fs         = require('fs')
 const http       = require('http')
 const os         = require('os')
+const updater    = require('./updater')
 
 // ─── paths ────────────────────────────────────────────────────────────────────
 // Packaged: Python lives in resources/clippy; writable data in %APPDATA%/Clippy Vision
@@ -839,6 +840,24 @@ function createTray() {
 ipcMain.handle('toggle-capture',     () => { toggleCapture();  return isCapturing() })
 ipcMain.handle('get-capture-status', () => isCapturing())
 
+function broadcastUpdateStatus(status) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('update-status-changed', status)
+    }
+}
+
+updater.onUpdateStateChanged(broadcastUpdateStatus)
+
+ipcMain.handle('get-update-status', () => updater.getState())
+ipcMain.handle('check-for-update', () => updater.checkForUpdate({ force: true }))
+ipcMain.handle('start-update', () => updater.startUpdate({
+    quitApp: () => {
+        isQuitting = true
+        stopCapture()
+        app.quit()
+    },
+}))
+
 ipcMain.handle('get-hardware-check', async () => getHardwareCheck())
 
 ipcMain.handle('confirm-hardware-and-start', async (_event, { override } = {}) => {
@@ -868,6 +887,7 @@ ipcMain.handle('launch-app', () => {
     if (setupWindow && !setupWindow.isDestroyed()) setupWindow.close()
     createTray()
     createMainWindow()
+    updater.startPeriodicChecks()
     // API server was already started during warmup step
 })
 
@@ -955,6 +975,7 @@ app.whenReady().then(async () => {
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     mainWindow.webContents.send('api-ready')
                 }
+                updater.startPeriodicChecks()
             })
             .catch(() => {
                 console.error('[app] API server failed to start after preflight — back to setup')
@@ -976,6 +997,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
     isQuitting = true
+    updater.stopPeriodicChecks()
     stopCapture()
     if (apiProcess) {
         spawnHidden('taskkill', ['/pid', String(apiProcess.pid), '/T', '/F'])

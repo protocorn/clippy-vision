@@ -154,6 +154,16 @@ contextBridge.exposeInMainWorld('clippy', {
         ipcRenderer.on('capture-status-changed', (_event, active) => callback(active))
     },
 
+    getUpdateStatus: () => ipcRenderer.invoke('get-update-status'),
+
+    checkForUpdate: () => ipcRenderer.invoke('check-for-update'),
+
+    startUpdate: () => ipcRenderer.invoke('start-update'),
+
+    onUpdateStatusChanged: (callback) => {
+        ipcRenderer.on('update-status-changed', (_event, status) => callback(status))
+    },
+
     onApiReady: (callback) => {
         ipcRenderer.on('api-ready', () => callback())
     },

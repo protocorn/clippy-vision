@@ -567,6 +567,42 @@
       animation: pulse 1.2s ease-in-out infinite;
     }
 
+    /* ---- Update available button ---- */
+    #update-btn {
+      display: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.2s, color 0.2s, opacity 0.2s;
+      background: var(--accent-muted);
+      color: var(--accent-hover);
+      border: 1px solid var(--accent);
+      font-family: inherit;
+    }
+
+    #update-btn.is-visible {
+      display: inline-flex;
+    }
+
+    #update-btn:hover:not(:disabled) {
+      background: var(--accent-fill);
+      color: var(--bg);
+    }
+
+    #update-btn:disabled {
+      opacity: 0.75;
+      cursor: wait;
+    }
+
+    #update-btn.is-busy {
+      border-color: var(--border);
+      color: var(--muted);
+    }
+
     @keyframes pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.35; }
@@ -1135,6 +1171,9 @@
       <div class="header-actions">
         <button id="new-chat-btn" class="header-btn">New Chat</button>
         <button id="settings-btn" class="header-btn" title="Settings">Settings</button>
+        <button id="update-btn" type="button" title="Download and install the latest Clippy Vision">
+          <span id="update-label">Update available</span>
+        </button>
         <button id="capture-btn" title="Toggle screen capture">
           <span class="capture-dot"></span>
           <span id="capture-label">Start Capture</span>
@@ -1283,6 +1322,8 @@
     const settingsBack = document.getElementById('settings-back')
     const captureBtn = document.getElementById('capture-btn')
     const captureLabel = document.getElementById('capture-label')
+    const updateBtn = document.getElementById('update-btn')
+    const updateLabel = document.getElementById('update-label')
     const chatMain = document.getElementById('chat-main')
     const welcomeInput = document.getElementById('welcome-input')
     const welcomeSend = document.getElementById('welcome-send')
@@ -1937,6 +1978,38 @@
       }
     }
 
+    function setUpdateUI(status) {
+      if (!updateBtn || !updateLabel || !status) return
+      const phase = status.phase
+      const latest = status.latestVersion
+
+      if (phase === 'available') {
+        updateBtn.classList.add('is-visible')
+        updateBtn.classList.remove('is-busy')
+        updateBtn.disabled = false
+        updateLabel.textContent = latest
+          ? `Update to v${latest}`
+          : 'Update available'
+        updateBtn.title = latest
+          ? `Install Clippy Vision v${latest}`
+          : 'Download and install the latest Clippy Vision'
+      } else if (phase === 'downloading') {
+        updateBtn.classList.add('is-visible', 'is-busy')
+        updateBtn.disabled = true
+        const pct = Math.max(0, Math.min(100, status.progress || 0))
+        updateLabel.textContent = `Downloading… ${pct}%`
+      } else if (phase === 'installing') {
+        updateBtn.classList.add('is-visible', 'is-busy')
+        updateBtn.disabled = true
+        updateLabel.textContent = 'Installing…'
+      } else {
+        // idle / up_to_date / error without a known update
+        updateBtn.classList.remove('is-visible', 'is-busy')
+        updateBtn.disabled = false
+        updateLabel.textContent = 'Update available'
+      }
+    }
+
     captureBtn.addEventListener('click', async () => {
       captureBtn.disabled = true
       try {
@@ -1950,6 +2023,28 @@
     window.clippy.onCaptureStatusChanged((active) => {
       setCaptureUI(active)
     })
+
+    updateBtn.addEventListener('click', async () => {
+      updateBtn.disabled = true
+      updateBtn.classList.add('is-busy')
+      updateLabel.textContent = 'Starting update…'
+      try {
+        const status = await window.clippy.startUpdate()
+        setUpdateUI(status)
+      } catch (err) {
+        updateBtn.disabled = false
+        updateBtn.classList.remove('is-busy')
+        updateLabel.textContent = 'Update failed — retry'
+        console.error('Update failed:', err)
+      }
+    })
+
+    window.clippy.onUpdateStatusChanged((status) => {
+      setUpdateUI(status)
+    })
+
+    // Sync once in case the check finished before the listener was attached
+    window.clippy.getUpdateStatus().then(setUpdateUI).catch(() => {})
 
     function setStatus(el, text, kind) {
       el.textContent = text || ''
