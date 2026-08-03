@@ -22,6 +22,10 @@ from paths import get_screenshots_dir
 
 _SCREENSHOT_DIR = get_screenshots_dir()
 
+# module-level, near _SCREENSHOT_DIR
+_phash_cache: dict[str, imagehash.ImageHash] = {}
+
+
 
 # ─────────────────────────────────────────────────────────────
 # DB helpers
@@ -138,6 +142,7 @@ def _get_unprocessed_screenshots() -> list[Path]:
 
 
 def _mark_as_processed(path: Path):
+    _phash_cache.pop(path.stem, None)
     path.rename(path.parent / f"{path.stem}_processed.jpg")
 
 
@@ -146,14 +151,26 @@ def _mark_as_processed(path: Path):
 # ─────────────────────────────────────────────────────────────
 
 def _compute_all_hashes(paths: list[Path]) -> dict[str, imagehash.ImageHash]:
-    """Compute perceptual hash for each screenshot. Skips unreadable files."""
+    """Compute perceptual hash for each screenshot; reuse cache across polls."""
+    live = {p.stem for p in paths}
+    # Drop entries for files that are gone (processed, deleted, purged)
+    for stem in list(_phash_cache.keys()):
+        if stem not in live:
+            del _phash_cache[stem]
     hashes: dict[str, imagehash.ImageHash] = {}
     for p in paths:
+        cached = _phash_cache.get(p.stem)
+        if cached is not None:
+            hashes[p.stem] = cached
+            continue
         try:
-            hashes[p.stem] = imagehash.phash(Image.open(p))
+            h = imagehash.phash(Image.open(p))
+            _phash_cache[p.stem] = h
+            hashes[p.stem] = h
         except Exception as e:
             print(f"  [screenshot_processor] Hash failed for {p.name}: {e}")
     return hashes
+
 
 
 def _group_by_similarity(
