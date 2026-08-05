@@ -7,7 +7,7 @@ SESSION_ID = str(uuid.uuid4())
 class WindowMetadata(TypedDict):
     timestamp: float
     current_window_title: str
-    #is_browser_window: bool
+
     active_url: Optional[str]
     process_name: str
 
@@ -16,16 +16,19 @@ class Event(TypedDict):
     session_id: str
     timestamp: float
 
-    event_type: str # "typing_burst", "paste", "context_change, "deviation", "mouse_burst", ...
+    event_type: str
 
     window_context: WindowMetadata
     previous_window_context: Optional[WindowMetadata]
 
     payload: dict
 
-    # Ingestion fields (filled after capture, and not at record time)
+
     summary: Optional[str]
     vector_embedding: Optional[list]
+    image_embedding: Optional[list]
+    image_embedding_model: Optional[str]
+    screenshot_filename: Optional[str]
     interest_score: Optional[float]
     interest_reason: Optional[str]
     interesting: Optional[bool]

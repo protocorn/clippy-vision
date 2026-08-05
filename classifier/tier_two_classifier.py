@@ -4,7 +4,7 @@ from core.llm_gateway import gateway, Priority
 
 MODEL      = "qwen3:8b"
 
-# Identical every call — Ollama reuses KV cache for this prefix (5x speedup)
+
 SYSTEM_PROMPT = """You label events from a personal computer activity monitor.
 
 Verdicts:

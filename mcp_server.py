@@ -1,7 +1,7 @@
 import sys
 import os
 
-# Make sure both the project root and core/ are importable
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "core"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent"))
@@ -65,6 +65,6 @@ def delete_note_tool(note_text: str) -> str:
     Use when the user says 'forget', 'delete', 'remove', or 'don't remember that'.
     Matches by substring — pass the key phrase or exact text from the note."""
     return delete_note(note_text)
-    
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

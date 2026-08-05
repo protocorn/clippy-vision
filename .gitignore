@@ -21,6 +21,10 @@ core/data/
 *.bin
 *.safetensors
 models/router_classifier/
+!models/embeddings/
+!models/embeddings/all-MiniLM-L6-v2/
+!models/embeddings/all-MiniLM-L6-v2/**
+models/embeddings/**/.cache/
 
 # ============================================================
 # BUILD / PACKAGING ARTIFACTS

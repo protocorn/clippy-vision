@@ -18,9 +18,9 @@ def tier_zero_classifier(event: dict) -> Optional[TierZeroClassification]:
     window_context   = event["window_context"]
     prev_context     = event["previous_window_context"]
 
-    # ------------------------------------------------------------------ #
-    # Obvious NOT INTERESTING ------------------------------------------ #
-    # ------------------------------------------------------------------ #
+
+
+
 
     if event_type == "typing_burst":
         word_count  = payload.get("word_count", 0)
@@ -28,7 +28,7 @@ def tier_zero_classifier(event: dict) -> Optional[TierZeroClassification]:
         key_count   = payload.get("key_down_count", 1)
         ratio       = char_count / key_count if key_count > 0 else 0.0
 
-        # No real words typed — volume keys, arrows, Ctrl+C etc.
+
         if word_count < MIN_WORDS or ratio < MEANINGFUL_RATIO_THRESHOLD:
             return TierZeroClassification(
                 verdict="not_interesting",
@@ -36,7 +36,7 @@ def tier_zero_classifier(event: dict) -> Optional[TierZeroClassification]:
                 reason=f"Non-typing burst (words={word_count}, char_ratio={ratio:.2f})"
             )
 
-    # Context change to a background system process
+
     if event_type == "context_change" and window_context["process_name"] in UNINTERESTING_PROCESSES:
         return TierZeroClassification(
             verdict="not_interesting",
@@ -44,7 +44,7 @@ def tier_zero_classifier(event: dict) -> Optional[TierZeroClassification]:
             reason="System process context change"
         )
 
-    # Duplicate context change — same process and same title (e.g. Chrome tab reload)
+
     if (event_type == "context_change"
             and prev_context is not None
             and window_context["process_name"] == prev_context["process_name"]
@@ -54,7 +54,7 @@ def tier_zero_classifier(event: dict) -> Optional[TierZeroClassification]:
             score=0,
             reason="Context change to same window"
         )
-    
+
     if event_type in ("paste", "clipboard_change"):
         content = payload.get("content") or payload.get("pasted_content") or ""
         if len(content.split()) < 3:
@@ -64,11 +64,11 @@ def tier_zero_classifier(event: dict) -> Optional[TierZeroClassification]:
                 reason="Trivial clipboard content"
             )
 
-    # ------------------------------------------------------------------ #
-    # Obvious INTERESTING ---------------------------------------------- #
-    # ------------------------------------------------------------------ #
 
-    # Anomalous deviation (baseline already computed the σ)
+
+
+
+
     if event_type == "deviation" and payload.get("anomaly") is True:
         return TierZeroClassification(
             verdict="interesting",
@@ -76,5 +76,5 @@ def tier_zero_classifier(event: dict) -> Optional[TierZeroClassification]:
             reason=f"Anomalous deviation {payload.get('overall_deviation')}σ"
         )
 
-    # Ambiguous — pass to Tier 1
+
     return None

@@ -1,12 +1,15 @@
-pywin32>=306
-uiautomation
+pywin32>=306; sys_platform == "win32"
+uiautomation; sys_platform == "win32"
 mss
 Pillow
 pynput
 psutil
 imagehash
-mcp
+rapidocr>=3.8.1,<4
+onnxruntime>=1.19.2
+mcp>=1.27,<2
 transformers>=4.40.0
+safetensors>=0.4.0
 torch
 scikit-learn
 fastapi
@@ -14,3 +17,5 @@ uvicorn[standard]
 scipy
 numpy
 httpx
+rapidfuzz
+parsedatetime>=2.6

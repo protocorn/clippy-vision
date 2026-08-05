@@ -2,12 +2,20 @@ from dataclasses import dataclass, field
 import sys
 import os
 import json
+import re
 import threading
 from pathlib import Path
 import torch
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "core"))
-from llm_gateway import gateway, Priority
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+  sys.path.insert(0, str(PROJECT_ROOT))
+
+try:
+  from core.llm_gateway import gateway, Priority
+except ImportError:
+  sys.path.append(os.path.join(os.path.dirname(__file__), "..", "core"))
+  from llm_gateway import gateway, Priority
 
 @dataclass
 class RouterDecision:
@@ -15,7 +23,7 @@ class RouterDecision:
     secondary: list[str]
     temporal_hint: str | None = None
     needs_memory_fetch: bool = False
-    # Label → softmax score for secondaries (used by should_prefetch thresholds)
+
     secondary_scores: dict[str, float] = field(default_factory=dict)
 
 CATEGORIES = [
@@ -35,19 +43,119 @@ _PREFETCH_THRESHOLDS: dict[str, float] = {
     "time_anchored":   0.55,
     "specific_recall": 0.30,
     "topic_search":    0.25,
-    # Categories not listed here are not prefetched
+
 }
 
 _classification_model = None
 _classification_tokenizer = None
 _classifier_lock = threading.Lock()
 
+_SCREENSHOT_QUERY_RE = re.compile(
+  r"\b(?:screenshot|screen[- ]?shot|screen capture|captured screen|captured frame)\b",
+  re.IGNORECASE,
+)
+_MEMORY_OVERVIEW_RE = re.compile(
+  r"\b(?:what (?:do|did) you know about me|what do you remember about me|"
+  r"what (?:is|do you have) stored|local memory|your memory (?:for|about) me|who am i|"
+  r"my (?:profile|preferences|skills|goals|interests))\b",
+  re.IGNORECASE,
+)
+_ARTIFACT_QUERY_RE = re.compile(
+  r"\b(?:url|link|clipboard|copied|pasted|error message|command|file name|filename|"
+  r"exact text|what did it say)\b",
+  re.IGNORECASE,
+)
+_ACTIVITY_QUERY_RE = re.compile(
+  r"\b(?:what (?:was|were) i doing|what did i do|what did i work on|"
+  r"what (?:have|had) i been doing|where was i|which app|activity|work history|"
+  r"worked on|working on|browsing|watching|reading)\b",
+  re.IGNORECASE,
+)
+_TIME_QUERY_RE = re.compile(
+    r"\b(?:today|yesterday|tonight|morning|afternoon|evening|last (?:week|month|night)|"
+    r"this (?:week|month|morning|afternoon|evening)|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|"
+    r"\d{1,2}:\d{2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?|"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    r"january|february|march|april|may|june|july|august|september|october|november|december|"
+    r"\d+\s+(?:minutes?|hours?|days?|weeks?|months?)\s+ago)\b",
+    re.IGNORECASE,
+)
+_HISTORY_RECALL_RE = re.compile(
+  r"\b(?:do you remember|can you remember|recall (?:my|what|when|where)|"
+  r"find (?:my|what i|when i|where i)|search (?:my|our) (?:history|activity|memory)|"
+  r"earlier activity|past activity|recent activity)\b",
+  re.IGNORECASE,
+)
+
+
+def _deterministic_route(query: str) -> RouterDecision | None:
+  text = str(query or "").strip()
+  if not text:
+    return None
+
+  if _SCREENSHOT_QUERY_RE.search(text):
+    secondary = ["time_anchored"] if _TIME_QUERY_RE.search(text) else []
+    return RouterDecision(
+      primary="specific_recall",
+      secondary=secondary,
+      temporal_hint=text if secondary else None,
+      needs_memory_fetch=True,
+      secondary_scores={route: 1.0 for route in secondary},
+    )
+
+  if _MEMORY_OVERVIEW_RE.search(text):
+    return RouterDecision(
+      primary="memory_query",
+      secondary=["topic_search"],
+      needs_memory_fetch=True,
+      secondary_scores={"topic_search": 1.0},
+    )
+
+  if _ARTIFACT_QUERY_RE.search(text):
+    secondary = ["time_anchored"] if _TIME_QUERY_RE.search(text) else []
+    return RouterDecision(
+      primary="specific_recall",
+      secondary=secondary,
+      temporal_hint=text if secondary else None,
+      needs_memory_fetch=True,
+      secondary_scores={route: 1.0 for route in secondary},
+    )
+
+  if _ACTIVITY_QUERY_RE.search(text):
+    primary = "time_anchored" if _TIME_QUERY_RE.search(text) else "topic_search"
+    secondary = ["topic_search"] if primary == "time_anchored" else []
+    return RouterDecision(
+      primary=primary,
+      secondary=secondary,
+      temporal_hint=text if primary == "time_anchored" else None,
+      needs_memory_fetch=True,
+      secondary_scores={route: 1.0 for route in secondary},
+    )
+
+  if _TIME_QUERY_RE.search(text):
+    return RouterDecision(
+      primary="time_anchored",
+      secondary=["topic_search"],
+      temporal_hint=text,
+      needs_memory_fetch=True,
+      secondary_scores={"topic_search": 1.0},
+    )
+
+  if _HISTORY_RECALL_RE.search(text):
+    return RouterDecision(
+      primary="topic_search",
+      secondary=[],
+      needs_memory_fetch=True,
+    )
+
+  return None
+
 class MiniLMClassifier(torch.nn.Module):
-  def __init__(self, base_model:str, num_labels: int):
+  def __init__(self, base_model: str, num_labels: int, *, local_files_only: bool = False):
     super().__init__()
     from transformers import AutoModel
 
-    self.encoder = AutoModel.from_pretrained(base_model)
+    self.encoder = AutoModel.from_pretrained(base_model, local_files_only=local_files_only)
     h = self.encoder.config.hidden_size
     self.dropout = torch.nn.Dropout(0.1)
     self.classifier = torch.nn.Linear(h, num_labels)
@@ -67,14 +175,18 @@ def load_classifier():
     if _classification_model is not None:
       return _classification_model, _classification_tokenizer
 
-    if not CLASSIFIER_PATH.exists():
-      print(f"[router] Classifier model not found at {CLASSIFIER_PATH}")
+    if not CLASSIFIER_PATH.exists() or not (CLASSIFIER_PATH / "model.pt").is_file():
+      print(f"[router] Classifier checkpoint not found at {CLASSIFIER_PATH}; using tool-driven retrieval")
       return None, None
 
     try:
       from transformers import AutoTokenizer
-      _classification_tokenizer = AutoTokenizer.from_pretrained(CLASSIFIER_PATH)
-      _classification_model = MiniLMClassifier(MINILM_MODEL, num_labels=len(CATEGORIES))
+      _classification_tokenizer = AutoTokenizer.from_pretrained(CLASSIFIER_PATH, local_files_only=True)
+      _classification_model = MiniLMClassifier(
+          MINILM_MODEL,
+          num_labels=len(CATEGORIES),
+          local_files_only=True,
+      )
       _classification_model.load_state_dict(torch.load(CLASSIFIER_PATH / "model.pt", map_location="cpu"))
       _classification_model.eval()
       print(f"[router] Classifier loaded successfully from {CLASSIFIER_PATH}")
@@ -82,17 +194,21 @@ def load_classifier():
     except Exception as e:
       print(f"[router] Failed to load classifier: {e}")
       return None, None
-  
+
 def classify_query(query: str) -> tuple[RouterDecision|None, float|None]:
+  deterministic = _deterministic_route(query)
+  if deterministic is not None:
+    return deterministic, 1.0
+
   model, tokenizer = load_classifier()
 
   if model is None:
     return None, 0.0
 
-  enc = tokenizer(query, 
-  return_tensors="pt", 
-  padding="max_length", 
-  truncation=True, 
+  enc = tokenizer(query,
+  return_tensors="pt",
+  padding="max_length",
+  truncation=True,
   max_length=128)
 
   with torch.no_grad():
@@ -121,13 +237,13 @@ def classify_query(query: str) -> tuple[RouterDecision|None, float|None]:
 
 
 def should_prefetch(decision: RouterDecision, confidence: float) -> bool:
-    # Generative / chat turns: never pull activity/memory context via secondaries.
+
     if decision.primary == "casual":
         return False
 
     threshold = _PREFETCH_THRESHOLDS.get(decision.primary)
     primary_ok = threshold is not None and confidence >= threshold
-    # Secondaries must clear that route's own prefetch threshold (not just 0.20).
+
     secondary_ok = any(
         s in _PREFETCH_THRESHOLDS
         and decision.secondary_scores.get(s, 0.0) >= _PREFETCH_THRESHOLDS[s]
@@ -142,7 +258,7 @@ ROUTE_SCHEMA = {
     "properties": {
         "primary":   {"type": "string", "enum": ["memory_query", "topic_search", "casual", "time_anchored", "aggregation", "specific_recall", "follow_up_inherit"]},
         "secondary": {"type": "array", "items": {"type": "string", "enum": ["memory_query", "topic_search", "casual","time_anchored", "aggregation", "specific_recall","follow_up_inherit"]}},
-        "temporal_hint": {"type": "string"}   # null if not time_anchored
+        "temporal_hint": {"type": "string"}
     },
     "required": ["primary", "secondary"]
 }
@@ -376,7 +492,6 @@ def classify_query(query: str) -> RouterDecision:
     primary = parsed["primary"]
     secondary = parsed.get("secondary", [])
 
-    # Only carry temporal_hint when time_anchored is actually in the routing decision
     has_time_anchor = primary == "time_anchored" or "time_anchored" in secondary
     raw_hint = parsed.get("temporal_hint")
     temporal_hint = (raw_hint if raw_hint and raw_hint != "null" else None) if has_time_anchor else None

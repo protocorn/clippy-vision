@@ -1,27 +1,14 @@
 import json
 import re
-import sqlite3
 import time
 
-# Ensure events / events_fts tables exist before we touch the index
-import core.storage  # noqa: F401
+from core.storage import conn
+from core.screenshot_search import resolve_screenshot_filename
 
 from agent.prefetch.topic_search import cosine_similarity
 from agent.helpers.time_resolver import resolve_temporal_range
 from agent.helpers.detect_recency import detect_recency_hint
 from agent.helpers.keywords import keywords_from_query, content_keywords, STOPWORDS
-from core.paths import get_db_path
-
-
-DB_PATH = get_db_path()
-conn = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=30.0)
-
-conn.execute("PRAGMA journal_mode=WAL")
-try:
-    conn.execute("INSERT INTO events_fts(events_fts) VALUES('rebuild')")
-    conn.commit()
-except sqlite3.OperationalError as e:
-    print(f"[specific_recall] FTS rebuild skipped: {e}")
 
 MAX_RESULTS = 5
 DEFAULT_LOOKBACK_DAYS = 7
@@ -32,7 +19,7 @@ ARTIFACT_PATTERNS = [
   ("clipboard", re.compile(r'\b(cop(y|ied)|clipboard|clipped)\b', re.I)),
   ("paste",     re.compile(r'\b(past(e|ed)|pasting)\b', re.I)),
   ("url",       re.compile(r'\b(link|url|website|article|book|page|site|read|reading|visit|browse|open)\b', re.I)),
-  ("screen",    re.compile(r'\b(saw|screen|viewing|looked at|displayed|showing|visible)\b', re.I)),
+  ("screen",    re.compile(r'\b(screenshot|screen[- ]?shot|screen capture|captured frame|saw|screen|viewing|looked at|displayed|showing|visible)\b', re.I)),
 ]
 
 ARTIFACT_ROUTES = {
@@ -43,7 +30,7 @@ ARTIFACT_ROUTES = {
 "paste":     {"fields": ["payload", "summary"],
                   "event_types": ["paste"], "app_filter": None},
 "clipboard": {"fields": ["payload", "summary"],
-                  "event_types": ["clipboard_change"], "app_filter": None},                 
+                  "event_types": ["clipboard_change"], "app_filter": None},
 "generic":   {"fields": ["summary", "vision_activity", "current_window_title", "vision_ocr_text", "active_url"],
                   "event_types": None, "app_filter": None}
 }
@@ -68,10 +55,10 @@ def extract_urls_from_entities(entities_json: str) -> list[str]:
     except Exception as e:
         print(f"Error loading entities: {e}")
         return []
-    
+
     return [e for e in entities if isinstance(e, str) and URL_RE.search(e)]
 
-# Track A: Session-level search for URLs
+
 def search_sessions_for_url(query:str,  query_vec, keywords: list[str], temporal_range=None, recency_hint=None) -> list | None:
 
     if temporal_range:
@@ -83,7 +70,7 @@ def search_sessions_for_url(query:str,  query_vec, keywords: list[str], temporal
         time_filter = f"window_start >= {time.time() - 7 * 86400}"
     else:
         time_filter = "1=1"
-    
+
     sql = f"""
     SELECT window_start, summary, active_task, entities, summary_embedding
     FROM sessions
@@ -97,7 +84,7 @@ def search_sessions_for_url(query:str,  query_vec, keywords: list[str], temporal
     if not rows:
         return None
 
-    # Only keep sessions that have at least one URL-like entity
+
     candidates = [
         (ws, summary, active_task, entities, emb_json)
         for (ws, summary, active_task, entities, emb_json) in rows
@@ -121,10 +108,10 @@ def search_sessions_for_url(query:str,  query_vec, keywords: list[str], temporal
         if query_vec and summary_embedding:
             score += cosine_similarity(query_vec, json.loads(summary_embedding))
         else:
-            # Fallback to keyword-based similarity
+
             combined_keywords = f"{summary or ''} {entities or ''} {active_task or ''}".lower()
             score += sum(1 for kw in keywords if kw in combined_keywords) / max(len(keywords), 1)
-        
+
         score+= recency_weight * recency_score
         scores.append((score, window_start, summary, active_task, urls))
 
@@ -134,7 +121,7 @@ def search_sessions_for_url(query:str,  query_vec, keywords: list[str], temporal
     top_k = [score for score in scores[:MAX_RESULTS] if score[0] >= SESSION_SCORE_THRESHOLD]
     return top_k if top_k else None
 
-# Track B: Event-level search for URLs
+
 
 def _sanitize_for_fts(keyword: str) -> str:
     """Strip FTS5 special chars, wrap in quotes for safe exact-token matching."""
@@ -154,11 +141,11 @@ def _extract_payload_text(payload: str) -> str | None:
     try:
         obj = json.loads(payload)
         if isinstance(obj, dict):
-            # grab first non-null string value
+
             for v in obj.values():
                 if isinstance(v, str) and v.strip():
                     return v.strip()
-            return None          # all values were null / empty
+            return None
         if isinstance(obj, str):
             return obj.strip() or None
     except (json.JSONDecodeError, TypeError):
@@ -184,7 +171,7 @@ def search_events_for_url(keywords: list[str], temporal_range=None, recency_hint
 
     fts_query = " OR ".join(fts_keywords)
 
-    # Use parameterized MATCH — handles any remaining edge cases safely
+
     sql = f"""
         SELECT e.timestamp, e.active_url, e.current_window_title, e.summary, events_fts.rank
         FROM events_fts
@@ -196,7 +183,7 @@ def search_events_for_url(keywords: list[str], temporal_range=None, recency_hint
         ORDER BY events_fts.rank
         LIMIT 20
     """
-    
+
     try:
         rows = conn.execute(sql, (fts_query,)).fetchall()
     except Exception:
@@ -205,7 +192,7 @@ def search_events_for_url(keywords: list[str], temporal_range=None, recency_hint
     if not rows:
         return []
 
-    # fts.rank is negative — more negative = more relevant
+
     timestamps = [r[0] for r in rows]
     newest_ts  = max(timestamps)
     oldest_ts  = min(timestamps)
@@ -214,17 +201,17 @@ def search_events_for_url(keywords: list[str], temporal_range=None, recency_hint
 
     scores = []
     for (ts, url, window_title, summary, rank) in rows:
-        relevance = -rank                              # flip: now positive, higher -> more relevant
-        recency   = (ts - oldest_ts) / ts_range       # 0.0 oldest -> 1.0 newest
+        relevance = -rank
+        recency   = (ts - oldest_ts) / ts_range
         score     = relevance + recency_weight * recency
-        scores.append((score, ts, url, window_title, summary)) 
+        scores.append((score, ts, url, window_title, summary))
 
     if not scores:
         return []
 
     scores.sort(key=lambda x: x[0], reverse=True)
     return scores[:MAX_RESULTS]
-  
+
 def search_events_for_artifact(
     artifact_type: str,
     keywords: list[str],
@@ -256,7 +243,7 @@ def search_events_for_artifact(
 
     recency_weight = 0.4 if recency_hint in ("soft", "window") else 0.2
 
-    # --- clipboard / paste: primary field is payload ---
+
     if artifact_type in ("clipboard", "paste"):
         if fts_keywords:
             fts_query = " OR ".join(fts_keywords)
@@ -278,7 +265,7 @@ def search_events_for_artifact(
         else:
             rows = []
 
-        # Pure-recency fallback — only when there were no keywords to begin with
+
         if not rows and not fts_keywords:
             sql = f"""
                 SELECT e.timestamp, e.payload, e.current_window_title, e.process_name, 0 AS rank
@@ -314,20 +301,23 @@ def search_events_for_artifact(
         scored.sort(key=lambda x: x[0], reverse=True)
         return scored[:MAX_RESULTS]
 
-    # --- screen: primary field is vision_ocr_text ---
-    # Do NOT filter by event_type — vision data is attached to whichever event
-    # happened to be nearest when the screenshot was captured.
+
+
+
     if artifact_type == "screen":
         if fts_keywords:
             fts_query = " OR ".join(fts_keywords)
             sql = f"""
                 SELECT e.timestamp, e.vision_ocr_text, e.vision_activity,
-                       e.current_window_title, events_fts.rank
+                       e.current_window_title, e.process_name, e.summary,
+                       e.screenshot_filename, events_fts.rank
                 FROM events_fts
                 JOIN events e ON events_fts.rowid = e.rowid
                 WHERE events_fts MATCH ?
                   AND {time_filter}
-                  AND (e.vision_ocr_text IS NOT NULL AND e.vision_ocr_text != '')
+                  AND (e.event_type = 'screenshot_analysis'
+                       OR e.vision_ocr_text IS NOT NULL
+                       OR e.screenshot_filename IS NOT NULL)
                 ORDER BY events_fts.rank
                 LIMIT 20
             """
@@ -338,14 +328,17 @@ def search_events_for_artifact(
         else:
             rows = []
 
-        # Pure-recency fallback — only when there were no keywords to begin with
-        if not rows and not fts_keywords:
+
+        if not rows:
             sql = f"""
                 SELECT e.timestamp, e.vision_ocr_text, e.vision_activity,
-                       e.current_window_title, 0 AS rank
+                       e.current_window_title, e.process_name, e.summary,
+                       e.screenshot_filename, 0 AS rank
                 FROM events e
                 WHERE {time_filter}
-                  AND (e.vision_ocr_text IS NOT NULL AND e.vision_ocr_text != '')
+                  AND (e.event_type = 'screenshot_analysis'
+                       OR e.vision_ocr_text IS NOT NULL
+                       OR e.screenshot_filename IS NOT NULL)
                 ORDER BY e.timestamp DESC
                 LIMIT 20
             """
@@ -362,17 +355,17 @@ def search_events_for_artifact(
         ts_range = max(newest_ts - oldest_ts, 1.0)
 
         scored = []
-        for (ts, ocr_text, vision_activity, window_title, rank) in rows:
+        for (ts, ocr_text, vision_activity, window_title, process_name, summary, screenshot_filename, rank) in rows:
             relevance = -rank
             recency   = (ts - oldest_ts) / ts_range
             score     = relevance + recency_weight * recency
-            scored.append((score, ts, ocr_text, vision_activity, window_title))
+            scored.append((score, ts, ocr_text, vision_activity, window_title, process_name, summary, screenshot_filename))
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return scored[:MAX_RESULTS]
 
-    # --- generic: broad search across all text fields ---
-    # Exclude pure noise event types, but keep them if vision data is attached.
+
+
     NOISE_FILTER = (
         "(e.event_type NOT IN ('typing_burst', 'deviation', 'context_change') "
         "OR e.vision_ocr_text IS NOT NULL)"
@@ -399,7 +392,7 @@ def search_events_for_artifact(
     else:
         rows = []
 
-    # Pure-recency fallback — only when there were no keywords to begin with
+
     if not rows and not fts_keywords:
         sql = f"""
             SELECT e.timestamp, e.summary, e.vision_activity,
@@ -465,18 +458,62 @@ def _format_screen_results(results: list) -> str:
         )
     parts = ["[screen activity — last 7 days]"]
     for item in results:
-        score, ts, ocr_text, vision_activity, window_title = item
-        ts_str = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+        score, ts, ocr_text, vision_activity, window_title, process_name, summary, screenshot_filename = item
+        ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
         block  = [f"time: {ts_str}"]
+        if process_name:
+            block.append(f"app: {process_name}")
         if window_title:
             block.append(f"window: {window_title}")
         if vision_activity:
             block.append(f"activity: {vision_activity}")
+        if summary:
+            block.append(f"summary: {summary}")
         if ocr_text:
             display = ocr_text if len(ocr_text) <= 400 else ocr_text[:400] + f"… [{len(ocr_text)} chars total]"
             block.append(f"ocr_text: {display}")
+        source = resolve_screenshot_filename(ts, screenshot_filename)
+        if source:
+            block.append(f"screenshot_source: {source}")
         parts.append("\n".join(block))
     return "\n\n---\n".join(parts)
+
+
+def _exact_screenshot_evidence(temporal_range) -> str | None:
+    midpoint = (temporal_range.start_ts + temporal_range.end_ts) / 2
+    row = conn.execute(
+        """SELECT timestamp, process_name, current_window_title, summary,
+                  vision_ocr_text, vision_activity, screenshot_filename
+           FROM events
+           WHERE event_type = 'screenshot_analysis'
+             AND timestamp >= ? AND timestamp < ?
+           ORDER BY ABS(timestamp - ?)
+           LIMIT 1""",
+        (temporal_range.start_ts, temporal_range.end_ts, midpoint),
+    ).fetchone()
+    if not row:
+        return None
+    ts, process_name, window_title, summary, ocr_text, vision_activity, screenshot_filename = row
+    parts = [
+        "[exact screenshot evidence — do not merge with nearby events]",
+        f"time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))}",
+        f"match_delta_seconds: {abs(ts - midpoint):.3f}",
+    ]
+    if process_name:
+        parts.append(f"app: {process_name}")
+    if window_title:
+        parts.append(f"window: {window_title}")
+    if summary:
+        parts.append(f"summary: {summary}")
+    if vision_activity:
+        parts.append(f"activity: {vision_activity}")
+    if ocr_text:
+        display = ocr_text if len(ocr_text) <= 1200 else ocr_text[:1200] + f"… [{len(ocr_text)} chars total]"
+        parts.append(f"ocr_text: {display}")
+    source = resolve_screenshot_filename(ts, screenshot_filename)
+    if source:
+        parts.append(f"screenshot_source: {source}")
+    return "\n".join(parts)
 
 
 def _format_generic_results(results: list) -> str:
@@ -532,7 +569,7 @@ def _format_url_results(session_results, event_results) -> str:
             "summaries — try topic_search for broader context."
         )
     return "\n\n---\n".join(parts)
-    
+
 def specific_recall(query: str, temporal_range=None, q_vec: list | None = None) -> str:
     from concurrent.futures import ThreadPoolExecutor
 
@@ -558,13 +595,17 @@ def specific_recall(query: str, temporal_range=None, q_vec: list | None = None) 
         return _format_clipboard_results(artifact_type, results)
 
     if artifact_type == "screen":
+        if temporal_range and temporal_range.granularity == "instant":
+            exact = _exact_screenshot_evidence(temporal_range)
+            if exact:
+                return exact
         results = search_events_for_artifact("screen", keywords, temporal_range, recency_hint)
         return _format_screen_results(results)
 
-    # generic fallback
+
     results = search_events_for_artifact("generic", keywords, temporal_range, recency_hint)
     return _format_generic_results(results)
-    
+
 
 if __name__ == "__main__":
     while True:

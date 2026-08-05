@@ -16,8 +16,8 @@ from core.memory_store import (
     count_identity_updates_since,
     get_all_clusters,
     get_fact_delta_since,
-    get_identity,
     get_introduction_meta,
+    get_profile,
     set_introduction,
 )
 
@@ -67,7 +67,10 @@ _started = False
 def gather_intro_inputs() -> dict:
     meta = get_introduction_meta()
     since = float(meta.get("updated_at") or 0)
-    identity = get_identity()
+    profile = get_profile()
+    identity = dict(profile["identity"])
+    if profile["name"]:
+        identity["name"] = profile["name"]
     clusters = get_all_clusters()
     fact_delta = get_fact_delta_since(since, limit=FACT_DELTA_CAP)
     return {
@@ -94,7 +97,7 @@ def should_rebuild_introduction(inputs: dict | None = None) -> bool:
     value = (meta.get("value") or "").strip()
     now = time.time()
 
-    # First intro: rebuild when any identity or facts exist
+
     if not value or updated_at <= 0:
         return bool(data["identity"] or data["clusters"] or data["fact_delta"])
 
@@ -178,11 +181,11 @@ def rebuild_introduction(inputs: dict | None = None) -> str | None:
     if len(text) > MAX_INTRO_CHARS:
         text = text[: MAX_INTRO_CHARS - 1].rsplit(" ", 1)[0] + "…"
 
-    # Re-fetch source after LLM so a mid-flight Settings save is not overwritten
+
     if (get_introduction_meta().get("source") or "").strip().lower() == "user":
         print("\n  [INTRO] skipped write — user-authored introduction protected")
         return None
-        
+
     set_introduction(text, source="distiller")
     print(f"\n  [INTRO] rebuilt ({len(text)} chars)")
     return text

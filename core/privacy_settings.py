@@ -6,21 +6,18 @@ When a target is enabled, matching windows are blacked out in captures
 from __future__ import annotations
 
 import json
-import os
-import sys
 import time
 from typing import Optional
 
-_CORE_DIR = os.path.dirname(os.path.abspath(__file__))
-if _CORE_DIR not in sys.path:
-    sys.path.insert(0, _CORE_DIR)
-
-from storage import conn
+try:
+    from core.storage import conn
+except ImportError:
+    from storage import conn
 
 _META_KEY = "settings.privacy_redact"
 
-# Curated targets shown in Settings → Access control.
-# Match by process name and/or case-insensitive window title substrings.
+
+
 PRIVACY_TARGETS: list[dict] = [
     {
         "id": "incognito",
@@ -38,61 +35,61 @@ PRIVACY_TARGETS: list[dict] = [
         "id": "whatsapp",
         "label": "WhatsApp",
         "description": "Black out WhatsApp Desktop and browser tabs",
-        "processes": ["whatsapp.exe"],
+        "processes": ["whatsapp.exe", "whatsapp"],
         "title_patterns": ["whatsapp"],
     },
     {
         "id": "instagram",
         "label": "Instagram",
         "description": "Black out Instagram Desktop and browser tabs",
-        "processes": ["instagram.exe"],
+        "processes": ["instagram.exe", "instagram"],
         "title_patterns": ["instagram"],
     },
     {
         "id": "telegram",
         "label": "Telegram",
         "description": "Black out Telegram Desktop windows",
-        "processes": ["telegram.exe", "telegramdesktop.exe"],
+        "processes": ["telegram.exe", "telegramdesktop.exe", "telegram"],
         "title_patterns": ["telegram"],
     },
     {
         "id": "signal",
         "label": "Signal",
         "description": "Black out Signal Desktop windows",
-        "processes": ["signal.exe"],
+        "processes": ["signal.exe", "signal"],
         "title_patterns": ["signal"],
     },
     {
         "id": "discord",
         "label": "Discord",
         "description": "Black out Discord windows",
-        "processes": ["discord.exe"],
+        "processes": ["discord.exe", "discord"],
         "title_patterns": ["discord"],
     },
     {
         "id": "slack",
         "label": "Slack",
         "description": "Black out Slack windows",
-        "processes": ["slack.exe"],
+        "processes": ["slack.exe", "slack"],
         "title_patterns": ["slack"],
     },
     {
         "id": "messages",
         "label": "Messages / SMS apps",
         "description": "Black out common messaging apps (Your Phone, Messages)",
-        "processes": ["yourphone.exe", "phonelink.exe"],
+        "processes": ["yourphone.exe", "phonelink.exe", "messages", "message"],
         "title_patterns": ["phone link", "your phone", "messages"],
     },
 ]
 
 _TARGET_IDS = {t["id"] for t in PRIVACY_TARGETS}
 
-# Always redact Clippy Vision itself (never user-toggleable).
-# electron.exe = npm start; packaged builds use the product exe name.
+
+
 ALWAYS_REDACT_PROCESSES = frozenset({
-    "electron.exe",
     "clippy vision.exe",
     "clippy-vision.exe",
+    "clippy vision",
 })
 ALWAYS_REDACT_TITLE_PATTERNS = ("clippy vision",)
 
@@ -124,6 +121,7 @@ def get_privacy_enabled() -> dict[str, bool]:
 
 def set_privacy_enabled(enabled: dict[str, bool]) -> dict[str, bool]:
     """Merge and persist enabled flags. Unknown keys ignored."""
+    global _cache_rules, _cache_at
     current = get_privacy_enabled()
     for tid, val in (enabled or {}).items():
         if tid in _TARGET_IDS:
@@ -133,6 +131,10 @@ def set_privacy_enabled(enabled: dict[str, bool]) -> dict[str, bool]:
         (_META_KEY, json.dumps(current)),
     )
     conn.commit()
+
+
+    _cache_rules = None
+    _cache_at = 0.0
     return current
 
 
@@ -155,8 +157,8 @@ def get_active_redact_rules() -> dict:
 
     Returns:
       {
-        "processes": set[str],          # lowercase exe names
-        "title_patterns": tuple[str],   # lowercase substrings
+        "processes": set[str],
+        "title_patterns": tuple[str],
       }
     """
     processes: set[str] = set(ALWAYS_REDACT_PROCESSES)
@@ -171,7 +173,7 @@ def get_active_redact_rules() -> dict:
         for pat in target.get("title_patterns") or []:
             titles.append(pat.lower())
 
-    # Dedupe titles while preserving order
+
     seen: set[str] = set()
     unique_titles: list[str] = []
     for t in titles:
@@ -182,7 +184,7 @@ def get_active_redact_rules() -> dict:
     return {"processes": processes, "title_patterns": tuple(unique_titles)}
 
 
-# ---- Cached rules for the capture process (avoids DB hit every EnumWindows) ----
+
 
 _cache_rules: Optional[dict] = None
 _cache_at: float = 0.0

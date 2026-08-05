@@ -6,12 +6,13 @@ from .tier_one_classifier import tier1_score
 from .tier_two_classifier import classify_with_llm
 from .vision_classifier import classify_with_vision
 from core.vision import get_screenshots_near
+from core.screenshot_enrichment import enrich_screenshot, merge_ocr_text
 from core.storage import conn
 
 POLL_SECS = 2
 VISION_POLL_SECS = 5
-VISION_SCORE_THRESHOLD = 7   # only route to vision if text score ≤ this (uncertain range)
-MAX_VISION_WAIT_SECS   = 300 # skip vision enrichment if event has been waiting longer than this
+VISION_SCORE_THRESHOLD = 7
+MAX_VISION_WAIT_SECS   = 300
 
 DEFAULT_SCREENSHOT_VERDICT = {
     "verdict": "not_interesting",
@@ -22,12 +23,21 @@ DEFAULT_SCREENSHOT_VERDICT = {
     "suggested_action": None,
 }
 
-# One-time migration: add classification_status if the DB existed before this column
+OCR_ONLY_VERDICT = {
+    "verdict": "not_interesting",
+    "score": 5,
+    "reason": "Local screenshot OCR completed; vision classification was unavailable",
+    "ocr_text": "",
+    "user_activity": "",
+    "suggested_action": None,
+}
+
+
 try:
     conn.execute("ALTER TABLE events ADD COLUMN classification_status TEXT DEFAULT 'pending'")
     conn.commit()
 except sqlite3.OperationalError:
-    pass  # column already exists
+    pass
 
 
 for col in ("vision_ocr_text", "vision_activity", "vision_suggested_action"):
@@ -37,9 +47,9 @@ for col in ("vision_ocr_text", "vision_activity", "vision_suggested_action"):
     except sqlite3.OperationalError:
         pass
 
-#-----------------------------------------------------#
-#------------------- Print functions -----------------#
-#-----------------------------------------------------#
+
+
+
 def _print_verdict(tier: int, event: dict, verdict: dict):
     verdict_str  = verdict["verdict"].upper()
     score        = verdict["score"]
@@ -68,32 +78,47 @@ def _print_vision_verdict(event: dict, verdict: dict):
 
 def apply_verdict(event_id: str, verdict: dict, needs_vision: bool = False):
     status      = "awaiting_vision" if needs_vision else "done"
-    interesting = 0 if verdict["verdict"] == "not_interesting" else 1  # needs_vision → tentatively interesting
-    conn.execute(
+    interesting = 0 if verdict["verdict"] == "not_interesting" else 1
+    cursor = conn.execute(
         """UPDATE events
            SET interesting=?, interest_score=?, interest_reason=?, classification_status=?
            WHERE event_id=?""",
         (interesting, verdict["score"], verdict["reason"], status, event_id)
     )
     conn.commit()
+    return bool(cursor.rowcount)
 
-def apply_vision_verdict(event_id: str, verdict: dict):
-    # Vision verdict is authoritative — it can see the screen, so it overrides text-tier classification
+def apply_vision_verdict(
+    event_id: str,
+    verdict: dict,
+    image_embedding: list[float] | None = None,
+    image_embedding_model: str | None = None,
+    screenshot_filename: str | None = None,
+):
+
     interesting = 0 if verdict["verdict"] == "not_interesting" else 1
-    conn.execute(
+    cursor = conn.execute(
         """UPDATE events
            SET vision_ocr_text=?,
                vision_activity=?,
                vision_suggested_action=?,
+               vector_embedding=NULL,
+               image_embedding=?,
+               image_embedding_model=?,
+               screenshot_filename=?,
                interesting=?,
                interest_score=?,
                interest_reason=?,
                classification_status='done'
-           WHERE event_id=?""",
+           WHERE event_id=?
+             AND classification_status IN ('awaiting_vision', 'screenshot_only')""",
         (
             verdict.get("ocr_text"),
             verdict.get("user_activity"),
             verdict.get("suggested_action"),
+            json.dumps(image_embedding) if image_embedding else None,
+            image_embedding_model,
+            screenshot_filename,
             interesting,
             verdict.get("score"),
             verdict.get("reason"),
@@ -101,6 +126,7 @@ def apply_vision_verdict(event_id: str, verdict: dict):
         ),
     )
     conn.commit()
+    return bool(cursor.rowcount)
 
 
 def _row_to_event(row) -> dict:
@@ -129,14 +155,14 @@ def _row_to_event(row) -> dict:
 
 
 def classify_event(event: dict):
-    # Tier 0 — rules (instant, no I/O)
+
     verdict = tier_zero_classifier(event)
     if verdict:
         _print_verdict(0, event, verdict)
         apply_verdict(event["event_id"], verdict)
         return
 
-    # Tier 1 — feature scoring + personal baseline (cheap)
+
     verdict = tier1_score(event, conn)
     if verdict:
         _print_verdict(1, event, verdict)
@@ -144,7 +170,7 @@ def classify_event(event: dict):
         apply_verdict(event["event_id"], verdict, needs_vision=needs_vision)
         return
 
-    # Tier 2 — LLM with last-3-event context window
+
     recent = conn.execute(
         """SELECT * FROM (
                SELECT event_type, process_name, summary, timestamp FROM events
@@ -166,7 +192,7 @@ def classify_event(event: dict):
     except Exception as e:
         print(f"  [TIER-2] Failed: {e} — backing off 30s before retry")
         time.sleep(30)
-        return  # leave as 'pending', retry next cycle
+        return
 
     _print_verdict(2, event, verdict)
     needs_vision = (
@@ -182,25 +208,31 @@ def classify_vision_event(event: dict):
         apply_vision_verdict(event["event_id"], DEFAULT_SCREENSHOT_VERDICT)
         return
 
-    # Show timing context before sending to the model
+
     event_ts   = time.strftime("%H:%M:%S", time.localtime(event["timestamp"]))
-    shot_ts_ms = int(screenshots[0].stem)
+    shot_ts_ms = int(screenshots[0].stem.split("_", 1)[0])
     shot_ts    = time.strftime("%H:%M:%S", time.localtime(shot_ts_ms / 1000))
-    shot_delta = int(event["timestamp"] - shot_ts_ms / 1000)  # screenshot age vs event (seconds)
-    vision_lag = int(time.time() - event["timestamp"])        # how late vision is vs real-time (seconds)
+    shot_delta = int(event["timestamp"] - shot_ts_ms / 1000)
+    vision_lag = int(time.time() - event["timestamp"])
     print(
         f"  [VISION] event@{event_ts} | screenshot@{shot_ts} "
         f"(Δ{shot_delta:+d}s vs event) | processing lag {vision_lag}s"
     )
 
     try:
+        ocr_text, image_embedding, image_embedding_model = enrich_screenshot(screenshots[0])
+    except Exception as e:
+        print(f"  [VISION] Screenshot enrichment failed: {e}")
+        ocr_text, image_embedding, image_embedding_model = "", None, None
+
+    try:
         verdict = classify_with_vision(event, screenshots)
     except Exception as e:
-        print(f"  [VISION] Failed: {e} — backing off 60s before retry")
-        time.sleep(60)
-        return  # leave as awaiting_vision, retry next cycle
+        print(f"  [VISION] Classifier unavailable: {e} — storing local screenshot data")
+        verdict = dict(OCR_ONLY_VERDICT)
+    verdict["ocr_text"] = merge_ocr_text(ocr_text, verdict.get("ocr_text"))
     _print_vision_verdict(event, verdict)
-    apply_vision_verdict(event["event_id"], verdict)
+    apply_vision_verdict(event["event_id"], verdict, image_embedding, image_embedding_model, screenshots[0].name)
 
 
 def worker_loop():
@@ -244,7 +276,7 @@ def vision_worker_loop():
             event = _row_to_event(row)
             age_secs = time.time() - event["timestamp"]
             if age_secs > MAX_VISION_WAIT_SECS:
-                # Event is too stale for vision enrichment to be useful — mark done and move on
+
                 conn.execute(
                     "UPDATE events SET classification_status='done' WHERE event_id=?",
                     (event["event_id"],)

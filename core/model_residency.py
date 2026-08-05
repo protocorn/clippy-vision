@@ -1,6 +1,6 @@
 """Vision model residency tied to screen capture — not app launch.
 
-Startup (API):     pin text + embed only; vision idle / unloaded.
+Startup (API):     pin text only; vision idle / unloaded.
 Capture start:     pin vision if RAM allows, else on-demand (short keep_alive).
 Capture stop:      unload vision.
 While pinned:      if free RAM drops below the floor, demote to on-demand.
@@ -24,10 +24,13 @@ try:
     from core.paths import get_data_dir
 except ImportError:
     from paths import get_data_dir
+try:
+    from core.llm_config import get_llm_config, is_external_provider, model_for
+except ImportError:
+    from llm_config import get_llm_config, is_external_provider, model_for
 
 TEXT_MODEL = "qwen3:8b"
 VL_MODEL = "qwen3-vl:4b"
-EMBED_MODEL = "nomic-embed-text"
 
 VisionPolicy = Literal["idle", "pinned", "on_demand"]
 
@@ -40,7 +43,7 @@ KEEP_ALIVE_PINNED = "1h"
 KEEP_ALIVE_VL_EPHEMERAL = "5m"
 KEEP_ALIVE_UNLOAD = 0
 
-_OLLAMA = "http://localhost:11434"
+_OLLAMA = "http://127.0.0.1:11434"
 _STATE_NAME = "model_residency.json"
 
 _policy: VisionPolicy = "idle"
@@ -80,14 +83,14 @@ def load_residency() -> dict:
         _policy = "idle"
         return {"vision": _policy}
 
-    vision = data.get("vision") or data.get("mode")  # mode: legacy dual/single
+    vision = data.get("vision") or data.get("mode")
     if vision == "dual":
         vision = "pinned"
     elif vision == "single":
         vision = "on_demand"
     if vision not in ("idle", "pinned", "on_demand"):
         vision = "idle"
-    _policy = vision  # type: ignore[assignment]
+    _policy = vision
     data["vision"] = _policy
     return data
 
@@ -107,6 +110,11 @@ def _persist(vision: VisionPolicy, **extra: Any) -> dict:
 
 
 def keep_alive_for(model: str) -> str | int:
+    if is_external_provider():
+
+
+
+        return KEEP_ALIVE_UNLOAD
     if "vl" not in (model or "").lower():
         return KEEP_ALIVE_PINNED
     if _policy == "pinned":
@@ -117,8 +125,13 @@ def keep_alive_for(model: str) -> str | int:
 
 
 def _ollama_post(path: str, body: dict, timeout: float = 90) -> None:
+    base = get_llm_config().get("base_url", _OLLAMA).rstrip("/")
+    if base.endswith("/api"):
+        base = base[:-4]
+    elif base.endswith("/v1"):
+        base = base[:-3]
     req = urllib.request.Request(
-        f"{_OLLAMA}{path}",
+        f"{base}{path}",
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"},
     )
@@ -127,29 +140,32 @@ def _ollama_post(path: str, body: dict, timeout: float = 90) -> None:
 
 
 def _warm(model: str, keep_alive: str | int = KEEP_ALIVE_PINNED, timeout: float = 90) -> None:
+    config = get_llm_config()
+    if config["provider"] != "ollama":
+        print(f"[residency] skip warm for external provider ({config['provider']})")
+        return
+    if model == VL_MODEL:
+        model = model_for("vision", VL_MODEL)
+    elif model == TEXT_MODEL:
+        model = model_for("chat", TEXT_MODEL)
     print(f"[residency] warm {model} (keep_alive={keep_alive!r})")
-    if model == EMBED_MODEL:
-        _ollama_post(
-            "/api/embed",
-            {"model": model, "input": "warmup", "keep_alive": keep_alive},
-            timeout=timeout,
-        )
-    else:
-        # Non-empty prompt: empty prompt hangs on some Ollama builds
-        _ollama_post(
-            "/api/generate",
-            {"model": model, "prompt": "ping", "stream": False, "keep_alive": keep_alive},
-            timeout=timeout,
-        )
+    _ollama_post(
+        "/api/generate",
+        {"model": model, "prompt": "ping", "stream": False, "keep_alive": keep_alive},
+        timeout=timeout,
+    )
 
 
 def _unload_vision() -> None:
-    print(f"[residency] unload {VL_MODEL}")
+    if is_external_provider():
+        return
+    vision_model = model_for("vision", VL_MODEL)
+    print(f"[residency] unload {vision_model}")
     try:
         _ollama_post(
             "/api/generate",
             {
-                "model": VL_MODEL,
+                "model": vision_model,
                 "prompt": "ping",
                 "stream": False,
                 "keep_alive": KEEP_ALIVE_UNLOAD,
@@ -193,14 +209,21 @@ def _start_monitor() -> None:
 
 
 def warm_for_startup() -> dict:
-    """App/API launch: pin text + embed only. Do not load vision.
+    """App/API launch: pin text only. Do not load vision.
 
     Always ends in vision=idle so setup UI cannot hang on a partial warm.
     """
     with _lock:
         _stop_monitor()
+        if is_external_provider():
+            return _persist(
+                "idle",
+                reason="external_provider",
+                provider=get_llm_config()["provider"],
+                model_warm_skipped=True,
+            )
         before = _available()
-        print(f"[residency] startup warm (text+embed only)  free~{before / _GB:.1f}GB")
+        print(f"[residency] startup warm (text only)  free~{before / _GB:.1f}GB")
 
         _state_path().write_text(
             json.dumps(
@@ -213,11 +236,6 @@ def warm_for_startup() -> dict:
         reason = "startup_text_only"
         err = None
         try:
-            try:
-                _warm(EMBED_MODEL, timeout=60)
-            except Exception as e:
-                print(f"[residency] embed warm failed (continuing): {e}")
-
             try:
                 _warm(TEXT_MODEL, timeout=90)
             except Exception as e:
@@ -250,6 +268,13 @@ def warm_for_startup() -> dict:
 def on_capture_start() -> dict:
     """Screen capture turned on: pin vision if RAM allows, else on-demand."""
     with _lock:
+        if is_external_provider():
+            return _persist(
+                "idle",
+                reason="external_provider",
+                provider=get_llm_config()["provider"],
+                vision_warm_skipped=True,
+            )
         free = _available()
         print(f"[residency] capture start  free~{free / _GB:.1f}GB")
 
@@ -285,11 +310,12 @@ def on_capture_stop() -> dict:
     with _lock:
         print("[residency] capture stop - unloading vision")
         _stop_monitor()
-        _unload_vision()
+        if not is_external_provider():
+            _unload_vision()
         return _persist("idle", reason="capture_stop")
 
 
-# Seed from disk for gateway imports (capture or API process)
+
 load_residency()
 
 
