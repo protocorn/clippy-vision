@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import json
 import threading
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any, Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -25,6 +25,8 @@ from agent.conversation import (
 from agent.react_agent import USER_MESSAGE_MAX_CHARS, run, run_stream
 from agent.router import load_classifier
 from core.intro_builder import start_intro_rebuild_daemon
+from core.llm_config import get_llm_config, public_llm_config, save_llm_config
+from core.llm_gateway import gateway
 from core.memory_store import (
     get_identity,
     get_introduction,
@@ -92,6 +94,21 @@ class ProfileUpdateRequest(BaseModel):
 class PrivacyUpdateRequest(BaseModel):
 
     enabled: dict[str, bool]
+
+
+class ProviderUpdateRequest(BaseModel):
+
+    provider: str | None = None
+
+    base_url: str | None = None
+
+    api_key: str | None = None
+
+    cli_command: str | None = None
+
+    chat_model: str | None = None
+
+    vision_model: str | None = None
 
 
 
@@ -248,6 +265,50 @@ def write_privacy_settings(req: PrivacyUpdateRequest):
     return {"targets": list_privacy_targets()}
 
 
+@app.get("/settings/provider")
+
+def read_provider_settings():
+
+    return public_llm_config()
+
+
+@app.put("/settings/provider")
+
+def write_provider_settings(req: ProviderUpdateRequest):
+
+    values: dict[str, Any] = {
+
+        key: value
+
+        for key, value in req.dict(exclude_unset=True).items()
+
+        if value is not None
+
+    }
+
+    try:
+
+        return public_llm_config(save_llm_config(values))
+
+    except ValueError as exc:
+
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/settings/provider/test")
+
+def test_provider_connection():
+
+    return gateway.test_connection(get_llm_config())
+
+
+@app.get("/settings/provider/capabilities")
+
+def provider_capabilities():
+
+    return gateway.capabilities(get_llm_config())
+
+
 
 @app.get("/conversations")
 
@@ -340,5 +401,3 @@ if __name__ == "__main__":
     port = int(os.environ.get("CLIPPY_API_PORT") or 8000)
 
     uvicorn.run(app, host="127.0.0.1", port=port)
-
-

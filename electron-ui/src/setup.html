@@ -541,7 +541,13 @@
       <div class="card provider-card">
         <div class="card-head">AI connection</div>
         <div class="provider-card-body">
-          <label>Provider<select id="llm-provider"><option value="ollama">Ollama · local chat and vision</option></select></label>
+          <label>Provider<select id="llm-provider">
+            <option value="ollama">Ollama · fully local</option>
+            <option value="openai_compatible">OpenAI-compatible API</option>
+            <option value="gemini_api">Google Gemini API</option>
+            <option value="codex_cli">Codex subscription CLI</option>
+            <option value="claude_cli">Claude subscription CLI</option>
+          </select></label>
           <div class="provider-details" id="provider-details">
             <label id="llm-base-url-field">Base URL<input id="llm-base-url" placeholder="http://127.0.0.1:1234/v1" /></label>
             <div class="provider-fields">
@@ -746,10 +752,14 @@
         ? 'macOS 12+'
         : 'Windows 10/11'
 
-      // The onboarding gate describes the local Ollama runtime. Hosted and
-      // subscription modes remain a comment-only future extension.
-      $('hardware-summary').textContent = check.level === 'ready' ? 'Ready' : check.level === 'warn' ? 'Review' : 'Blocked'
-      $('hardware-note').textContent = 'Models use roughly 8 GB on disk. During capture, leave headroom for your browser, IDE, and the desktop compositor.'
+      const external = check.mode === 'external'
+      const subscription = check.mode === 'subscription'
+      $('hardware-summary').textContent = external
+        ? 'API provider'
+        : subscription ? 'Subscription CLI' : check.level === 'ready' ? 'Ready' : check.level === 'warn' ? 'Review' : 'Blocked'
+      $('hardware-note').textContent = external || subscription
+        ? 'Chat prompts may include retrieved activity context and are sent to the selected provider. The activity database and embeddings remain local.'
+        : 'Models use roughly 8 GB on disk. During capture, leave headroom for your browser, IDE, and the desktop compositor.'
 
       const verdict = $('verdict')
       const continueBtn = $('btn-continue')
@@ -760,8 +770,12 @@
 
       if (check.level === 'ready') {
         $('verdict-icon').textContent = '✓'
-        $('verdict-title').textContent = 'Ready for full capture'
-        $('verdict-body').textContent = 'Your machine meets the recommended specs. You can install and use screen capture comfortably alongside everyday apps.'
+        $('verdict-title').textContent = external
+          ? 'Ready to connect to your API'
+          : subscription ? 'Ready to use your subscription' : 'Ready for full capture'
+        $('verdict-body').textContent = external || subscription
+          ? 'Only the small local embedding model is downloaded. Review the provider privacy terms and complete authentication before launching.'
+          : 'Your machine meets the recommended specs. You can install and use screen capture comfortably alongside everyday apps.'
         overrideRow.classList.remove('visible')
         override.checked = false
         continueBtn.disabled = false
@@ -807,22 +821,29 @@
     }
 
     function renderLLMConfig(config) {
-      // Keep the model fields ready for local model selection, while leaving
-      // hosted-provider controls out of onboarding until that work is approved.
-      const provider = 'ollama'
+      const providers = new Set(['ollama', 'openai_compatible', 'gemini_api', 'codex_cli', 'claude_cli'])
+      const provider = providers.has(config?.provider) ? config.provider : 'ollama'
+      const subscription = provider.endsWith('_cli')
+      const apiProvider = provider === 'openai_compatible' || provider === 'gemini_api'
       $('llm-provider').value = provider
-      $('provider-details').hidden = true
-      $('llm-base-url-field').hidden = true
-      $('llm-api-key-field').hidden = true
-      $('llm-cli-command-field').hidden = true
-      $('llm-connect-btn').hidden = true
-      $('llm-base-url').value = config.base_url || 'http://127.0.0.1:11434'
-      $('llm-chat-model').value = config.chat_model || 'qwen3:8b'
+      $('provider-details').hidden = provider === 'ollama'
+      $('llm-base-url-field').hidden = !apiProvider
+      $('llm-api-key-field').hidden = !apiProvider
+      $('llm-cli-command-field').hidden = !subscription
+      $('llm-connect-btn').hidden = !subscription
+      $('llm-base-url').value = config.base_url || (provider === 'gemini_api' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : provider === 'openai_compatible' ? 'http://127.0.0.1:1234/v1' : provider === 'ollama' ? 'http://127.0.0.1:11434' : 'cli://local')
+      $('llm-chat-model').value = config.chat_model || (provider === 'codex_cli' ? 'default' : provider === 'claude_cli' ? 'sonnet' : provider === 'gemini_api' ? 'gemini-2.5-flash' : 'qwen3:8b')
       $('llm-vision-model').value = config.vision_model || $('llm-chat-model').value
       $('llm-cli-command').value = config.cli_command || ''
       $('llm-api-key').value = ''
       $('llm-api-key').placeholder = config.api_key_set ? 'Saved key is set · leave blank to keep it' : 'Leave blank if your local server needs no key'
-      $('provider-help').textContent = 'Ollama will download and manage the chat, vision, and embedding models during setup.'
+      $('provider-help').textContent = provider === 'gemini_api'
+        ? 'Use a Gemini API key. Gemini CLI login is not used. Embeddings remain local.'
+        : provider === 'openai_compatible'
+        ? 'Clippy sends chat and vision requests to this API. Embeddings remain local.'
+        : subscription
+        ? 'Clippy uses the official authenticated CLI in read-only mode. Embeddings remain local.'
+        : 'Ollama will download and manage the chat, vision, and embedding models during setup.'
     }
 
     function selectedLLMConfig() {
@@ -845,13 +866,21 @@
     }
 
     $('llm-provider').addEventListener('change', async () => {
-      // The select currently contains only Ollama; keep this handler so adding
-      // another local runtime later has one clear configuration entry point.
-      $('llm-provider').value = 'ollama'
-      $('llm-base-url').value = 'http://127.0.0.1:11434'
-      $('llm-chat-model').value = 'qwen3:8b'
-      $('llm-vision-model').value = 'qwen3-vl:4b'
-      $('provider-help').textContent = 'Ollama will download and manage the chat, vision, and embedding models during setup.'
+      const provider = $('llm-provider').value
+      const apiProvider = provider === 'openai_compatible' || provider === 'gemini_api'
+      const subscription = provider.endsWith('_cli')
+      $('llm-base-url').value = provider === 'gemini_api' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : provider === 'openai_compatible' ? 'http://127.0.0.1:1234/v1' : subscription ? 'cli://local' : 'http://127.0.0.1:11434'
+      $('llm-chat-model').value = provider === 'codex_cli' ? 'default' : provider === 'claude_cli' ? 'sonnet' : provider === 'gemini_api' ? 'gemini-2.5-flash' : provider === 'openai_compatible' ? 'local-chat' : 'qwen3:8b'
+      $('llm-vision-model').value = provider === 'codex_cli' ? 'default' : provider === 'claude_cli' ? 'sonnet' : provider === 'gemini_api' ? 'gemini-2.5-flash' : provider === 'openai_compatible' ? 'local-vision' : 'qwen3-vl:4b'
+      $('llm-cli-command').value = provider === 'codex_cli' ? 'codex' : provider === 'claude_cli' ? 'claude' : ''
+      $('provider-details').hidden = provider === 'ollama'
+      $('llm-base-url-field').hidden = !apiProvider
+      $('llm-api-key-field').hidden = !apiProvider
+      $('llm-cli-command-field').hidden = !subscription
+      $('llm-connect-btn').hidden = !subscription
+      $('provider-help').textContent = subscription
+        ? 'Connect the official CLI account, then return here. Embeddings remain local.'
+        : apiProvider ? 'Chat and vision use this API. Embeddings remain local.' : 'Ollama manages every model locally.'
       try {
         await saveSelectedLLMConfig()
         await loadHardware()
@@ -900,8 +929,9 @@
     })
 
     function configureSetupMode(mode) {
-      const external = mode !== 'ollama'
-      activeSteps = new Set(external ? ['python', 'packages', 'warmup'] : STEPS)
+      // Ollama remains visible for external providers because it owns the
+      // loopback-only embedding model used by memory retrieval.
+      activeSteps = new Set(STEPS)
       completedSteps.clear()
       for (const key of STEPS) {
         const el = getStepEl(key)

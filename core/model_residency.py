@@ -20,6 +20,8 @@ from typing import Any, Literal
 
 import psutil
 
+from core.llm_config import get_llm_config, is_external_provider, model_for
+
 try:
     from core.paths import get_data_dir
 except ImportError:
@@ -117,8 +119,10 @@ def keep_alive_for(model: str) -> str | int:
 
 
 def _ollama_post(path: str, body: dict, timeout: float = 90) -> None:
+    config = get_llm_config()
+    base_url = _OLLAMA if is_external_provider(config) else config["base_url"]
     req = urllib.request.Request(
-        f"{_OLLAMA}{path}",
+        f"{base_url.rstrip('/')}{path}",
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"},
     )
@@ -126,7 +130,9 @@ def _ollama_post(path: str, body: dict, timeout: float = 90) -> None:
         resp.read()
 
 
-def _warm(model: str, keep_alive: str | int = KEEP_ALIVE_PINNED, timeout: float = 90) -> None:
+def _warm(
+    model: str, keep_alive: str | int = KEEP_ALIVE_PINNED, timeout: float = 90
+) -> None:
     print(f"[residency] warm {model} (keep_alive={keep_alive!r})")
     if model == EMBED_MODEL:
         _ollama_post(
@@ -138,18 +144,26 @@ def _warm(model: str, keep_alive: str | int = KEEP_ALIVE_PINNED, timeout: float 
         # Non-empty prompt: empty prompt hangs on some Ollama builds
         _ollama_post(
             "/api/generate",
-            {"model": model, "prompt": "ping", "stream": False, "keep_alive": keep_alive},
+            {
+                "model": model,
+                "prompt": "ping",
+                "stream": False,
+                "keep_alive": keep_alive,
+            },
             timeout=timeout,
         )
 
 
 def _unload_vision() -> None:
-    print(f"[residency] unload {VL_MODEL}")
+    if is_external_provider():
+        return
+    vision_model = model_for("vision", VL_MODEL)
+    print(f"[residency] unload {vision_model}")
     try:
         _ollama_post(
             "/api/generate",
             {
-                "model": VL_MODEL,
+                "model": vision_model,
                 "prompt": "ping",
                 "stream": False,
                 "keep_alive": KEEP_ALIVE_UNLOAD,
@@ -175,8 +189,10 @@ def _pressure_loop() -> None:
             free = _available()
             if free >= _FREE_FLOOR:
                 continue
-            print(f"[residency] pressure free~{free / _GB:.1f}GB < floor "
-                  f"{_FREE_FLOOR / _GB:.1f}GB - demoting vision to on_demand")
+            print(
+                f"[residency] pressure free~{free / _GB:.1f}GB < floor "
+                f"{_FREE_FLOOR / _GB:.1f}GB - demoting vision to on_demand"
+            )
             _unload_vision()
             _persist("on_demand", reason="ram_pressure")
             return
@@ -187,7 +203,9 @@ def _start_monitor() -> None:
     _stop_monitor()
     _monitor_stop.clear()
     _monitor_thread = threading.Thread(
-        target=_pressure_loop, daemon=True, name="residency-pressure",
+        target=_pressure_loop,
+        daemon=True,
+        name="residency-pressure",
     )
     _monitor_thread.start()
 
@@ -210,7 +228,9 @@ def warm_for_startup() -> dict:
             encoding="utf-8",
         )
 
-        reason = "startup_text_only"
+        config = get_llm_config()
+        external = is_external_provider(config)
+        reason = "startup_embed_only" if external else "startup_text_only"
         err = None
         try:
             try:
@@ -218,20 +238,22 @@ def warm_for_startup() -> dict:
             except Exception as e:
                 print(f"[residency] embed warm failed (continuing): {e}")
 
-            try:
-                _warm(TEXT_MODEL, timeout=90)
-            except Exception as e:
-                print(f"[residency] text warm failed: {e}")
-                reason = "text_warmup_failed"
-                err = str(e)
+            if not external:
+                try:
+                    _warm(model_for("chat", TEXT_MODEL), timeout=90)
+                except Exception as e:
+                    print(f"[residency] text warm failed: {e}")
+                    reason = "text_warmup_failed"
+                    err = str(e)
 
-            try:
-                _unload_vision()
-            except Exception as e:
-                print(f"[residency] vision unload skipped: {e}")
+                try:
+                    _unload_vision()
+                except Exception as e:
+                    print(f"[residency] vision unload skipped: {e}")
 
             payload = dict(
                 reason=reason,
+                provider=config["provider"],
                 available_before_mb=_mb(before),
             )
             if err:
@@ -250,39 +272,69 @@ def warm_for_startup() -> dict:
 def on_capture_start() -> dict:
     """Screen capture turned on: pin vision if RAM allows, else on-demand."""
     with _lock:
+        config = get_llm_config()
+        if is_external_provider(config):
+            _stop_monitor()
+            return _persist(
+                "idle",
+                reason="external_vision_provider",
+                provider=config["provider"],
+            )
+
         free = _available()
         print(f"[residency] capture start  free~{free / _GB:.1f}GB")
 
         if _can_pin_vision(free):
             try:
-                _warm(VL_MODEL, KEEP_ALIVE_PINNED)
+                _warm(model_for("vision", VL_MODEL), KEEP_ALIVE_PINNED)
             except Exception as e:
                 print(f"[residency] vision pin failed - on_demand: {e}")
                 _stop_monitor()
-                return _persist("on_demand", reason="vl_warm_failed", error=str(e),
-                                available_before_mb=_mb(free))
+                return _persist(
+                    "on_demand",
+                    reason="vl_warm_failed",
+                    error=str(e),
+                    available_before_mb=_mb(free),
+                )
 
             after = _available()
             if after < _FREE_FLOOR:
                 print(f"[residency] after VL pin free~{after / _GB:.1f}GB - on_demand")
                 _unload_vision()
                 _stop_monitor()
-                return _persist("on_demand", reason="post_pin_below_floor",
-                                available_before_mb=_mb(free), available_after_mb=_mb(after))
+                return _persist(
+                    "on_demand",
+                    reason="post_pin_below_floor",
+                    available_before_mb=_mb(free),
+                    available_after_mb=_mb(after),
+                )
 
-            result = _persist("pinned", reason="capture_pin",
-                              available_before_mb=_mb(free), available_after_mb=_mb(after))
+            result = _persist(
+                "pinned",
+                reason="capture_pin",
+                available_before_mb=_mb(free),
+                available_after_mb=_mb(after),
+            )
             _start_monitor()
             return result
 
         _stop_monitor()
-        return _persist("on_demand", reason="insufficient_ram_to_pin",
-                        available_before_mb=_mb(free))
+        return _persist(
+            "on_demand", reason="insufficient_ram_to_pin", available_before_mb=_mb(free)
+        )
 
 
 def on_capture_stop() -> dict:
     """Screen capture turned off: unload vision and return to idle."""
     with _lock:
+        config = get_llm_config()
+        if is_external_provider(config):
+            _stop_monitor()
+            return _persist(
+                "idle",
+                reason="external_vision_provider",
+                provider=config["provider"],
+            )
         print("[residency] capture stop - unloading vision")
         _stop_monitor()
         _unload_vision()

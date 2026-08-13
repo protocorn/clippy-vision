@@ -1,14 +1,11 @@
 import json
-import os
-import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import torch
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "core"))
-from llm_gateway import Priority, gateway
+from core.llm_gateway import Priority, gateway
 
 
 @dataclass
