@@ -302,7 +302,7 @@ def evaluate(model, loader, device, threshold: float = SECONDARY_THRESHOLD):
                         sec_fired += 1
                 sec_possible += 1
 
-    acc    = sum(p == l for p, l in zip(all_preds, all_labels)) / len(all_labels)
+    acc    = sum(pred == label for pred, label in zip(all_preds, all_labels)) / len(all_labels)
     report = classification_report(
         all_labels, all_preds,
         target_names=CATEGORIES,

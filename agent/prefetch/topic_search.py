@@ -1,20 +1,20 @@
 import json
 import math
 import re
-import sqlite3
+import sys
 import time
 from pathlib import Path
+from typing import Optional
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from agent.helpers.keywords import content_keywords, keywords_from_query
-from core.llm_gateway import Priority, gateway
-from core.paths import get_db_path
-
-_DB_PATH = get_db_path()
-_conn = sqlite3.connect(str(_DB_PATH), check_same_thread=False, timeout=30)
-_conn.execute("PRAGMA journal_mode=WAL")
+from core.local_embeddings import embed_text
+from core.rag import search_event_rag
+from core.storage import conn as _conn
 
 MAX_RESULTS = 5
-EMBED_MODEL = "nomic-embed-text"
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     dot = sum(x*y for x, y in zip(a, b))
@@ -48,7 +48,7 @@ def topic_search(query: str, q_vec: list | None, temporal_range=None) -> str:
 
     keywords = keywords_from_query(query)
     if q_vec is None:
-        q_vec = gateway.embed(query, priority=Priority.INTERACTIVE, embed_model=EMBED_MODEL)
+        q_vec = embed_text(query)
 
     date_filter_query = date_filter(temporal_range)
     sql = f"""
@@ -64,7 +64,20 @@ def topic_search(query: str, q_vec: list | None, temporal_range=None) -> str:
 
     
     if not rows:
-        return "No sessions found"
+        event_result = search_event_rag(
+            query,
+            start_ts=temporal_range.start_ts if temporal_range else None,
+            end_ts=temporal_range.end_ts if temporal_range else None,
+            limit=8,
+        )
+        if event_result:
+            matches, total = event_result
+            if matches:
+                return (
+                    f"[event-level activity fallback — showing {len(matches)} of {total} matches]\n"
+                    + "\n\n---\n\n".join(matches)
+                )
+        return "No activity events or session summaries found."
 
     results = []
     score = 0.0

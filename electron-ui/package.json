@@ -49,6 +49,7 @@
           "core/**/*",
           "classifier/**/*",
           "models/router_classifier/best/**/*",
+          "models/embeddings/all-MiniLM-L6-v2/**/*",
           "!**/__pycache__/**",
           "!**/*.pyc",
           "!**/*.pyo",
@@ -100,5 +101,8 @@
   "dependencies": {
     "dompurify": "^3.4.13",
     "marked": "^18.0.9"
+  },
+  "overrides": {
+    "js-yaml": "^4.3.1"
   }
 }

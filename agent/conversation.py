@@ -5,15 +5,16 @@ import time
 import uuid
 
 from core.llm_gateway import Priority, gateway
+from core.local_embeddings import embed_text
 from core.storage import conn
 
-EMBED_MODEL        = "nomic-embed-text"
-SUMMARY_MIN_TURNS  = 5    # build first summary after this many turns
-SUMMARY_EVERY_N    = 5    # build a new summary every N turns thereafter
-RECENT_TURNS_LIMIT = 8    # raw turns always injected (4 full exchanges)
-RECENT_SUMMARIES   = 2    # summaries always injected (most recent first)
-DEEP_SUMMARIES     = 2    # additional summaries via semantic retrieval
-SUMMARY_MIN_SIM    = 0.35 # floor for deep summary retrieval
+SUMMARY_MIN_TURNS  = 5  # build first summary after this many turns
+SUMMARY_EVERY_N    = 5  # build a new summary every N turns thereafter
+RECENT_TURNS_LIMIT = 8  # raw turns always injected (4 full exchanges)
+RECENT_SUMMARIES   = 2  # summaries always injected (most recent first)
+DEEP_SUMMARIES     = 2  # additional summaries via semantic retrieval
+SUMMARY_MIN_SIM    = 0.35  # floor for deep summary retrieval
+
 
 # Conversation search ranking
 SEARCH_HALF_LIFE_DAYS = 14.0  # recency halves every 2 weeks
@@ -23,10 +24,13 @@ SEARCH_MIN_SIM        = 0.22  # drop chats below this max turn similarity
 SEARCH_DEFAULT_LIMIT  = 20
 
 
+
+
+
+
 # ─────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────
-
 def _cosine_sim(a: list, b: list) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     na  = math.sqrt(sum(x * x for x in a))
@@ -37,7 +41,7 @@ def _cosine_sim(a: list, b: list) -> float:
 def _embed_and_update(chat_id: str, text: str) -> None:
     """Background thread: embed text and write vector_embedding for a chat row."""
     try:
-        vec = gateway.embed(text, embed_model=EMBED_MODEL, priority=Priority.BACKGROUND)
+        vec = embed_text(text)
         conn.execute(
             "UPDATE conversations SET vector_embedding = ? WHERE chat_id = ?",
             (json.dumps(vec), chat_id)
@@ -47,10 +51,13 @@ def _embed_and_update(chat_id: str, text: str) -> None:
         pass
 
 
+
+
+
+
 # ─────────────────────────────────────────────────────────────
 # Write
 # ─────────────────────────────────────────────────────────────
-
 def save_chat(conversation_id: str, role: str, content: str) -> str:
     """Persist a turn and fire a background embed."""
     chat_id = str(uuid.uuid4())
@@ -73,10 +80,13 @@ def save_chat(conversation_id: str, role: str, content: str) -> str:
     return "Success"
 
 
+
+
+
+
 # ─────────────────────────────────────────────────────────────
 # Read — Tier 1 (always injected, fixed cost)
 # ─────────────────────────────────────────────────────────────
-
 def get_recent_chats(conversation_id: str, limit: int = RECENT_TURNS_LIMIT) -> list[dict]:
     """Last N raw turns, oldest-first, excluding the most recent user message
     (which is already passed explicitly as the final user turn in the messages list)."""
@@ -86,6 +96,7 @@ def get_recent_chats(conversation_id: str, limit: int = RECENT_TURNS_LIMIT) -> l
            ORDER BY timestamp DESC LIMIT ?""",
         (conversation_id, limit + 1)  # fetch one extra to drop the current user message
     ).fetchall()
+
     # rows[0] is the most recent — if it's the user message just saved, drop it
     if rows and rows[0][0] == "user":
         rows = rows[1:]
@@ -160,7 +171,7 @@ def search_conversations(query: str, limit: int = 20) -> list[dict]:
     now = time.time()
 
     try:
-        q_vec = gateway.embed(q, embed_model=EMBED_MODEL, priority=Priority.INTERACTIVE)
+        q_vec = embed_text(q)
     except Exception:
         q_vec = None
 
@@ -184,6 +195,7 @@ def search_conversations(query: str, limit: int = 20) -> list[dict]:
             if sim > best_sim[cid]:
                 best_sim[cid] = sim
     else:
+
         # Embedder unavailable — fall back to keyword-only ranking.
         rows = conn.execute(
             """SELECT conversation_id, content FROM conversations
@@ -194,6 +206,7 @@ def search_conversations(query: str, limit: int = 20) -> list[dict]:
                 continue
             if q_lower in content.lower():
                 best_sim[cid] = max(best_sim[cid], 0.55)
+
 
     # Title keyword fallback for chats that never got embeddings yet
     for cid, info in meta.items():
@@ -261,14 +274,18 @@ def get_recent_summaries(conversation_id: str, limit: int = RECENT_SUMMARIES) ->
            ORDER BY timestamp DESC LIMIT ?""",
         (conversation_id, limit)
     ).fetchall()
+
     # Reverse so they read chronologically in the prompt
     return [r[0] for r in reversed(rows)]
+
+
+
+
 
 
 # ─────────────────────────────────────────────────────────────
 # Read — Tier 2 (semantic retrieval, only when history is deep)
 # ─────────────────────────────────────────────────────────────
-
 def get_relevant_summaries(
     conversation_id: str,
     query_vector: list[float],
@@ -285,9 +302,11 @@ def get_relevant_summaries(
         (conversation_id,)
     ).fetchall()
 
+
     # Not enough summaries to go beyond the recent window — skip
     if len(all_rows) <= exclude_last_n:
         return []
+
 
     # Only score summaries outside the recent window
     candidates = all_rows[:-exclude_last_n] if exclude_last_n > 0 else all_rows
@@ -302,10 +321,13 @@ def get_relevant_summaries(
     return [c for _, c in scored[:top_k]]
 
 
+
+
+
+
 # ─────────────────────────────────────────────────────────────
 # Summarization
 # ─────────────────────────────────────────────────────────────
-
 SUMMARY_SYSTEM_PROMPT = (
     "You are summarizing a conversation between a user and their personal AI assistant.\n"
     "Write a concise 2-4 sentence summary that preserves: the main topics discussed, "
@@ -343,6 +365,7 @@ def maybe_summarize(conversation_id: str) -> None:
         (conversation_id,)
     ).fetchone()[0]
 
+
     # Gate: only fire at exactly 5, 10, 15, ...
     if count < SUMMARY_MIN_TURNS or count % SUMMARY_EVERY_N != 0:
         return
@@ -364,6 +387,7 @@ def maybe_summarize(conversation_id: str) -> None:
         (chat_id, conversation_id, time.time(), "system", summary_text)
     )
     conn.commit()
+
 
     # Embed the summary so get_relevant_summaries can retrieve it
     _embed_and_update(chat_id, summary_text)

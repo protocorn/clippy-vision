@@ -71,6 +71,6 @@ def delete_note_tool(note_text: str) -> str:
     Use when the user says 'forget', 'delete', 'remove', or 'don't remember that'.
     Matches by substring — pass the key phrase or exact text from the note."""
     return delete_note(note_text)
-    
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

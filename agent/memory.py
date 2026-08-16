@@ -1,27 +1,30 @@
+import json
 import math
 import time
 from typing import Optional
 
 from core.distil import save_note_to_memory
-from core.llm_gateway import Priority, gateway
+from core.local_embeddings import embed_text
 from core.memory_store import (
     get_active_facts,
     get_all_clusters,
     get_identity,
     get_identity_for_semantic_profile,
     get_introduction,
+    get_profile,
     save_identity_field,
     update_field_embedding,
 )
+from core.storage import conn
 
-EMBED_MODEL      = "nomic-embed-text"
-MEMORY_TOP_K     = 8     # max facts to inject per turn
+MEMORY_TOP_K     = 8  # max facts to inject per turn
 MEMORY_MIN_SIM   = 0.55  # floor — below this a fact is unrelated (was 0.30; raised to reduce noise)
 MAX_MEMORY_CHARS = 2000  # token budget guard
 
+
 # Profile semantic slicing
 _PROFILE_ALWAYS_ON = {"name", "location"}  # injected regardless of query
-_PROFILE_TOP_K     = 5     # max additional fields after always-on
+_PROFILE_TOP_K     = 5  # max additional fields after always-on
 _PROFILE_MIN_SIM   = 0.25  # lower than fact threshold — fields are shorter and more general
 
 
@@ -35,15 +38,7 @@ def _cosine_sim(a: list, b: list) -> float:
 def semantic_memory_context_from_vec(q_vec: list) -> str:
     """Same as semantic_memory_context but accepts a pre-computed query vector.
     Use this when the caller has already embedded the query to avoid a second embed call."""
-    import json
-    import os
-    import sys
-    _CORE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core")
-    if _CORE_DIR not in sys.path:
-        sys.path.insert(0, _CORE_DIR)
-    from storage import conn as _conn
-
-    rows = _conn.execute("""
+    rows = conn.execute("""
         SELECT f.fact_id, f.text, f.vector_embedding, f.cluster_id,
                c.label, c.description
         FROM memory_facts f
@@ -104,34 +99,37 @@ def get_autobiographical_context(q_vec: list | None = None) -> str:
 
     When q_vec is None (no embedding available), all fields are returned as before.
     """
-    intro = get_introduction()
+    profile = get_profile()
+    intro = profile["introduction"]
+    user_name = profile["name"]
+
 
     # ── Fallback: no query vector → return everything ─────────────────────────
     if q_vec is None:
-        identity = get_identity()
-        if not identity and not intro:
+        identity = profile["identity"]
+        if not identity and not intro and not user_name:
             return "No profile data yet. Ask the user to share more about themselves."
         lines = []
+        if user_name:
+            lines.append(f"name: {user_name}")
         if intro:
             lines.append(intro)
         for field, value in identity.items():
             lines.append(f"{field}: {value}")
         return "\n".join(lines)
 
+
     # ── Semantic slicing path ─────────────────────────────────────────────────
     fields = get_identity_for_semantic_profile()
-    if not fields and not intro:
+    if not fields and not intro and not user_name:
         return "No profile data yet. Ask the user to share more about themselves."
+
 
     # Re-embed any dirty fields (newly written) and cache immediately
     for f in fields:
         if f["embedding"] is None:
             try:
-                emb = gateway.embed(
-                    f"{f['field']}: {f['display']}",
-                    embed_model=EMBED_MODEL,
-                    priority=Priority.INTERACTIVE,
-                )
+                emb = embed_text(f"{f['field']}: {f['display']}")
                 f["embedding"] = emb
                 update_field_embedding(f["field"], emb)
             except Exception:
@@ -152,6 +150,8 @@ def get_autobiographical_context(q_vec: list | None = None) -> str:
     top_fields = [f for _, f in scoreable[:_PROFILE_TOP_K]]
 
     lines = []
+    if user_name:
+        lines.append(f"name: {user_name}")
     if intro:
         lines.append(intro)
     for f in always_on:
@@ -191,16 +191,8 @@ def save_note(note: str) -> str:
 def delete_note(note_text: str) -> str:
     """Suppress a memory fact whose text matches note_text (case-insensitive substring).
     Marks the fact as valid_to=now so it no longer appears in retrieval."""
-    import json
-    import os
-    import sys
-    _CORE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core")
-    if _CORE_DIR not in sys.path:
-        sys.path.insert(0, _CORE_DIR)
-    from storage import conn as _conn
-
     needle = note_text.strip().lower()
-    rows = _conn.execute(
+    rows = conn.execute(
         "SELECT fact_id, text FROM memory_facts WHERE valid_to IS NULL"
     ).fetchall()
 
@@ -214,9 +206,9 @@ def delete_note(note_text: str) -> str:
 
     now = time.time()
     for fact_id in matched:
-        _conn.execute(
+        conn.execute(
             "UPDATE memory_facts SET valid_to = ? WHERE fact_id = ?",
             (now, fact_id)
         )
-    _conn.commit()
+    conn.commit()
     return f"Deleted {len(matched)} memory fact(s) matching '{note_text}'."

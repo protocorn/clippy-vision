@@ -1,4 +1,5 @@
 import json
+import re
 import threading
 import time
 import uuid
@@ -21,26 +22,37 @@ from agent.router import classify_query, should_prefetch
 from agent.tools import TOOL_SCHEMAS, TOOLS, WRITE_TOOL_SCHEMAS, WRITE_TOOLS
 from core.distil import ingest_conversation
 from core.llm_gateway import Priority, gateway
+from core.local_embeddings import embed_text
 from core.memory_store import get_unresolved_conflicts
 from core.storage import get_user_name
 
 MODEL     = "qwen3:8b"
 MAX_STEPS = 10
-EMBED_MODEL = "nomic-embed-text"
+
+
 
 # Soft cap on user turns. Prefetch/history/profile already consume most of the
 # context window; ~4k chars (~1k tokens) leaves room for unknown retrieval size.
 USER_MESSAGE_MAX_CHARS = 4000
 
+
 # Routes that have real prefetch implementations
 _PREFETCHABLE = {"time_anchored", "topic_search", "specific_recall", "memory_query"}
+MAX_PREFETCH_CONTEXT_CHARS = 8000
+_SHORT_FOLLOW_UP_RE = re.compile(
+    r"^\s*(?:nothing else|anything else|what else|and|more|go on|continue|that one|"
+    r"what about that|what about it)\s*[?.!]*\s*$",
+    re.IGNORECASE,
+)
 
 _TOOL_POLICY_PREFETCH = """Tool Policy:
-- <prefetch_context> above contains the retrieved data for this query. Read it and answer from it.
-- The data in <prefetch_context> is already verified to exist — do not claim it is unavailable or
-  outside any retention window. If it is there, answer it.
-- You only have access to save_identity, save_note, and delete_note.
-  Use them immediately if the user asks you to remember or forget something."""
+- <prefetch_context> above is a concise starting point for this query. Read it first, but treat it
+  as evidence rather than a complete answer.
+- Search tools remain available. Use search_events or search_sessions when the context is truncated,
+  missing an exact artifact, ambiguous, or when the user asks for more detail. Do not repeat a search
+  that the context already answers.
+- Use save_identity, save_note, and delete_note immediately when the user asks you to remember or
+  forget something."""
 
 _TOOL_POLICY_FALLBACK = """Tool Policy:
 - No context was pre-fetched. Use tools to retrieve data before answering.
@@ -77,6 +89,10 @@ Current date and time: {datetime}
 
 Core Rules:
 - <user_profile> is always present. Use it for identity and preference questions without calling any tools.
+- Keep explicit personal facts separate from observed activity. App usage can support "what was I doing" but must not be presented as a fact about the user's identity.
+- A zero explicit-fact count does not mean there is no memory. If activity, screenshots, conversations, or session counts are present, describe those separately and accurately.
+- For an exact screenshot question, describe only the exact screenshot evidence. Never blend nearby before/after activity into what was visible in that frame.
+- If exact screenshot evidence includes screenshot_source, the image is locally available. Do not claim the image content or file is unavailable.
 - Do not invent activity history, timestamps, files, websites, apps, or user intentions.
 - If evidence is weak, partial, or missing, say so plainly.
 - Address the user naturally. Use their name occasionally, not repeatedly.
@@ -89,6 +105,7 @@ Core Rules:
 
 Response Style:
 - Be concise by default. Use 1-3 sentences for simple answers.
+- Avoid repetitive greetings, generic follow-up offers, and decorative emoji.
 - Give detailed answers when the user asks for analysis, planning, comparison, or debugging.
 - Do not expose raw SQL, tiers, internal tool names, or implementation details unless the user asks."""
 
@@ -99,7 +116,7 @@ def _build_combined_query_context(conversation_id: str, user_message: str) -> st
     recent_turns = get_recent_chats(conversation_id, limit=3)
     if not recent_turns:
         return user_message
-    
+
     prior = " | ".join(
         f"{'User' if t['role'] == 'user' else 'Clippy'}: {t['content']}"
         for t in recent_turns
@@ -115,6 +132,7 @@ def _build_conversation_history(conversation_id: str, q_vec: list|None=None) -> 
     parts = []
 
 
+
     # Tier 2 — semantically relevant older summaries (only when history is deep)
     if q_vec:
         try:
@@ -124,10 +142,12 @@ def _build_conversation_history(conversation_id: str, q_vec: list|None=None) -> 
         except Exception:
             pass
 
+
     # Tier 1a — recent rolling summaries
     recent_summaries = get_recent_summaries(conversation_id)
     if recent_summaries:
         parts.append("[Recent summary]\n" + "\n\n".join(recent_summaries))
+
 
     # Tier 1b — last N raw turns
     recent_turns = get_recent_chats(conversation_id)
@@ -186,14 +206,14 @@ def _build_system_prompt(
 
 def _fetch_single_route(
     route: str,
-    temporal_range,          # pre-resolved, may be None
+    temporal_range,  # pre-resolved, may be None
     query: str,
     combined: str,
     q_vec: list,
 ) -> str:
     """Execute one prefetch route and return its string result."""
     if route == "memory_query":
-        return memory_query(q_vec=q_vec)
+        return memory_query(query=query, q_vec=q_vec)
 
     if route == "topic_search":
         return topic_search(combined, q_vec=q_vec, temporal_range=temporal_range)
@@ -218,10 +238,14 @@ def _run_prefetch(decision, query: str, combined: str, q_vec: list) -> str:
     - If time_anchored is SECONDARY → pass temporal_range as a filter to primary;
       do NOT run a separate time_anchor_fetch (the range narrows, not supplements).
     """
+
     # ── Resolve temporal range once ───────────────────────────────────────────
     all_routes = {decision.primary} | set(decision.secondary)
     needs_time = "time_anchored" in all_routes
     temporal_range = resolve_temporal_range(combined) if needs_time else None
+
+
+
 
     # ── Build the list of routes to run ───────────────────────────────────────
     # time_anchored as secondary = filter only; don't run it as a standalone fetch
@@ -234,12 +258,16 @@ def _run_prefetch(decision, query: str, combined: str, q_vec: list) -> str:
     routes_to_run = primary_routes + secondary_routes
     print(f"[prefetch] routes: {routes_to_run}")
 
+
     # ── Single route — no thread overhead ────────────────────────────────────
     if len(routes_to_run) == 1:
-        return _fetch_single_route(routes_to_run[0], temporal_range, query, combined, q_vec)
+        return _limit_prefetch_context(
+            _fetch_single_route(routes_to_run[0], temporal_range, query, combined, q_vec)
+        )
 
+
+    results: dict[str, str] = {}
     # ── Multiple routes — run in parallel ────────────────────────────────────
-    parts: list[str] = []
     with ThreadPoolExecutor(max_workers=len(routes_to_run)) as ex:
         future_to_route = {
             ex.submit(_fetch_single_route, r, temporal_range, query, combined, q_vec): r
@@ -249,10 +277,25 @@ def _run_prefetch(decision, query: str, combined: str, q_vec: list) -> str:
             route  = future_to_route[future]
             result = future.result()
             print(f"[prefetch]   {route} → {len(result)} chars")
-            if result:
-                parts.append(result)
+            results[route] = result
 
-    return "\n\n---\n\n".join(parts)
+
+
+    combined_context = "\n\n---\n\n".join(
+        results[route] for route in routes_to_run if results.get(route)
+    )
+    return _limit_prefetch_context(combined_context)
+
+
+def _limit_prefetch_context(context: str) -> str:
+    """Bound retrieval context so one broad query cannot crowd out reasoning."""
+    context = (context or "").strip()
+    if len(context) <= MAX_PREFETCH_CONTEXT_CHARS:
+        return context
+    return (
+        context[:MAX_PREFETCH_CONTEXT_CHARS].rstrip()
+        + "\n\n[Retrieved context truncated for space. Use the search tools for missing detail.]"
+    )
 
 
 def _stream_ollama(messages: list[dict], prefetch_active: bool = False):
@@ -263,10 +306,45 @@ def _stream_ollama(messages: list[dict], prefetch_active: bool = False):
       ("content", str_delta)
       ("final", message_dict)  — always last
     """
-    schemas = WRITE_TOOL_SCHEMAS if prefetch_active else TOOL_SCHEMAS
+
+
+    schemas = TOOL_SCHEMAS
     thinking = ""
     content = ""
-    tool_calls = None
+    tool_calls = []
+
+    def merge_tool_call_deltas(incoming: list[dict]) -> None:
+        """Assemble OpenAI-compatible streamed tool-call fragments.
+
+        Ollama normally emits a complete tool call near the end of its stream,
+        but assembling fragments here also tolerates fields split across chunks.
+        """
+        for call in incoming:
+            index = call.get("index", len(tool_calls))
+            try:
+                index = int(index)
+            except (TypeError, ValueError):
+                index = len(tool_calls)
+            while len(tool_calls) <= index:
+                tool_calls.append({
+                    "id": None,
+                    "type": "function",
+                    "function": {"name": "", "arguments": ""},
+                })
+            target = tool_calls[index]
+            if call.get("id"):
+                target["id"] = call["id"]
+            function = call.get("function") or {}
+            if function.get("name"):
+                target["function"]["name"] = function["name"]
+            arguments = function.get("arguments", "")
+            if isinstance(arguments, dict):
+                target["function"]["arguments"] = arguments
+            elif arguments:
+                current = target["function"].get("arguments", "")
+                if isinstance(current, dict):
+                    current = json.dumps(current)
+                target["function"]["arguments"] = f"{current}{arguments}"
 
     for chunk in gateway.chat_stream(
         messages, MODEL,
@@ -275,6 +353,10 @@ def _stream_ollama(messages: list[dict], prefetch_active: bool = False):
         timeout=180,
         think=True,
     ):
+        gateway_status = chunk.get("_gateway_status")
+        if gateway_status:
+            yield ("status", gateway_status)
+            continue
         msg = chunk.get("message") or {}
         t_delta = msg.get("thinking") or ""
         c_delta = msg.get("content") or ""
@@ -285,15 +367,33 @@ def _stream_ollama(messages: list[dict], prefetch_active: bool = False):
             content += c_delta
             yield ("content", c_delta)
         if msg.get("tool_calls"):
-            tool_calls = msg["tool_calls"]
+            merge_tool_call_deltas(msg["tool_calls"])
+
+    normalized_tool_calls = []
+    for call in tool_calls:
+        function = call.get("function") or {}
+        arguments = function.get("arguments", {})
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments) if arguments.strip() else {}
+            except json.JSONDecodeError:
+                arguments = {}
+        normalized_tool_calls.append({
+            "id": call.get("id"),
+            "type": call.get("type", "function"),
+            "function": {
+                "name": function.get("name", ""),
+                "arguments": arguments,
+            },
+        })
 
     raw_msg = {
         "role": "assistant",
         "content": content,
         "thinking": thinking,
     }
-    if tool_calls:
-        raw_msg["tool_calls"] = tool_calls
+    if normalized_tool_calls:
+        raw_msg["tool_calls"] = normalized_tool_calls
     yield ("final", raw_msg)
 
 
@@ -322,17 +422,19 @@ def _prepare_turn(user_message: str, conversation_id: str):
     combined = _build_combined_query_context(conversation_id, user_message)
     q_vec: list | None = None
     try:
-        q_vec = gateway.embed(combined, embed_model=EMBED_MODEL, priority=Priority.INTERACTIVE)
+        q_vec = embed_text(combined)
     except Exception:
         pass
 
     prefetch_context = ""
     decision, confidence = classify_query(user_message)
+    if decision is None and _SHORT_FOLLOW_UP_RE.match(user_message):
+        decision, confidence = classify_query(combined)
 
     if decision:
         print(f"[router] {decision.primary} (conf={confidence:.2f}) secondary={decision.secondary}")
 
-    if decision and q_vec and should_prefetch(decision, confidence):
+    if decision and should_prefetch(decision, confidence):
         try:
             prefetch_context = _run_prefetch(decision, user_message, combined, q_vec)
             print(f"[prefetch] {decision.primary} → {len(prefetch_context)} chars")
@@ -340,7 +442,9 @@ def _prepare_turn(user_message: str, conversation_id: str):
             print(f"[prefetch] ERROR — {e}")
 
     prefetch_active = bool(prefetch_context)
-    active_tools = WRITE_TOOLS if prefetch_active else TOOLS
+
+
+    active_tools = TOOLS
 
     messages = [
         {"role": "system", "content": _build_system_prompt(
@@ -369,7 +473,7 @@ def _finalize_answer(user_message: str, conversation_id: str, thinking: str, ans
 
 def run_stream(user_message: str, conversation_id: str):
     """Yield SSE-ready event dicts while running the ReAct loop with streamed thinking."""
-    yield {"type": "status", "text": "Thinking"}
+    yield {"type": "status", "text": "Preparing response"}
     messages, active_tools, prefetch_active, user_message = _prepare_turn(user_message, conversation_id)
 
     for step in range(MAX_STEPS):
@@ -378,6 +482,7 @@ def run_stream(user_message: str, conversation_id: str):
         thinking = ""
         content = ""
         raw_msg = None
+
         # Buffer content until we know this step is the final answer (no tool calls).
         content_started = False
 
@@ -385,8 +490,11 @@ def run_stream(user_message: str, conversation_id: str):
             if kind == "thinking":
                 thinking += payload
                 yield {"type": "thinking", "delta": payload}
+            elif kind == "status":
+                yield {"type": "status", "text": payload}
             elif kind == "content":
                 content += payload
+
                 # Speculatively stream content; cleared if this turns out to be a tool step
                 content_started = True
                 yield {"type": "content", "delta": payload}
@@ -409,6 +517,7 @@ def run_stream(user_message: str, conversation_id: str):
             _finalize_answer(user_message, conversation_id, thinking, content)
             yield {"type": "done", "result": content}
             return
+
 
         # Tool step — drop any speculative answer text from the UI
         if content_started:

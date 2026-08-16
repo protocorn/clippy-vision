@@ -60,15 +60,19 @@ def _parse_json_safe(text: str) -> dict:
       3. Extract individual known fields via regex and rebuild a minimal dict.
     Raises ValueError only when all strategies fail.
     """
+
     # Strategy 1: clean parse
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
+
+
     # Strategy 2: close truncated object
     # Find the last well-formed top-level comma or the opening brace, then close.
     repaired = text.rstrip()
+
     # Strip any trailing partial token (open string, trailing comma)
     repaired = re.sub(r',\s*$', '', repaired)
     repaired = re.sub(r',\s*"[^"]*$', '', repaired)
@@ -78,6 +82,7 @@ def _parse_json_safe(text: str) -> dict:
         return json.loads(repaired)
     except json.JSONDecodeError:
         pass
+
 
     # Strategy 3: regex field extraction
     def _extract(key: str, default=None):
@@ -100,6 +105,7 @@ def _parse_json_safe(text: str) -> dict:
         "user_activity":    _extract("user_activity", ""),
         "suggested_action": _extract("suggested_action"),
     }
+
     # Accept if we got at least a verdict
     if result["verdict"] in ("interesting", "not_interesting"):
         return result
@@ -136,6 +142,8 @@ def classify_with_vision(event: dict, screenshot_paths: list) -> dict:
     )
 
     content = body["message"]["content"]
+
+
     # qwen3-vl with think=False routes structured output into "thinking" instead of
     # "content" — fall back to thinking field if content is empty.
     if isinstance(content, str) and not content.strip():

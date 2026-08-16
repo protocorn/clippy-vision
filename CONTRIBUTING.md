@@ -82,6 +82,10 @@ For Python-only work outside the app, you can also install deps with `pip instal
 
 See [QUICKSTART.md](QUICKSTART.md) for installer and troubleshooting details.
 
+### Lower-spec machines
+
+Current `main` uses accessibility text + OCR for capture and does not download a vision model in setup. Only the chat text model is required by default (`qwen3:8b`). If that is still heavy on your machine, set a smaller chat model in the setup wizard.
+
 ## Code Style
 
 - Follow PEP 8 for Python code

@@ -1,12 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Clippy Vision</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap"
+    rel="stylesheet" />
   <style>
     /* Copper Signal — muted warm sand on espresso */
     :root {
@@ -35,7 +38,11 @@
       --scrollbar-thumb-hover: rgba(168, 144, 108, 0.4);
     }
 
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
     /* Thin transparent scrollbars — Copper Signal */
     * {
@@ -85,8 +92,16 @@
       border-bottom: 1px solid var(--border);
     }
 
-    .view { display: none; flex-direction: column; flex: 1; min-height: 0; }
-    .view.active { display: flex; }
+    .view {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .view.active {
+      display: flex;
+    }
 
     /* ---- Update available banner ---- */
     .update-banner {
@@ -100,14 +115,29 @@
       color: var(--text);
       font-size: 13px;
     }
-    .update-banner[hidden] { display: none; }
-    .update-banner-actions { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+
+    .update-banner[hidden] {
+      display: none;
+    }
+
+    .update-banner-actions {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-shrink: 0;
+    }
+
     .update-banner-link {
       color: var(--accent);
       font-weight: 600;
       text-decoration: none;
     }
-    .update-banner-link:hover { color: var(--accent-hover); text-decoration: underline; }
+
+    .update-banner-link:hover {
+      color: var(--accent-hover);
+      text-decoration: underline;
+    }
+
     .update-banner-dismiss {
       background: none;
       border: none;
@@ -118,7 +148,30 @@
       line-height: 1;
       padding: 2px 4px;
     }
-    .update-banner-dismiss:hover { opacity: 1; }
+
+    .update-banner-dismiss:hover {
+      opacity: 1;
+    }
+
+    .update-banner-action {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .update-banner-action:hover {
+      background: var(--accent-hover);
+    }
+
+    .update-banner-action:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
 
     /* ---- Name setup view ---- */
     #name-view {
@@ -159,7 +212,9 @@
       outline: none;
     }
 
-    #name-input:focus { border-color: var(--accent); }
+    #name-input:focus {
+      border-color: var(--accent);
+    }
 
     #name-submit {
       padding: 10px 20px;
@@ -172,7 +227,9 @@
       font-size: 14px;
     }
 
-    #name-submit:hover { background: var(--accent-fill-hover); }
+    #name-submit:hover {
+      background: var(--accent-fill-hover);
+    }
 
     #name-error {
       color: var(--danger);
@@ -209,9 +266,14 @@
       min-height: 0;
     }
 
-    #chat-main.is-welcome .welcome-screen { display: flex; }
+    #chat-main.is-welcome .welcome-screen {
+      display: flex;
+    }
+
     #chat-main.is-welcome #messages,
-    #chat-main.is-welcome #input-row { display: none; }
+    #chat-main.is-welcome #input-row {
+      display: none;
+    }
 
     .welcome-brand {
       display: flex;
@@ -276,7 +338,9 @@
       padding: 2px 2px 0;
     }
 
-    #welcome-input::placeholder { color: var(--muted); }
+    #welcome-input::placeholder {
+      color: var(--muted);
+    }
 
     .welcome-composer-bar {
       display: flex;
@@ -295,9 +359,17 @@
       transition: opacity 0.15s ease, color 0.15s ease;
     }
 
-    .char-count.is-visible { opacity: 1; }
-    .char-count.is-warn { color: var(--accent-hover); }
-    .char-count.is-limit { color: var(--danger); }
+    .char-count.is-visible {
+      opacity: 1;
+    }
+
+    .char-count.is-warn {
+      color: var(--accent-hover);
+    }
+
+    .char-count.is-limit {
+      color: var(--danger);
+    }
 
     #welcome-send {
       padding: 8px 16px;
@@ -311,8 +383,14 @@
       cursor: pointer;
     }
 
-    #welcome-send:hover { background: var(--accent-fill-hover); }
-    #welcome-send:disabled { opacity: 0.5; cursor: default; }
+    #welcome-send:hover {
+      background: var(--accent-fill-hover);
+    }
+
+    #welcome-send:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
 
     /* ---- Conversation drawer ---- */
     #drawer-backdrop {
@@ -323,7 +401,9 @@
       z-index: 20;
     }
 
-    #drawer-backdrop.open { display: block; }
+    #drawer-backdrop.open {
+      display: block;
+    }
 
     #conv-drawer {
       position: absolute;
@@ -342,16 +422,24 @@
       flex-shrink: 0;
     }
 
-    #conv-drawer.open { transform: translateX(0); }
+    #conv-drawer.open {
+      transform: translateX(0);
+    }
 
     /* Wide: docked sidebar beside chat */
     @media (min-width: 800px) {
-      #drawer-toggle { display: none; }
+      #drawer-toggle {
+        display: none;
+      }
 
       #drawer-backdrop,
-      #drawer-backdrop.open { display: none !important; }
+      #drawer-backdrop.open {
+        display: none !important;
+      }
 
-      #drawer-close { display: none; }
+      #drawer-close {
+        display: none;
+      }
 
       #conv-drawer {
         position: relative;
@@ -401,7 +489,9 @@
       font-weight: 400;
     }
 
-    #conv-search:focus { border-color: var(--accent); }
+    #conv-search:focus {
+      border-color: var(--accent);
+    }
 
     .conv-search-hint {
       margin-top: 6px;
@@ -411,7 +501,9 @@
       color: var(--muted);
     }
 
-    .conv-search-hint:empty { display: none; }
+    .conv-search-hint:empty {
+      display: none;
+    }
 
     #drawer-close {
       background: transparent;
@@ -534,7 +626,7 @@
       margin-bottom: 4px;
     }
 
-    .conv-section + .conv-section {
+    .conv-section+.conv-section {
       margin-top: 6px;
     }
 
@@ -556,7 +648,9 @@
       font-family: inherit;
     }
 
-    .conv-section-label:hover { color: var(--text); }
+    .conv-section-label:hover {
+      color: var(--text);
+    }
 
     .conv-section-chevron {
       display: inline-block;
@@ -605,9 +699,15 @@
       font-weight: 500;
     }
 
-    .header-btn:hover { background: var(--accent-muted); }
+    .header-btn:hover {
+      background: var(--accent-muted);
+    }
 
-    .header-actions { display: flex; gap: 8px; align-items: center; }
+    .header-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
 
     /* ---- Capture toggle button ---- */
     #capture-btn,
@@ -652,8 +752,15 @@
     }
 
     @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.35; }
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.35;
+      }
     }
 
     /* ---- Messages ---- */
@@ -718,7 +825,9 @@
       text-align: left;
     }
 
-    .think-toggle:hover { color: var(--text); }
+    .think-toggle:hover {
+      color: var(--text);
+    }
 
     .think-chevron {
       display: inline-block;
@@ -775,20 +884,34 @@
       text-align: left;
     }
 
-    .copy-reply:hover { color: var(--text); }
+    .copy-reply:hover {
+      color: var(--text);
+    }
 
     .message-body {
       line-height: 1.55;
       word-break: break-word;
     }
 
-    .message-body:empty { display: none; }
+    .message-body:empty {
+      display: none;
+    }
 
-    .message-body.md > :first-child { margin-top: 0; }
-    .message-body.md > :last-child { margin-bottom: 0; }
+    .message-body.md> :first-child {
+      margin-top: 0;
+    }
 
-    .message-body.md p { margin: 0 0 0.65em; }
-    .message-body.md p:last-child { margin-bottom: 0; }
+    .message-body.md> :last-child {
+      margin-bottom: 0;
+    }
+
+    .message-body.md p {
+      margin: 0 0 0.65em;
+    }
+
+    .message-body.md p:last-child {
+      margin-bottom: 0;
+    }
 
     .message-body.md h1,
     .message-body.md h2,
@@ -799,19 +922,34 @@
       margin: 0.85em 0 0.4em;
       color: var(--text);
     }
-    .message-body.md h1 { font-size: 1.2em; }
-    .message-body.md h2 { font-size: 1.1em; }
+
+    .message-body.md h1 {
+      font-size: 1.2em;
+    }
+
+    .message-body.md h2 {
+      font-size: 1.1em;
+    }
+
     .message-body.md h3,
-    .message-body.md h4 { font-size: 1.02em; }
+    .message-body.md h4 {
+      font-size: 1.02em;
+    }
 
     .message-body.md ul,
     .message-body.md ol {
       margin: 0.4em 0 0.65em;
       padding-left: 1.35em;
     }
-    .message-body.md li { margin: 0.2em 0; }
-    .message-body.md li > ul,
-    .message-body.md li > ol { margin: 0.15em 0; }
+
+    .message-body.md li {
+      margin: 0.2em 0;
+    }
+
+    .message-body.md li>ul,
+    .message-body.md li>ol {
+      margin: 0.15em 0;
+    }
 
     .message-body.md blockquote {
       margin: 0.5em 0;
@@ -831,7 +969,10 @@
       text-decoration: underline;
       text-underline-offset: 2px;
     }
-    .message-body.md a:hover { color: var(--accent); }
+
+    .message-body.md a:hover {
+      color: var(--accent);
+    }
 
     .message-body.md code {
       font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
@@ -852,6 +993,7 @@
       font-size: 0.86em;
       line-height: 1.45;
     }
+
     .message-body.md pre code {
       background: none;
       border: none;
@@ -868,12 +1010,14 @@
       display: block;
       overflow-x: auto;
     }
+
     .message-body.md th,
     .message-body.md td {
       border: 1px solid var(--border);
       padding: 6px 10px;
       text-align: left;
     }
+
     .message-body.md th {
       background: var(--surface);
       font-weight: 600;
@@ -886,12 +1030,17 @@
       margin: 0.4em 0;
     }
 
-    .message-body.md strong { font-weight: 600; }
-    .message-body.md del { color: var(--muted); }
+    .message-body.md strong {
+      font-weight: 600;
+    }
+
+    .message-body.md del {
+      color: var(--muted);
+    }
 
     #input-row {
       display: flex;
-      align-items: center;
+      align-items: flex-end;
       padding: 16px;
       gap: 10px;
       background: var(--panel);
@@ -907,10 +1056,17 @@
       color: var(--text);
       font-size: 14px;
       font-family: inherit;
+      line-height: 1.45;
       outline: none;
+      resize: none;
+      min-height: 40px;
+      max-height: 160px;
+      overflow-y: auto;
     }
 
-    #input-box:focus { border-color: var(--accent); }
+    #input-box:focus {
+      border-color: var(--accent);
+    }
 
     #input-row .char-count {
       margin-right: 0;
@@ -930,7 +1086,9 @@
       font-size: 14px;
     }
 
-    #send-btn:hover { background: var(--accent-fill-hover); }
+    #send-btn:hover {
+      background: var(--accent-fill-hover);
+    }
 
     /* ---- Loading / startup view ---- */
     #loading-view {
@@ -949,7 +1107,11 @@
       animation: lspin 0.9s linear infinite;
     }
 
-    @keyframes lspin { to { transform: rotate(360deg); } }
+    @keyframes lspin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
 
     .loading-title {
       font-size: 16px;
@@ -989,7 +1151,7 @@
       min-height: 0;
     }
 
-    #settings-view > header {
+    #settings-view>header {
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -1012,7 +1174,7 @@
       margin-bottom: 6px;
     }
 
-    .settings-section > .settings-hint {
+    .settings-section>.settings-hint {
       font-size: 13px;
       opacity: 0.65;
       margin-bottom: 14px;
@@ -1114,7 +1276,10 @@
       outline: none;
     }
 
-    #identity-add-row input:focus { border-color: var(--accent); border-style: solid; }
+    #identity-add-row input:focus {
+      border-color: var(--accent);
+      border-style: solid;
+    }
 
     .settings-actions {
       display: flex;
@@ -1134,8 +1299,14 @@
       font-size: 14px;
     }
 
-    .settings-save-btn:hover { background: var(--accent-fill-hover); }
-    .settings-save-btn:disabled { opacity: 0.5; cursor: default; }
+    .settings-save-btn:hover {
+      background: var(--accent-fill-hover);
+    }
+
+    .settings-save-btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
 
     .settings-status {
       font-size: 13px;
@@ -1143,8 +1314,13 @@
       opacity: 0.85;
     }
 
-    .settings-status.error { color: var(--danger); }
-    .settings-status.ok { color: var(--accent); }
+    .settings-status.error {
+      color: var(--danger);
+    }
+
+    .settings-status.ok {
+      color: var(--accent);
+    }
 
     .settings-section-title-row {
       display: flex;
@@ -1237,7 +1413,9 @@
       border-bottom: 1px solid var(--border);
     }
 
-    .privacy-row:last-child { border-bottom: none; }
+    .privacy-row:last-child {
+      border-bottom: none;
+    }
 
     .privacy-row-text {
       min-width: 0;
@@ -1295,21 +1473,161 @@
       transition: transform 0.15s ease;
     }
 
-    .toggle input:checked + .toggle-track {
+    .toggle input:checked+.toggle-track {
       background: var(--accent);
     }
 
-    .toggle input:checked + .toggle-track::after {
+    .toggle input:checked+.toggle-track::after {
       transform: translateX(20px);
       background: var(--bg);
     }
 
-    .toggle input:disabled + .toggle-track {
+    .toggle input:disabled+.toggle-track {
       opacity: 0.5;
       cursor: default;
     }
+
+    /* ------- SKILLS VIEW ------- */
+
+    #skills-view {
+      min-height: 0;
+    }
+
+    #skills-view>header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    #skills-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 24px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .skill-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    .skill-card.is-soon {
+      opacity: 0.72;
+    }
+
+    .skill-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 16px;
+    }
+
+    .skill-card-text {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .skill-card-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 3px;
+    }
+
+    .skill-card-title strong {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .skill-card-text p {
+      font-size: 12px;
+      line-height: 1.4;
+      color: var(--muted);
+    }
+
+    .skill-card-body {
+      display: none;
+      padding: 0 16px 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .skill-card.is-on .skill-card-body {
+      display: block;
+      padding-top: 14px;
+    }
+
+    .skill-rule {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px;
+      margin-bottom: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--inset);
+    }
+
+    .skill-rule-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .skill-rule-row label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--muted);
+      min-width: 42px;
+    }
+
+    .skill-rule input,
+    .skill-rule select {
+      flex: 1;
+      min-width: 120px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+    }
+
+    .skill-rule input:focus,
+    .skill-rule select:focus {
+      border-color: var(--accent);
+    }
+
+    .skill-rule input.skill-cooldown {
+      flex: 0;
+      width: 64px;
+      min-width: 64px;
+    }
+
+    .skill-empty {
+      font-size: 13px;
+      color: var(--muted);
+      padding: 8px 0 12px;
+    }
+
+    .skill-add-btn {
+      margin-top: 4px;
+
+    }
   </style>
 </head>
+
 <body>
 
   <!-- Loading / startup view -->
@@ -1340,6 +1658,7 @@
       </div>
       <div class="header-actions">
         <button id="new-chat-btn" class="header-btn">New Chat</button>
+        <button id="skills-btn" class="header-btn" title="Skills">Skills</button>
         <button id="settings-btn" class="header-btn" title="Settings">Settings</button>
         <button id="capture-btn" title="Toggle screen capture">
           <span class="capture-dot"></span>
@@ -1378,13 +1697,8 @@
             <p class="welcome-sub">Sees what you do. Remembers what you don’t.</p>
           </div>
           <div class="welcome-composer">
-            <textarea
-              id="welcome-input"
-              rows="2"
-              placeholder="How can I help you today?"
-              autocomplete="off"
-              maxlength="4000"
-            ></textarea>
+            <textarea id="welcome-input" rows="2" placeholder="How can I help you today?" autocomplete="off"
+              maxlength="4000"></textarea>
             <div class="welcome-composer-bar">
               <span id="welcome-char-count" class="char-count" aria-live="polite"></span>
               <button type="button" id="welcome-send">Send</button>
@@ -1395,7 +1709,7 @@
         <div id="messages"></div>
 
         <div id="input-row">
-          <input id="input-box" type="text" placeholder="Ask Clippy..." maxlength="4000" />
+          <textarea id="input-box" rows="1" placeholder="Ask Clippy..." maxlength="4000"></textarea>
           <span id="input-char-count" class="char-count" aria-live="polite"></span>
           <button id="send-btn">Send</button>
         </div>
@@ -1445,37 +1759,15 @@
         </div>
       </section>
 
-      <section class="settings-section settings-section-disabled" id="privacy-section">
-        <div class="settings-section-title-row">
-          <h2>Access control</h2>
-          <span class="settings-badge">Coming soon</span>
-        </div>
+      <section class="settings-section" id="privacy-section">
+        <h2>Access control</h2>
         <p class="settings-hint">
-          Soon you’ll be able to pick which apps and windows Clippy can see — sensitive ones
-          (messages, banking, etc.) will be blacked out automatically in screenshots.
+          Choose which apps and windows Clippy should black out in screenshots.
+          Clippy Vision’s own window is always redacted and isn’t listed here.
         </p>
-        <div class="settings-coming-soon" aria-disabled="true">
-          <p>
-            <strong style="font-weight:600; color: var(--text);">For now:</strong>
-            use screen capture as your privacy switch. When capture is off, Clippy stops
-            taking screenshots until you turn it back on.
-          </p>
-          <span class="settings-coming-label">Header controls</span>
-          <div class="settings-capture-demos">
-            <button type="button" class="capture-btn" tabindex="-1" aria-hidden="true">
-              <span class="capture-dot"></span>
-              <span>Start Capture</span>
-            </button>
-            <button type="button" class="capture-btn active" tabindex="-1" aria-hidden="true">
-              <span class="capture-dot"></span>
-              <span>Stop Capture</span>
-            </button>
-          </div>
-          <p>
-            Find these on the main chat header. Tap <em>Start Capture</em> when you want
-            Clippy watching your screen; tap <em>Stop Capture</em> whenever you need privacy
-            or you’re done for the moment.
-          </p>
+        <div id="privacy-list" class="privacy-list"></div>
+        <div class="settings-actions">
+          <span id="privacy-status" class="settings-status"></span>
         </div>
       </section>
 
@@ -1502,6 +1794,100 @@
           <span id="updates-status" class="settings-status"></span>
         </div>
       </section>
+
+      <section class="settings-section" id="about-section">
+        <h2>About</h2>
+        <p class="settings-hint">
+          The version of Clippy Vision currently installed on this machine.
+        </p>
+        <div class="privacy-list">
+          <div class="privacy-row">
+            <div class="privacy-row-text">
+              <strong>Clippy Vision</strong>
+              <span id="about-version">Version unavailable</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Skills view -->
+  <div id="skills-view" class="view">
+    <header>
+      <div class="header-actions">
+        <button id="skills-back" class="header-btn" title="Back to chat">← Back</button>
+        <span>Skills</span>
+      </div>
+    </header>
+
+    <div id="skills-scroll">
+      <p class="settings-hint">Skills stay off until you turn them on. Clippy only acts when a skill is enabled.</p>
+
+      <article class="skill-card" id="skill-see-x" data-skill="see-x-do-y">
+        <div class="skill-card-head">
+          <div class="skill-card-text">
+            <div class="skill-card-title"><strong>When you see X, do Y</strong></div>
+            <p>When something appears on screen, Clippy runs a rule you wrote.</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="skill-see-x-toggle" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+        <div class="skill-card-body">
+          <div id="skill-rules"></div>
+          <button type="button" id="skill-add-rule" class="header-btn skill-add-btn">+ Add rule</button>
+        </div>
+      </article>
+
+      <article class="skill-card is-soon">
+        <div class="skill-card-head">
+          <div class="skill-card-text">
+            <div class="skill-card-title">
+              <strong>Reading &amp; quiz</strong>
+              <span class="settings-badge">Under development</span>
+            </div>
+            <p>After a study session, quiz you on what was on screen.</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" disabled />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </article>
+
+      <article class="skill-card is-soon">
+        <div class="skill-card-head">
+          <div class="skill-card-text">
+            <div class="skill-card-title">
+              <strong>Next best action</strong>
+              <span class="settings-badge">Under development</span>
+            </div>
+            <p>At a real pause, remind you what you were in the middle of.</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" disabled />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </article>
+
+      <article class="skill-card is-soon">
+        <div class="skill-card-head">
+          <div class="skill-card-text">
+            <div class="skill-card-title">
+              <strong>Meeting notes</strong>
+              <span class="settings-badge">Under development</span>
+            </div>
+            <p>When a call starts, keep light notes against what was on screen.</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" disabled />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </article>
     </div>
   </div>
 
@@ -1510,6 +1896,7 @@
   <script>
     const nameView = document.getElementById('name-view')
     const chatView = document.getElementById('chat-view')
+    const skillsView = document.getElementById('skills-view')
     const settingsView = document.getElementById('settings-view')
     const nameInput = document.getElementById('name-input')
     const nameSubmit = document.getElementById('name-submit')
@@ -1540,12 +1927,21 @@
     const convSearch = document.getElementById('conv-search')
     const convSearchHint = document.getElementById('conv-search-hint')
 
+    const SKILLS_KEY = 'clippy.skills.v1'
+    const skillsBtn = document.getElementById('skills-btn')
+    const skillsBack = document.getElementById('skills-back')
+    const skillSeeXToggle = document.getElementById('skill-see-x-toggle')
+    const skillSeeXCard = document.getElementById('skill-see-x')
+    const skillRulesEl = document.getElementById('skill-rules')
+    const skillAddRuleBtn = document.getElementById('skill-add-rule')
+
+
     let searchTimer = null
     let searchSeq = 0
     let activeSearchQuery = ''
 
-    const loadingView  = document.getElementById('loading-view')
-    const loadingSub   = document.getElementById('loading-sub')
+    const loadingView = document.getElementById('loading-view')
+    const loadingSub = document.getElementById('loading-sub')
     const loadingError = document.getElementById('loading-error')
 
     const settingsName = document.getElementById('settings-name')
@@ -1558,6 +1954,9 @@
     const profileStatus = document.getElementById('profile-status')
     const updateCheckToggle = document.getElementById('update-check-toggle')
     const updatesStatus = document.getElementById('updates-status')
+    const aboutVersion = document.getElementById('about-version')
+    const privacyList = document.getElementById('privacy-list')
+    const privacyStatus = document.getElementById('privacy-status')
 
     let isLoading = false
     // In-flight bot reply kept across conversation switches
@@ -1568,6 +1967,158 @@
     let identityCleared = new Set()
 
     let conversationId = crypto.randomUUID()
+
+
+    function defaultSkillsState() {
+      return {
+        skills: {
+          'see-x-do-y': { enabled: false, rules: [] },
+          'reading-quiz': { enabled: false },
+          'next-best-action': { enabled: false },
+          'meeting-notes': { enabled: false },
+        },
+      }
+    }
+
+
+    function loadSkillsState() {
+      try {
+        const raw = localStorage.getItem(SKILLS_KEY)
+        if (!raw) return defaultSkillsState()
+        const parsed = JSON.parse(raw)
+        const base = defaultSkillsState()
+        if (parsed && parsed.skills) {
+          Object.assign(base.skills, parsed.skills)
+        }
+        return base
+      } catch {
+        return defaultSkillsState()
+      }
+    }
+
+    function saveSkillsState(state) {
+      localStorage.setItem(SKILLS_KEY, JSON.stringify(state))
+    }
+
+    let skillsState = loadSkillsState()
+
+    function newRule() {
+      return {
+        id: 'r' + Date.now().toString(36),
+        textContains: '',
+        appContains: '',
+        action: 'notify',
+        cooldownMinutes: 30,
+        enabled: true,
+      }
+    }
+
+    function renderRules() {
+      const skill = skillsState.skills['see-x-do-y']
+      skillRulesEl.innerHTML = ''
+      if (!skill.rules.length) {
+        const empty = document.createElement('p')
+        empty.className = 'skill-empty'
+        empty.textContent = 'No rules yet. Add one so Clippy knows what to watch for.'
+        skillRulesEl.appendChild(empty)
+        return
+      }
+      skill.rules.forEach((rule, index) => {
+        const card = document.createElement('div')
+        card.className = 'skill-rule'
+        const whenRow = document.createElement('div')
+        whenRow.className = 'skill-rule-row'
+        const whenLabel = document.createElement('label')
+        whenLabel.textContent = 'When'
+        const appInput = document.createElement('input')
+        appInput.type = 'text'
+        appInput.placeholder = 'any app'
+        appInput.value = rule.appContains
+        appInput.addEventListener('input', () => {
+          skill.rules[index].appContains = appInput.value
+          saveSkillsState(skillsState)
+        })
+        const seeInput = document.createElement('input')
+        seeInput.type = 'text'
+        seeInput.placeholder = 'I see (text on screen)'
+        seeInput.value = rule.textContains
+        seeInput.addEventListener('input', () => {
+          skill.rules[index].textContains = seeInput.value
+          saveSkillsState(skillsState)
+        })
+        whenRow.append(whenLabel, appInput, seeInput)
+        const thenRow = document.createElement('div')
+        thenRow.className = 'skill-rule-row'
+        const thenLabel = document.createElement('label')
+        thenLabel.textContent = 'Then'
+        const actionSelect = document.createElement('select')
+          ;[
+            ['notify', 'Notify me'],
+            ['chat', 'Open a chat (soon)'],
+          ].forEach(([value, label]) => {
+            const opt = document.createElement('option')
+            opt.value = value
+            opt.textContent = label
+            if (value !== 'notify') opt.disabled = true
+            if (rule.action === value) opt.selected = true
+            actionSelect.appendChild(opt)
+          })
+        actionSelect.addEventListener('change', () => {
+          skill.rules[index].action = actionSelect.value
+          saveSkillsState(skillsState)
+        })
+        thenRow.append(thenLabel, actionSelect)
+        const metaRow = document.createElement('div')
+        metaRow.className = 'skill-rule-row'
+        const coolLabel = document.createElement('label')
+        coolLabel.textContent = 'Wait'
+        const coolInput = document.createElement('input')
+        coolInput.className = 'skill-cooldown'
+        coolInput.type = 'number'
+        coolInput.min = '1'
+        coolInput.value = String(rule.cooldownMinutes)
+        coolInput.addEventListener('input', () => {
+          const n = parseInt(coolInput.value, 10)
+          skill.rules[index].cooldownMinutes = Number.isFinite(n) && n > 0 ? n : 30
+          saveSkillsState(skillsState)
+        })
+        const coolHint = document.createElement('span')
+        coolHint.style.cssText = 'font-size:12px;color:var(--muted)'
+        coolHint.textContent = 'minutes before repeating'
+        const delBtn = document.createElement('button')
+        delBtn.type = 'button'
+        delBtn.className = 'identity-remove'
+        delBtn.textContent = 'Delete'
+        delBtn.addEventListener('click', () => {
+          skill.rules.splice(index, 1)
+          saveSkillsState(skillsState)
+          renderRules()
+        })
+        metaRow.append(coolLabel, coolInput, coolHint, delBtn)
+        card.append(whenRow, thenRow, metaRow)
+        skillRulesEl.appendChild(card)
+      })
+    }
+
+    function syncSeeXCard() {
+      const on = !!skillsState.skills['see-x-do-y'].enabled
+      skillSeeXToggle.checked = on
+      skillSeeXCard.classList.toggle('is-on', on)
+      renderRules()
+    }
+
+    function openSkills() {
+      closeDrawer()
+      skillsState = loadSkillsState()
+      syncSeeXCard()
+      showView(skillsView)
+    }
+    function closeSkills() {
+      showView(chatView)
+      if (chatMain.classList.contains('is-welcome')) welcomeInput.focus()
+      else inputBox.focus()
+    }
+
 
     function parseAssistantContent(raw) {
       const text = raw || ''
@@ -1754,6 +2305,7 @@
     function showView(view) {
       nameView.classList.remove('active')
       chatView.classList.remove('active')
+      skillsView.classList.remove('active')
       loadingView.classList.remove('active')
       settingsView.classList.remove('active')
       view.classList.add('active')
@@ -1811,6 +2363,7 @@
       conversationId = crypto.randomUUID()
       messages.innerHTML = ''
       inputBox.value = ''
+      inputBox.style.height = 'auto'
       setChatMode('welcome')
       highlightActiveConversation()
       closeDrawer()
@@ -2092,7 +2645,7 @@
       isLoading = true
       addMessage(text, 'user')
       source.value = ''
-      if (fromWelcome) welcomeInput.style.height = 'auto'
+      source.style.height = 'auto'
       sendBtn.disabled = true
       welcomeSend.disabled = true
 
@@ -2270,7 +2823,10 @@
     newChatBtn.addEventListener('click', resetConversation)
     sendBtn.addEventListener('click', () => send(false))
     inputBox.addEventListener('keydown', e => {
-      if (e.key === 'Enter') send(false)
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        send(false)
+      }
     })
 
     welcomeSend.addEventListener('click', () => send(true))
@@ -2286,6 +2842,8 @@
       updateCharCount(welcomeInput, welcomeCharCount)
     })
     inputBox.addEventListener('input', () => {
+      inputBox.style.height = 'auto'
+      inputBox.style.height = Math.min(inputBox.scrollHeight, 160) + 'px'
       updateCharCount(inputBox, inputCharCount)
     })
 
@@ -2309,9 +2867,9 @@
     })
 
     // ---- Update available banner ----
-    const updateBanner       = document.getElementById('update-banner')
-    const updateBannerText   = document.getElementById('update-banner-text')
-    const updateBannerLink   = document.getElementById('update-banner-link')
+    const updateBanner = document.getElementById('update-banner')
+    const updateBannerText = document.getElementById('update-banner-text')
+    const updateBannerLink = document.getElementById('update-banner-link')
     const updateBannerDismiss = document.getElementById('update-banner-dismiss')
     let dismissedUpdateVersion = null
 
@@ -2416,23 +2974,88 @@
       }
     }
 
-    async function saveUpdateCheck() {
-      const desired = updateCheckToggle.checked
-      updateCheckToggle.disabled = true
+    async function loadAppVersion() {
       try {
-        const saved = await window.clippy.setUpdateCheckEnabled(desired)
-        updateCheckToggle.checked = saved
-        setStatus(updatesStatus, saved ? 'Update checks on.' : 'Update checks off.', 'ok')
+        const version = await window.clippy.getAppVersion()
+        aboutVersion.textContent = version ? `Version ${version}` : 'Version unavailable'
       } catch (error) {
-        updateCheckToggle.checked = !desired
-        setStatus(updatesStatus, `Could not save: ${error.message}`, 'error')
+        aboutVersion.textContent = 'Version unavailable'
+      }
+    }
+
+    function renderPrivacyTargets(targets) {
+      privacyList.innerHTML = ''
+      if (!targets.length) {
+        const empty = document.createElement('div')
+        empty.className = 'settings-hint'
+        empty.style.marginBottom = '0'
+        empty.textContent = 'No privacy targets available.'
+        privacyList.appendChild(empty)
+        return
+      }
+      for (const target of targets) {
+        const row = document.createElement('div')
+        row.className = 'privacy-row'
+
+        const textWrap = document.createElement('div')
+        textWrap.className = 'privacy-row-text'
+        const strong = document.createElement('strong')
+        strong.textContent = target.label
+        const span = document.createElement('span')
+        span.textContent = target.description
+        textWrap.appendChild(strong)
+        textWrap.appendChild(span)
+
+        const toggleLabel = document.createElement('label')
+        toggleLabel.className = 'toggle'
+        const checkbox = document.createElement('input')
+        checkbox.type = 'checkbox'
+        checkbox.checked = !!target.enabled
+        const track = document.createElement('span')
+        track.className = 'toggle-track'
+        toggleLabel.appendChild(checkbox)
+        toggleLabel.appendChild(track)
+
+        checkbox.addEventListener('change', () => togglePrivacyTarget(target.id, checkbox))
+
+        row.appendChild(textWrap)
+        row.appendChild(toggleLabel)
+        privacyList.appendChild(row)
+      }
+    }
+
+    async function loadPrivacySettings() {
+      setStatus(privacyStatus, 'Loading…', null)
+      try {
+        const data = await window.clippy.getPrivacySettings()
+        renderPrivacyTargets(data.targets || [])
+        setStatus(privacyStatus, '', null)
+      } catch (error) {
+        privacyList.innerHTML = ''
+        setStatus(privacyStatus, `Could not load privacy settings: ${error.message}`, 'error')
+      }
+    }
+
+    async function togglePrivacyTarget(id, checkbox) {
+      const desired = checkbox.checked
+      checkbox.disabled = true
+      setStatus(privacyStatus, 'Saving…', null)
+      try {
+        await window.clippy.updatePrivacySettings({ [id]: desired })
+        setStatus(privacyStatus, 'Saved.', 'ok')
+        setTimeout(() => setStatus(privacyStatus, '', null), 1500)
+      } catch (error) {
+        checkbox.checked = !desired
+        setStatus(privacyStatus, `Could not save: ${error.message}`, 'error')
       } finally {
-        updateCheckToggle.disabled = false
+        checkbox.disabled = false
       }
     }
 
     async function loadSettings() {
       loadUpdateCheck()
+      loadAppVersion()
+      loadPrivacySettings()
       setStatus(profileStatus, 'Loading…', null)
       try {
         const profile = await window.clippy.getProfile()
@@ -2506,6 +3129,36 @@
     })
     profileSaveBtn.addEventListener('click', saveProfile)
     updateCheckToggle.addEventListener('change', saveUpdateCheck)
+
+    async function saveUpdateCheck() {
+      const desired = updateCheckToggle.checked
+      updateCheckToggle.disabled = true
+      try {
+        const saved = await window.clippy.setUpdateCheckEnabled(desired)
+        updateCheckToggle.checked = saved
+        setStatus(updatesStatus, saved ? 'Update checks on.' : 'Update checks off.', 'ok')
+      } catch (error) {
+        updateCheckToggle.checked = !desired
+        setStatus(updatesStatus, `Could not save: ${error.message}`, 'error')
+      } finally {
+        updateCheckToggle.disabled = false
+      }
+    }
+
+    // skills view
+
+    skillSeeXToggle.addEventListener('change', () => {
+      skillsState.skills['see-x-do-y'].enabled = skillSeeXToggle.checked
+      saveSkillsState(skillsState)
+      syncSeeXCard()
+    })
+    skillAddRuleBtn.addEventListener('click', () => {
+      skillsState.skills['see-x-do-y'].rules.push(newRule())
+      saveSkillsState(skillsState)
+      renderRules()
+    })
+    skillsBtn.addEventListener('click', openSkills)
+    skillsBack.addEventListener('click', closeSkills)
 
     init()
   </script>

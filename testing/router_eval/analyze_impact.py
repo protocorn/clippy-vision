@@ -16,7 +16,13 @@ import json
 from pathlib import Path
 
 HERE = Path(__file__).parent
-records = [json.loads(l) for l in (HERE / "results" / "records_minilm.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+records = [
+    json.loads(line)
+    for line in (HERE / "results" / "records_minilm.jsonl")
+    .read_text(encoding="utf-8")
+    .splitlines()
+    if line.strip()
+]
 
 PREFETCH_THRESHOLDS = {
     "aggregation": 0.50, "memory_query": 0.50, "time_anchored": 0.55,

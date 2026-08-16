@@ -1,30 +1,18 @@
 import json
 import math
 import re
-import sqlite3
 import time
 
+from agent.helpers.time_resolver import resolve_temporal_range
 from core.llm_gateway import Priority, gateway
-from core.paths import get_db_path
-
-_DB_PATH = get_db_path()
-
-conn = sqlite3.connect(str(_DB_PATH), check_same_thread=False, timeout=30)
-conn.execute("PRAGMA journal_mode=WAL")
-conn.commit()
-
-# Add summary_embedding column to sessions if it doesn't exist yet (Fix 3)
-try:
-    conn.execute("ALTER TABLE sessions ADD COLUMN summary_embedding TEXT")
-    conn.commit()
-except sqlite3.OperationalError:
-    pass  # already exists
+from core.local_embeddings import embed_text, embed_texts
+from core.rag import search_event_rag
+from core.storage import conn
 
 MAX_RESULT_ROWS = 20
 MAX_RESULT_CHARS = 4000
 _HEAVY_COLS = {"payload", "vector_embedding", "summary_embedding"}
 
-EMBED_MODEL = "nomic-embed-text"
 MODEL = "qwen3:8b"
 
 OUTPUT_SCHEMA = {
@@ -35,21 +23,24 @@ OUTPUT_SCHEMA = {
     "required": ["sql_query"]
 }
 
+
+
+
+
 # ─────────────────────────────────────────────────────────────
 # Two focused prompts — model only sees the table it will use
 # ─────────────────────────────────────────────────────────────
-
 _SESSIONS_PROMPT = """
 You generate SQLite SELECT queries against a sessions table.
 
 sessions (
     summary_id   TEXT PRIMARY KEY,
     session_id   TEXT,
-    window_start REAL,   -- Unix epoch
-    window_end   REAL,   -- Unix epoch
-    summary      TEXT,   -- paragraph describing what the user did
+    window_start REAL,
+    window_end   REAL,
+    summary      TEXT,
     active_task  TEXT,
-    entities     TEXT,   -- JSON array of names/tools/files mentioned
+    entities     TEXT,
     event_count  INTEGER
 )
 
@@ -83,8 +74,8 @@ _EVENTS_PROMPT = """
 You generate SQLite SELECT queries against an events table.
 
 events (
-    timestamp             REAL,   -- Unix epoch
-    event_type            TEXT,   -- ONLY these values exist: clipboard_change, context_change, deviation, paste, screenshot_analysis, typing_burst
+    timestamp             REAL,
+    event_type            TEXT,
     process_name          TEXT,
     current_window_title  TEXT,
     active_url            TEXT,
@@ -129,10 +120,13 @@ Rules:
 - Output only valid SQLite SELECT SQL in JSON.
 """.strip()
 
+
+
+
+
 # ─────────────────────────────────────────────────────────────
 # Safety
 # ─────────────────────────────────────────────────────────────
-
 _BLOCKED = re.compile(
     r'\b(DROP|DELETE|UPDATE|INSERT|ALTER|CREATE|ATTACH|DETACH|PRAGMA|REPLACE|TRUNCATE)\b',
     re.IGNORECASE,
@@ -142,10 +136,13 @@ def _is_safe(sql: str) -> bool:
     return sql.strip().upper().startswith("SELECT") and not _BLOCKED.search(sql)
 
 
+
+
+
+
 # ─────────────────────────────────────────────────────────────
 # Core helpers
 # ─────────────────────────────────────────────────────────────
-
 def _generate_sql(system_prompt: str, user_content: str) -> str:
     body = gateway.chat(
         [{"role": "system", "content": system_prompt},
@@ -176,10 +173,13 @@ def _run_sql(sql: str) -> tuple[list, int]:
     return result_text, total
 
 
+
+
+
+
 # ─────────────────────────────────────────────────────────────
 # Cosine similarity helpers (Fix 3 — semantic session search)
 # ─────────────────────────────────────────────────────────────
-
 def _cosine(a: list, b: list) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     norm_a = math.sqrt(sum(x * x for x in a))
@@ -199,7 +199,7 @@ def _semantic_sessions(question: str, date_sql_filter: str, limit: int = MAX_RES
     Returns (rows_as_text_list, total_candidates_count).
     Rows that have no embedding yet are scored 0 (still returned if nothing better exists).
     """
-    q_vec = gateway.embed(question, embed_model=EMBED_MODEL, priority=Priority.INTERACTIVE)
+    q_vec = embed_text(question)
 
     candidate_sql = f"""
         SELECT summary_id, session_id, window_start, window_end,
@@ -224,6 +224,7 @@ def _semantic_sessions(question: str, date_sql_filter: str, limit: int = MAX_RES
             score = 0.0
             unembedded_ids.append((summary_id, summary))
         scored.append((score, summary_id, ws, summary, active_task, entities))
+
 
     # Back-fill missing embeddings in the background (non-blocking)
     if unembedded_ids:
@@ -252,7 +253,7 @@ def _backfill_session_embeddings(pairs: list[tuple[str, str]]) -> None:
     if not texts:
         return
     try:
-        vecs = gateway.embed(texts, embed_model=EMBED_MODEL, priority=Priority.BACKGROUND)
+        vecs = embed_texts(texts)
         for (summary_id, _), vec in zip(pairs, vecs):
             conn.execute(
                 "UPDATE sessions SET summary_embedding = ? WHERE summary_id = ?",
@@ -281,11 +282,15 @@ def _rows_are_useful(rows: list) -> bool:
     return False
 
 
+
+
+
+
+
 # ─────────────────────────────────────────────────────────────
 # Helper: extract the date-filter fragment from a full SQL query
 # so we can pass it to the semantic ranker (Fix 3).
 # ─────────────────────────────────────────────────────────────
-
 def _extract_where_fragment(sql: str) -> str | None:
     """Return everything after WHERE up to ORDER BY / LIMIT / end, or None."""
     m = re.search(r'\bWHERE\b(.+?)(?:\bORDER\s+BY\b|\bLIMIT\b|$)', sql, re.IGNORECASE | re.DOTALL)
@@ -294,10 +299,13 @@ def _extract_where_fragment(sql: str) -> str | None:
     return None
 
 
+
+
+
+
 # ─────────────────────────────────────────────────────────────
 # Public entry points
 # ─────────────────────────────────────────────────────────────
-
 def search_sessions(question: str) -> str:
     """Search session summaries. Best for: broad time windows, daily/weekly
     overviews, project topics, what-did-I-work-on questions."""
@@ -315,12 +323,14 @@ def search_sessions(question: str) -> str:
     if not _is_safe(sql):
         return "search_sessions: unsafe query blocked."
 
+
     # Fix 3: use semantic re-ranking when we can extract a date filter
     where_fragment = _extract_where_fragment(sql)
     if where_fragment:
         try:
             rows, total = _semantic_sessions(question, where_fragment)
         except Exception:
+
             # Fall back to plain SQL on any embedding failure
             try:
                 rows, total = _run_sql(sql)
@@ -340,6 +350,7 @@ def search_sessions(question: str) -> str:
             "call search_events."
         )
 
+
     # Fix 1: include total count so the agent knows if it's seeing a partial view
     shown = len(rows)
     if total > shown:
@@ -356,6 +367,31 @@ def search_sessions(question: str) -> str:
 def search_events(question: str) -> str:
     """Search individual events. Best for: specific messages, OCR text,
     exact URLs, clipboard content, app switches, fine-grained timestamps."""
+
+
+
+    try:
+        temporal = resolve_temporal_range(question)
+        rag = search_event_rag(
+            question,
+            start_ts=temporal.start_ts if temporal else None,
+            end_ts=temporal.end_ts if temporal else None,
+        )
+        if rag is not None:
+            rows, total = rag
+            if rows and _rows_are_useful(rows):
+                shown = len(rows)
+                if total > shown:
+                    header = (
+                        f"search_events hybrid RAG results (showing {shown} most relevant of {total} "
+                        "embedded events — refine the query for more detail):"
+                    )
+                else:
+                    header = f"search_events RAG results ({shown} hybrid matches):"
+                return _truncate_result(header + "\n\n" + "\n---\n".join(rows))
+    except Exception as exc:
+        print(f"[rag] event search unavailable; using SQL fallback: {exc}")
+
     now_ts  = int(time.time())
     now_str = time.strftime("%A %B %d, %Y at %H:%M (local time)")
     user_content = f"Current timestamp: {now_ts} ({now_str})\n\nQuestion: {question}"
@@ -381,6 +417,7 @@ def search_events(question: str) -> str:
             "Events store low-level activity — if you need a high-level "
             "topic or time-window summary, call search_sessions."
         )
+
 
     # Fix 1: include total count
     shown = len(rows)

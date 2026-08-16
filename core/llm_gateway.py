@@ -2,6 +2,7 @@ import json
 import queue
 import threading
 import time
+import urllib.error
 import urllib.request
 from itertools import count
 
@@ -10,10 +11,13 @@ import psutil
 from core.cli_providers import is_cli_provider, provider_status
 from core.cli_providers import run_chat as run_cli_chat
 from core.llm_config import get_llm_config, model_for
-from core.model_residency import keep_alive_for
-
-LOCAL_EMBED_URL = "http://127.0.0.1:11434/api/embed"
-
+from core.local_embeddings import embed_text, embed_texts
+from core.model_residency import can_load_text, keep_alive_for, text_unavailable_reason
+from core.ollama_client import (
+    OllamaError,
+    OllamaUnavailable,
+    describe_http_error,
+)
 
 # --- Throttle configuration (relative to per-device baseline) ---
 # Thresholds are NOT hardcoded — they are derived at startup from a short CPU
@@ -22,35 +26,28 @@ LOCAL_EMBED_URL = "http://127.0.0.1:11434/api/embed"
 # "Pressured" = CPU has risen _PAUSE_HEADROOM points above the idle baseline.
 # "Recovered" = CPU has fallen back to within _RESUME_HEADROOM of the baseline.
 # Hard ceilings prevent the thresholds from being set too high on a busy device.
-_BASELINE_SAMPLES = 4  # number of 1-second samples used to measure idle CPU
-_PAUSE_HEADROOM = 30  # CPU points above baseline that trigger a pause
-_RESUME_HEADROOM = 12  # CPU points above baseline considered "recovered"
-_CPU_PAUSE_CEIL = 92.0  # hard ceiling: never pause above this regardless of baseline
-_CPU_RESUME_CEIL = 80.0  # hard ceiling: resume threshold cap
-_CHECK_INTERVAL_S = 1.0  # seconds between CPU re-checks while paused
-_BG_INTER_JOB_SLEEP = 2.0  # seconds to breathe between consecutive BACKGROUND jobs
-_MAX_WAIT_SECS = 180  # escape hatch: force-run after waiting this long regardless
+_BASELINE_SAMPLES   = 4      # number of 1-second samples used to measure idle CPU
+_PAUSE_HEADROOM     = 30     # CPU points above baseline that trigger a pause
+_RESUME_HEADROOM    = 12     # CPU points above baseline considered "recovered"
+_CPU_PAUSE_CEIL     = 92.0   # hard ceiling: never pause above this regardless of baseline
+_CPU_RESUME_CEIL    = 80.0   # hard ceiling: resume threshold cap
+_CHECK_INTERVAL_S   = 1.0    # seconds between CPU re-checks while paused
+_BG_INTER_JOB_SLEEP = 2.0    # seconds to breathe between consecutive BACKGROUND jobs
+_MAX_WAIT_SECS      = 180    # escape hatch: force-run after waiting this long regardless
+_INTERACTIVE_PREEMPT_SECS = 10.0  # maximum time chat waits behind background work
 
 
 class Priority:
-    INTERACTIVE = 0  # chat agent - user is waiting for a response
-    FOREGROUND = 10  # classifiers - image/text processing
-    BACKGROUND = 20  # summarization/distillation - background tasks
+    INTERACTIVE = 0 # chat agent - user is waiting for a response
+    FOREGROUND = 10 # classifiers - image/text processing
+    BACKGROUND = 20 # summarization/distillation - background tasks
 
 
 class Job:
     __slots__ = (
-        "url",
-        "payload",
-        "timeout",
-        "event",
-        "result",
-        "error",
-        "enqueued_at",
-        "stream",
-        "chunks",
-        "headers",
-        "stream_format",
+        "url", "payload", "timeout", "event", "result", "error", "enqueued_at",
+        "stream", "chunks", "waiting_for_background", "cancel_requested",
+        "response", "headers", "stream_format", "local_model",
     )
 
     def __init__(
@@ -62,6 +59,7 @@ class Job:
         *,
         headers: dict[str, str] | None = None,
         stream_format: str = "ollama_ndjson",
+        local_model: bool = True,
     ):
         self.url = url
         self.payload = payload
@@ -72,8 +70,12 @@ class Job:
         self.enqueued_at = time.monotonic()
         self.stream = stream
         self.chunks = queue.Queue() if stream else None
+        self.waiting_for_background = False
+        self.cancel_requested = threading.Event()
+        self.response = None
         self.headers = headers or {}
         self.stream_format = stream_format
+        self.local_model = local_model
 
 
 class LLMGateway:
@@ -91,15 +93,16 @@ class LLMGateway:
     def __init__(self):
         self.queue = queue.PriorityQueue()
         self._seq = count()
+        self._state_lock = threading.Lock()
+        self._current_job: Job | None = None
+        self._current_priority: int | None = None
 
         baseline = self._measure_cpu_baseline()
-        self._cpu_pause_pct = min(baseline + _PAUSE_HEADROOM, _CPU_PAUSE_CEIL)
+        self._cpu_pause_pct  = min(baseline + _PAUSE_HEADROOM,  _CPU_PAUSE_CEIL)
         self._cpu_resume_pct = min(baseline + _RESUME_HEADROOM, _CPU_RESUME_CEIL)
-        print(
-            f"[gateway] CPU baseline={baseline:.1f}%  "
-            f"pause>{self._cpu_pause_pct:.1f}%  "
-            f"resume<{self._cpu_resume_pct:.1f}%"
-        )
+        print(f"[gateway] CPU baseline={baseline:.1f}%  "
+              f"pause>{self._cpu_pause_pct:.1f}%  "
+              f"resume<{self._cpu_resume_pct:.1f}%")
 
         self.worker = threading.Thread(target=self._worker_loop, daemon=True)
         self.worker.start()
@@ -118,47 +121,114 @@ class LLMGateway:
     def _is_recovered(self) -> bool:
         return psutil.cpu_percent(interval=0.5) < self._cpu_resume_pct
 
-    def _health_gate(self, job: "Job") -> None:
+    def _health_gate(self, job: "Job", *, priority: int) -> None:
         """Block until CPU has recovered, or until the job's max-wait deadline
-        expires — whichever comes first."""
+        expires — whichever comes first.
+
+        BACKGROUND jobs never force-run under sustained pressure: they fail soft
+        so catch-up can retry later instead of thrashing the machine.
+        """
         deadline = job.enqueued_at + _MAX_WAIT_SECS
 
         if not self._is_pressured():
             return  # fast path: system is healthy, no wait needed
 
         while time.monotonic() < deadline:
+            if job.cancel_requested.is_set():
+                job.error = OSError("deferred: preempted by interactive chat")
+                return
             time.sleep(_CHECK_INTERVAL_S)
             if self._is_recovered():
                 return  # CPU settled, proceed
 
-        # Deadline reached — log and run anyway to drain the backlog
         waited = time.monotonic() - job.enqueued_at
-        print(
-            f"[gateway] escape hatch triggered after {waited:.0f}s wait — running despite pressure"
-        )
+        if priority >= Priority.BACKGROUND:
+            job.error = OSError(
+                f"deferred: cpu pressured after {waited:.0f}s — catch-up will retry"
+            )
+            print(f"[gateway] background job deferred after {waited:.0f}s CPU pressure")
+            return
+
+        # FOREGROUND escape hatch — drain classifiers that the user is waiting on
+        print(f"[gateway] escape hatch triggered after {waited:.0f}s wait — running despite pressure")
+
+    def _cancel_background_for_chat(self, background_job: Job) -> None:
+        """Close the client response so the gateway can move on to chat.
+
+        Ollama stops generating when its client disconnects, so dropping the
+        response frees the gateway without waiting out the background timeout.
+        """
+        with self._state_lock:
+            if self._current_job is not background_job:
+                return
+            if self._current_priority is None or self._current_priority < Priority.BACKGROUND:
+                return
+            background_job.cancel_requested.set()
+            response = background_job.response
+        print("[gateway] preempting background job for waiting chat")
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+
+    def _enqueue(self, job: Job, priority: int) -> None:
+        """Queue a job and bound interactive wait behind an in-flight background call."""
+        if priority == Priority.INTERACTIVE:
+            with self._state_lock:
+                background_job = (
+                    self._current_job
+                    if self._current_priority is not None
+                    and self._current_priority >= Priority.BACKGROUND
+                    else None
+                )
+            if background_job is not None:
+                job.waiting_for_background = True
+                timer = threading.Timer(
+                    _INTERACTIVE_PREEMPT_SECS,
+                    self._cancel_background_for_chat,
+                    args=(background_job,),
+                )
+                timer.daemon = True
+                timer.start()
+        self.queue.put((priority, next(self._seq), job))
 
     @staticmethod
-    def _request_headers(job: "Job") -> dict[str, str]:
-        return {"Content-Type": "application/json", **job.headers}
+    def _open(job: Job):
+        """Open a provider request and preserve Ollama's actionable errors."""
+        req = urllib.request.Request(
+            job.url,
+            data=json.dumps(job.payload).encode(),
+            headers={"Content-Type": "application/json", **job.headers},
+        )
+        try:
+            return urllib.request.urlopen(req, timeout=job.timeout)
+        except urllib.error.HTTPError as err:
+            if job.local_model:
+                raise OllamaError(
+                    f"ollama chat failed — {describe_http_error(err)}"
+                ) from err
+            detail = err.read().decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                f"provider request failed with HTTP {err.code}: {detail[-1200:]}"
+            ) from err
+        except urllib.error.URLError as err:
+            if job.local_model:
+                raise OllamaUnavailable(
+                    f"ollama not reachable ({err.reason}) — is the Ollama server running?"
+                ) from err
+            raise RuntimeError(f"provider not reachable: {err.reason}") from err
 
     @staticmethod
     def _provider_urls(config: dict[str, str]) -> tuple[str, str]:
-        """Return chat and model-list URLs for the selected API."""
-
+        """Return chat and model-list URLs for the selected HTTP provider."""
         base = config["base_url"].rstrip("/")
         if config["provider"] == "ollama":
             if base.endswith("/api"):
                 base = base[:-4]
             return f"{base}/api/chat", f"{base}/api/tags"
-
-        if config["provider"] == "gemini_api":
-            api_base = base
-        else:
-            api_base = base if base.endswith("/v1") else f"{base}/v1"
-        return (
-            f"{api_base}/chat/completions",
-            f"{api_base}/models",
-        )
+        api_base = base if config["provider"] == "gemini_api" or base.endswith("/v1") else f"{base}/v1"
+        return f"{api_base}/chat/completions", f"{api_base}/models"
 
     @staticmethod
     def _auth_headers(config: dict[str, str]) -> dict[str, str]:
@@ -169,7 +239,6 @@ class LLMGateway:
     def _resolve_model(model: str | None, role: str) -> str:
         requested = str(model or "").strip()
         configured = model_for(role, requested or None)
-
         defaults = {
             "chat": {"", "qwen3:8b"},
             "vision": {"qwen3-vl:4b"},
@@ -182,7 +251,6 @@ class LLMGateway:
     def _openai_options(options: dict | None) -> dict:
         if not options:
             return {}
-
         mapped = {}
         for source, target in (
             ("temperature", "temperature"),
@@ -195,13 +263,7 @@ class LLMGateway:
 
     @staticmethod
     def _openai_messages(messages: list[dict]) -> list[dict]:
-        """Translate Ollama messages to OpenAI-compatible chat messages.
-
-        This covers both Ollama's ``images`` field and the small tool-message
-        differences that matter on the second ReAct turn: OpenAI APIs expect
-        stringified function arguments and a ``tool_call_id`` on tool results.
-        """
-
+        """Translate Ollama image and tool messages to OpenAI-compatible form."""
         converted = []
         pending_tool_ids = []
         for message in messages:
@@ -209,7 +271,7 @@ class LLMGateway:
                 converted.append(message)
                 continue
             converted_message = dict(message)
-            images = message.get("images") if isinstance(message, dict) else None
+            images = message.get("images")
             if images:
                 parts = []
                 text = message.get("content") or ""
@@ -242,19 +304,13 @@ class LLMGateway:
                     )
                 converted_message["tool_calls"] = normalized_calls
 
-            if (
-                message.get("role") == "tool"
-                and not message.get("tool_call_id")
-                and pending_tool_ids
-            ):
+            if message.get("role") == "tool" and not message.get("tool_call_id") and pending_tool_ids:
                 converted_message["tool_call_id"] = pending_tool_ids.pop(0)
-
             converted.append(converted_message)
         return converted
 
     @staticmethod
     def _openai_response_format(schema: dict) -> dict:
-
         if isinstance(schema, dict) and schema.get("type") == "json_object":
             return schema
         return {"type": "json_object"}
@@ -262,22 +318,14 @@ class LLMGateway:
     @staticmethod
     def _normalize_openai_response(body: dict) -> dict:
         choices = body.get("choices") or []
-        choice = choices[0] if choices else {}
-        message = choice.get("message") or {}
+        message = (choices[0] if choices else {}).get("message") or {}
         content = message.get("content") or ""
         if isinstance(content, list):
             content = "".join(
                 item.get("text", "") for item in content if isinstance(item, dict)
             )
-        normalized = {
-            "role": message.get("role", "assistant"),
-            "content": content,
-        }
-        thinking = (
-            message.get("reasoning_content")
-            or message.get("reasoning")
-            or message.get("thinking")
-        )
+        normalized = {"role": message.get("role", "assistant"), "content": content}
+        thinking = message.get("reasoning_content") or message.get("reasoning") or message.get("thinking")
         if thinking:
             normalized["thinking"] = thinking
         tool_calls = []
@@ -310,16 +358,15 @@ class LLMGateway:
             return None
         delta = choices[0].get("delta") or {}
         message = {}
-        content = delta.get("content")
-        if isinstance(content, str) and content:
-            message["content"] = content
-        thinking = (
-            delta.get("reasoning_content")
-            or delta.get("reasoning")
-            or delta.get("thinking")
-        )
-        if isinstance(thinking, str) and thinking:
-            message["thinking"] = thinking
+        for source, target in (
+            ("content", "content"),
+            ("reasoning_content", "thinking"),
+            ("reasoning", "thinking"),
+            ("thinking", "thinking"),
+        ):
+            value = delta.get(source)
+            if isinstance(value, str) and value and target not in message:
+                message[target] = value
         tool_calls = []
         for tool_call in delta.get("tool_calls") or []:
             function = tool_call.get("function") or {}
@@ -340,13 +387,12 @@ class LLMGateway:
 
     def _run_stream_job(self, job: "Job") -> None:
         try:
-            req = urllib.request.Request(
-                job.url,
-                data=json.dumps(job.payload).encode(),
-                headers=self._request_headers(job),
-            )
-            with urllib.request.urlopen(req, timeout=job.timeout) as resp:
+            with self._open(job) as resp:
+                with self._state_lock:
+                    job.response = resp
                 while True:
+                    if job.cancel_requested.is_set():
+                        raise OSError("deferred: preempted by interactive chat")
                     line = resp.readline()
                     if not line:
                         break
@@ -374,35 +420,55 @@ class LLMGateway:
         except Exception as e:
             job.error = e
         finally:
+            with self._state_lock:
+                job.response = None
             job.chunks.put(None)  # sentinel — stream finished
             job.event.set()
 
     def _worker_loop(self):
         while True:
             priority, seq, job = self.queue.get()
+            with self._state_lock:
+                self._current_job = job
+                self._current_priority = priority
 
             # Health gate for all non-interactive jobs
-            if priority > Priority.INTERACTIVE:
-                self._health_gate(job)
+            if priority > Priority.INTERACTIVE and job.local_model:
+                if not can_load_text():
+                    job.error = OSError(f"deferred: {text_unavailable_reason()}")
+                else:
+                    self._health_gate(job, priority=priority)
+            if job.error:
+                job.event.set()
+                if job.chunks is not None:
+                    job.chunks.put(None)
+                self.queue.task_done()
+                with self._state_lock:
+                    self._current_job = None
+                    self._current_priority = None
+                continue
 
             if job.stream:
                 self._run_stream_job(job)
             else:
                 try:
-                    req = urllib.request.Request(
-                        job.url,
-                        data=json.dumps(job.payload).encode(),
-                        headers=self._request_headers(job),
-                    )
-
-                    with urllib.request.urlopen(req, timeout=job.timeout) as resp:
+                    with self._open(job) as resp:
+                        with self._state_lock:
+                            job.response = resp
+                        if job.cancel_requested.is_set():
+                            raise OSError("deferred: preempted by interactive chat")
                         job.result = json.loads(resp.read())
                 except Exception as e:
                     job.error = e
                 finally:
+                    with self._state_lock:
+                        job.response = None
                     job.event.set()
 
             self.queue.task_done()
+            with self._state_lock:
+                self._current_job = None
+                self._current_priority = None
 
             # Give the CPU breathing room between consecutive background jobs.
             # This sleep is after event.set() so the caller is already unblocked.
@@ -423,9 +489,8 @@ class LLMGateway:
         keep_alive=None,
     ) -> dict | None:
         config = get_llm_config()
-        resolved_model = self._resolve_model(
-            model, "vision" if "vl" in str(model or "").lower() else "chat"
-        )
+        role = "vision" if "vl" in str(model or "").lower() else "chat"
+        resolved_model = self._resolve_model(model, role)
         if is_cli_provider(config["provider"]):
             return run_cli_chat(
                 config,
@@ -435,10 +500,10 @@ class LLMGateway:
                 tools=tools,
                 timeout=timeout,
             )
-        chat_url, _ = self._provider_urls(config)
-        headers = self._auth_headers(config)
 
-        if config["provider"] == "ollama":
+        chat_url, _ = self._provider_urls(config)
+        local_model = config["provider"] == "ollama"
+        if local_model:
             payload = {
                 "model": resolved_model,
                 "messages": messages,
@@ -467,19 +532,20 @@ class LLMGateway:
                 payload["response_format"] = self._openai_response_format(format)
             payload.update(self._openai_options(options))
 
-        job = Job(chat_url, payload, timeout, headers=headers)
-        self.queue.put((priority, next(self._seq), job))
-
+        job = Job(
+            chat_url,
+            payload,
+            timeout,
+            headers=self._auth_headers(config),
+            local_model=local_model,
+        )
+        self._enqueue(job, priority)
         job.event.wait()
         if job.error:
             raise job.error
         if isinstance(job.result, dict) and job.result.get("error"):
             raise RuntimeError(str(job.result["error"]))
-        return (
-            job.result
-            if config["provider"] == "ollama"
-            else self._normalize_openai_response(job.result or {})
-        )
+        return job.result if local_model else self._normalize_openai_response(job.result or {})
 
     def chat_stream(
         self,
@@ -494,11 +560,10 @@ class LLMGateway:
         timeout=180,
         keep_alive=None,
     ):
-        """Yield normalized streaming chunks from Ollama or a local API."""
+        """Yield normalized streaming chunks from the selected provider."""
         config = get_llm_config()
-        resolved_model = self._resolve_model(
-            model, "vision" if "vl" in str(model or "").lower() else "chat"
-        )
+        role = "vision" if "vl" in str(model or "").lower() else "chat"
+        resolved_model = self._resolve_model(model, role)
         if is_cli_provider(config["provider"]):
             yield run_cli_chat(
                 config,
@@ -509,9 +574,10 @@ class LLMGateway:
                 timeout=timeout,
             )
             return
+
         chat_url, _ = self._provider_urls(config)
-        headers = self._auth_headers(config)
-        if config["provider"] == "ollama":
+        local_model = config["provider"] == "ollama"
+        if local_model:
             payload = {
                 "model": resolved_model,
                 "messages": messages,
@@ -547,10 +613,13 @@ class LLMGateway:
             payload,
             timeout,
             stream=True,
-            headers=headers,
+            headers=self._auth_headers(config),
             stream_format=stream_format,
+            local_model=local_model,
         )
-        self.queue.put((priority, next(self._seq), job))
+        self._enqueue(job, priority)
+        if job.waiting_for_background:
+            yield {"_gateway_status": "Waiting for background work"}
 
         tool_call_parts = {}
         while True:
@@ -592,40 +661,17 @@ class LLMGateway:
                 calls.append(call)
             yield {"message": {"tool_calls": calls}}
 
-    def embed(
-        self,
-        text,
-        *,
-        embed_model=None,
-        priority=Priority.FOREGROUND,
-        timeout=60,
-        keep_alive=None,
-    ):
-        """Embed text through loopback Ollama, never through the chat provider."""
-        model = embed_model or model_for("embedding", "nomic-embed-text")
-        payload = {
-            "model": model,
-            "input": text,
-            "keep_alive": keep_alive_for(model) if keep_alive is None else keep_alive,
-        }
-        job = Job(LOCAL_EMBED_URL, payload, timeout)
-        self.queue.put((priority, next(self._seq), job))
-        job.event.wait()
-        if job.error:
-            raise job.error
-        if isinstance(job.result, dict) and job.result.get("error"):
-            raise RuntimeError(str(job.result["error"]))
-        embeddings = (job.result or {}).get("embeddings", [])
+    def embed(self, text, *, embed_model=None, priority=Priority.FOREGROUND, timeout=60, keep_alive=None):
+        """Embed text with the bundled MiniLM model, independent of Ollama."""
         if isinstance(text, str):
-            return embeddings[0] if embeddings else []
-        return embeddings
+            return embed_text(text)
+        return embed_texts(text)
 
     def test_connection(self, config: dict[str, str] | None = None) -> dict:
-        """Check the selected endpoint without loading or downloading a model."""
         current = get_llm_config() if config is None else config
         if is_cli_provider(current["provider"]):
             return provider_status(current)
-        result = self.capabilities(config)
+        result = self.capabilities(current)
         return {
             "ok": result["ok"],
             "provider": result["provider"],
@@ -641,7 +687,8 @@ class LLMGateway:
             return provider_status(current)
         _, models_url = self._provider_urls(current)
         request = urllib.request.Request(
-            models_url, headers=self._auth_headers(current)
+            models_url,
+            headers=self._auth_headers(current),
         )
         try:
             with urllib.request.urlopen(request, timeout=8) as response:
@@ -660,12 +707,13 @@ class LLMGateway:
                 ]
             model_set = {model.lower() for model in models}
 
-            def availability(role: str, configured: str) -> bool | None:
+            def availability(configured: str) -> bool | None:
                 if not model_set:
                     return None
                 target = configured.lower()
                 return target in model_set or any(
-                    target.split(":")[0] == item.split(":")[0] for item in model_set
+                    target.split(":")[0] == item.split(":")[0]
+                    for item in model_set
                 )
 
             return {
@@ -676,7 +724,7 @@ class LLMGateway:
                 "capabilities": {
                     role: {
                         "model": current[field],
-                        "available": availability(role, current[field]),
+                        "available": availability(current[field]),
                     }
                     for role, field in (
                         ("chat", "chat_model"),
@@ -693,6 +741,5 @@ class LLMGateway:
                 "capabilities": {},
                 "error": str(exc),
             }
-
 
 gateway = LLMGateway()

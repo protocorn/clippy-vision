@@ -19,6 +19,7 @@ STOPWORDS: frozenset[str] = frozenset({
     "know", "think", "want", "use", "look", "come", "take", "give",
     "now", "here", "up", "out", "about", "over", "after", "before",
     "into", "through", "during", "until", "while", "since", "between",
+
     # query meta-words that carry zero content signal
     "related", "show", "tell", "find", "search", "describe",
     "exactly", "specific", "recent", "days", "last", "first", "ago",

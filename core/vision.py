@@ -36,7 +36,7 @@ MIN_GAP_SECONDS = 8
 
 BACKGROUND_INTERVALS_SECS = 60
 # Retain only a bounded local window of visual context.
-SCREENSHOT_TTL_MS = 24 * 60 * 60 * 1000
+SCREENSHOT_TTL_MS = 24 * 60 * 60 * 1000  # 24 hours
 JPEG_QUALITY = 75
 
 # Coalesce typing, paste, and context-change notifications into one capture.
@@ -46,21 +46,49 @@ ACTIVITY_DEBOUNCE_SECONDS = 2.0
 try:
     from core.privacy_settings import is_clippy_window, should_redact_window
 except ImportError:
+    # Redaction rules (Clippy window + user privacy toggles) live in privacy_settings.
     from privacy_settings import is_clippy_window, should_redact_window
-def get_capture_settings() -> dict:
-    return {
-        "capture_screenshots": True,
-        "capture_all_monitors": False,
-        "min_gap_seconds": 8.0,
-        "screenshot_retention_days": 1,
-        "activity_debounce_seconds": 2.0,
-        "background_interval_seconds": 60.0,
-    }
+try:
+    from core.accessibility_text import extract_accessibility_text, foreground_content_bounds
+    from core.app_settings import get_capture_settings
+    from core.ocr_crop import save_crop_metadata
+    from core.screenshot_enrichment import remember_accessibility_text
+except ImportError:
+    from accessibility_text import extract_accessibility_text, foreground_content_bounds
+    from app_settings import get_capture_settings
+    from ocr_crop import save_crop_metadata
+    from screenshot_enrichment import remember_accessibility_text
 
 _lock = threading.Lock()
 _last_capture_ms = 0
 _last_capture_hash = None
 _activity_timer: threading.Timer | None = None
+
+
+def _foreground_accessibility_text() -> str:
+    """Read foreground text only when the same window is safe to persist."""
+    metadata = get_window_metadata()
+    if not metadata:
+        return ""
+    process_name = metadata.get("process_name", "")
+    title = metadata.get("current_window_title", "")
+    if is_clippy_window(process_name, title) or should_redact_window(process_name, title):
+        return ""
+    captured_text = extract_accessibility_text()
+    current = get_window_metadata()
+    if not current:
+        return ""
+    original_key = (process_name, title, metadata.get("active_url"))
+    current_key = (
+        current.get("process_name", ""),
+        current.get("current_window_title", ""),
+        current.get("active_url"),
+    )
+    if current_key != original_key:
+        return ""
+    if is_clippy_window(current_key[0], current_key[1]) or should_redact_window(current_key[0], current_key[1]):
+        return ""
+    return captured_text
 
 
 def _redact_clippy_windows(img: Image.Image, monitor: dict) -> None:
@@ -96,8 +124,8 @@ def _redact_clippy_windows(img: Image.Image, monitor: dict) -> None:
                 return
 
             if is_clippy_window(name, title):
-                # Only obscure Clippy when the user is looking at it. A hidden
-                # or minimized window does not occupy the pixels being saved.
+                # Only obscure Clippy when the user is actually looking at it
+                # A hidden or minimized window does not occupy the saved pixels.
                 if hwnd != foreground_hwnd:
                     return
             elif not should_redact_window(name, title):
@@ -171,6 +199,17 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
         path.write_bytes(buf.getvalue())
+        # UIA text can be poor while its pane geometry still identifies the
+        # user's work area. Persist this immediately; OCR may run later after
+        # the focused UI has changed.
+        save_crop_metadata(
+            path,
+            image_width=img.width,
+            image_height=img.height,
+            monitor=monitor,
+            a11y_bounds=foreground_content_bounds(),
+        )
+        remember_accessibility_text(path, _foreground_accessibility_text())
         with _lock:
             _last_capture_hash = digest
         return path
@@ -205,6 +244,7 @@ def purge_expired_screenshots() -> None:
             ts_part = path.stem.split("_")[0]
             if int(ts_part) < cutoff_ms:
                 path.unlink()
+                path.with_suffix(".ocr-crop.json").unlink(missing_ok=True)
         except ValueError:
             continue
         except Exception as e:
@@ -247,6 +287,8 @@ def get_screenshots_near(
 
         # Allow a small future window for camera lag, but never attach a frame
         # captured substantially after the event being explained.
+        # Only consider screenshots taken up to window_secs before the event
+        # or up to 10 s after (camera lag), never far-future shots.
         offset = ts_ms - target_ms
         if -window_ms <= offset <= 10_000:
             candidates.append((abs(offset), path))

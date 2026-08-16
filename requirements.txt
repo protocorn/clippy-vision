@@ -5,8 +5,11 @@ Pillow
 pynput
 psutil
 imagehash
-mcp
+mcp>=1.27,<2
 transformers>=4.40.0
+rapidocr>=3.8.1,<4
+onnxruntime>=1.19.2
+safetensors>=0.4.0
 torch
 scikit-learn
 fastapi
@@ -14,4 +17,6 @@ uvicorn[standard]
 scipy
 numpy
 httpx
+rapidfuzz
+parsedatetime>=2.6
 ruff

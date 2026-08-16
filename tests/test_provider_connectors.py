@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import threading
 import unittest
 from itertools import count
 from pathlib import Path
@@ -40,7 +41,10 @@ class ProviderConfigTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(config["embedding_model"], "nomic-embed-text")
+        self.assertEqual(
+            config["embedding_model"],
+            "local:sentence-transformers/all-MiniLM-L6-v2",
+        )
         self.assertEqual(config["base_url"], llm_config.GEMINI_API_BASE_URL)
 
     def test_saved_api_key_is_redacted_from_public_config(self):
@@ -195,6 +199,9 @@ class GatewayCompatibilityTests(unittest.TestCase):
     def _gateway_with_queue(callback):
         instance = object.__new__(LLMGateway)
         instance._seq = count()
+        instance._state_lock = threading.Lock()
+        instance._current_job = None
+        instance._current_priority = None
 
         class ImmediateQueue:
             def put(self, item):
@@ -242,17 +249,23 @@ class GatewayCompatibilityTests(unittest.TestCase):
         self.assertEqual(normalized, {"message": {"role": "assistant", "content": "hello"}})
 
     def test_embed_preserves_single_and_batch_return_shapes(self):
-        def complete(job):
-            job.result = {"embeddings": [[0.1, 0.2], [0.3, 0.4]]}
-            job.event.set()
+        gateway = object.__new__(LLMGateway)
+        with (
+            patch.object(llm_gateway, "embed_text", return_value=[0.1, 0.2]) as single,
+            patch.object(
+                llm_gateway,
+                "embed_texts",
+                return_value=[[0.1, 0.2], [0.3, 0.4]],
+            ) as batch,
+        ):
+            self.assertEqual(gateway.embed("one"), [0.1, 0.2])
+            self.assertEqual(
+                gateway.embed(["one", "two"]),
+                [[0.1, 0.2], [0.3, 0.4]],
+            )
 
-        gateway = self._gateway_with_queue(complete)
-
-        self.assertEqual(gateway.embed("one", embed_model="nomic-embed-text"), [0.1, 0.2])
-        self.assertEqual(
-            gateway.embed(["one", "two"], embed_model="nomic-embed-text"),
-            [[0.1, 0.2], [0.3, 0.4]],
-        )
+        single.assert_called_once_with("one")
+        batch.assert_called_once_with(["one", "two"])
 
     def test_streaming_openai_tool_fragments_are_assembled(self):
         def complete(job):

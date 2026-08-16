@@ -9,6 +9,8 @@ TOOLS = {
     "delete_note":     delete_note,
 }
 
+
+
 # Used when prefetch already supplied retrieval context — model only gets
 # write/delete tools so it physically cannot trigger a redundant search.
 WRITE_TOOLS = {
@@ -122,6 +124,7 @@ TOOL_SCHEMAS = [
         },
     },
 ]
+
 
 # Schemas for write-only mode (used when prefetch context is present)
 WRITE_TOOL_SCHEMAS = [s for s in TOOL_SCHEMAS if s["function"]["name"] in WRITE_TOOLS]

@@ -169,6 +169,8 @@ contextBridge.exposeInMainWorld('clippy', {
 
     setUpdateCheckEnabled: (enabled) => ipcRenderer.invoke('set-update-check', Boolean(enabled)),
 
+    getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
     toggleCapture: () => ipcRenderer.invoke('toggle-capture'),
 
     getCaptureStatus: () => ipcRenderer.invoke('get-capture-status'),

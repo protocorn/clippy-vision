@@ -18,19 +18,13 @@ from pynput import keyboard
 
 try:
     from core.baseline import compute_deviation, update_baseline
-    from core.distil import distil, should_distil
     from core.events import Event, WindowMetadata, generate_summary, get_session_id
-    from core.screenshot_processor import start_screenshot_processor
     from core.storage import purge_expired, store_event
-    from core.summarizer import start_summarizer
     from core.vision import on_activity_event, start_vision_daemon
 except ImportError:
     from baseline import compute_deviation, update_baseline
-    from distil import distil, should_distil
     from events import Event, WindowMetadata, generate_summary, get_session_id
-    from screenshot_processor import start_screenshot_processor
     from storage import purge_expired, store_event
-    from summarizer import start_summarizer
     from vision import on_activity_event, start_vision_daemon
 import uuid
 from datetime import datetime
@@ -57,13 +51,10 @@ except ImportError:
     from platform_support import (
         window_key,
     )
-def get_capture_settings() -> dict:
-    return {"capture_clipboard": True}
-
 try:
-    from core.model_residency import on_capture_start, on_capture_stop
+    from core.app_settings import get_capture_settings
 except ImportError:
-    from model_residency import on_capture_start, on_capture_stop
+    from app_settings import get_capture_settings
 try:
     from core.capture_state import set_capture_status
 except ImportError:
@@ -77,7 +68,6 @@ except ImportError:
 
 def _capture_shutdown() -> None:
     set_capture_status(False, None)
-    on_capture_stop()
 
 
 def _capture_heartbeat() -> None:
@@ -86,20 +76,15 @@ def _capture_heartbeat() -> None:
         time.sleep(60)
 
 
-on_capture_start()
 set_capture_status(True, os.getpid())
 atexit.register(_capture_shutdown)
 threading.Thread(target=_capture_heartbeat, daemon=True, name="capture-heartbeat").start()
 purge_expired()
-# Startup is intentionally centralized here so the desktop process can spawn a
-# single capture worker and avoid duplicate listeners or duplicate daemons.
+# Capture only intakes live activity and runs cheap Tier-0/1 classification.
+# Deferred Tier-2 catch-up, summarizer, screenshot OCR, and distil run in the
+# API process so backlog drains even when capture is paused.
 start_worker()
 start_vision_daemon()
-start_summarizer()
-start_screenshot_processor()
-if should_distil():
-    print("[startup] Distillation threshold reached — running distil...")
-    distil()
 
 
 # A burst ends after a short pause; grouping keystrokes keeps activity records

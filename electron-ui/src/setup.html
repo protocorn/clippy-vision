@@ -542,7 +542,7 @@
         <div class="card-head">AI connection</div>
         <div class="provider-card-body">
           <label>Provider<select id="llm-provider">
-            <option value="ollama">Ollama · fully local</option>
+            <option value="ollama">Ollama-compatible local API</option>
             <option value="openai_compatible">OpenAI-compatible API</option>
             <option value="gemini_api">Google Gemini API</option>
             <option value="codex_cli">Codex subscription CLI</option>
@@ -555,11 +555,11 @@
               <label>Vision model<input id="llm-vision-model" placeholder="local-vision" /></label>
             </div>
             <label id="llm-cli-command-field" hidden>CLI command/path<input id="llm-cli-command" placeholder="Detected from PATH" /></label>
-            <div class="provider-help">Embeddings use nomic-embed-text through local Ollama.</div>
+            <div class="provider-help">MiniLM embeddings are bundled and event RAG is opt-in.</div>
             <label id="llm-api-key-field">API key <span style="font-weight:400;text-transform:none;letter-spacing:normal">optional</span><input id="llm-api-key" type="password" placeholder="Leave blank if your local server needs no key" autocomplete="off" /></label>
             <button type="button" class="secondary" id="llm-connect-btn" hidden>Connect account in Terminal</button>
           </div>
-          <div class="provider-help" id="provider-help">Ollama will download and manage the chat, vision, and embedding models during setup.</div>
+          <div class="provider-help" id="provider-help">Ollama manages the chat model; capture uses accessibility text and local OCR.</div>
         </div>
       </div>
 
@@ -610,7 +610,7 @@
       </details>
 
       <p class="note" id="hardware-note">
-        Ollama downloads the chat, vision, and embedding models locally.
+        Use the managed Ollama default, or point Clippy at an existing local API to skip the chat-model download.
       </p>
 
       <label class="override" id="override-row">
@@ -668,7 +668,7 @@
         <div class="step-icon">○</div>
         <div class="step-body">
           <div class="step-label">AI Models</div>
-          <div class="step-sub">Downloading nomic-embed-text, qwen3:8b, and qwen3-vl:4b</div>
+          <div class="step-sub">Downloading qwen3:8b (~4.7 GB)</div>
           <div class="step-bar-wrap"><div class="step-bar" id="bar-models"></div></div>
         </div>
       </div>
@@ -758,8 +758,8 @@
         ? 'API provider'
         : subscription ? 'Subscription CLI' : check.level === 'ready' ? 'Ready' : check.level === 'warn' ? 'Review' : 'Blocked'
       $('hardware-note').textContent = external || subscription
-        ? 'Chat prompts may include retrieved activity context and are sent to the selected provider. The activity database and embeddings remain local.'
-        : 'Models use roughly 8 GB on disk. During capture, leave headroom for your browser, IDE, and the desktop compositor.'
+        ? 'Chat prompts may include retrieved activity context and are sent to the selected provider. MiniLM embeddings and the activity database remain local.'
+        : 'The default text model uses roughly 5 GB on disk. Screen capture uses accessibility + OCR and does not download a vision model.'
 
       const verdict = $('verdict')
       const continueBtn = $('btn-continue')
@@ -774,7 +774,7 @@
           ? 'Ready to connect to your API'
           : subscription ? 'Ready to use your subscription' : 'Ready for full capture'
         $('verdict-body').textContent = external || subscription
-          ? 'Only the small local embedding model is downloaded. Review the provider privacy terms and complete authentication before launching.'
+          ? 'No chat or vision model is downloaded. Review the provider privacy terms and complete authentication before launching.'
           : 'Your machine meets the recommended specs. You can install and use screen capture comfortably alongside everyday apps.'
         overrideRow.classList.remove('visible')
         override.checked = false
@@ -784,7 +784,7 @@
         $('verdict-icon').textContent = '!'
         $('verdict-title').textContent = 'May run, but expect lag'
         $('verdict-body').textContent =
-          'Your machine is above the minimum but below recommended. Capture can work with fewer apps open, but you may see freezes when switching windows or playing video.'
+          'Your machine is above the minimum but below recommended. Capture should be fine; chat may feel slower if you also run heavy apps alongside the text model.'
         overrideRow.classList.add('visible')
         continueBtn.disabled = !override.checked
         continueBtn.textContent = 'Continue anyway'
@@ -792,7 +792,7 @@
         $('verdict-icon').textContent = '✕'
         $('verdict-title').textContent = 'Not enough resources'
         $('verdict-body').textContent =
-          'This machine is below Clippy Vision’s minimum for local AI capture. Setup is blocked so we don’t leave you with a desktop that freezes under load. Free disk space or add memory, then try again.'
+          'This machine is below Clippy Vision’s minimum for the local text model and capture stack. Free disk space or add memory, then try again.'
         overrideRow.classList.remove('visible')
         override.checked = false
         continueBtn.disabled = true
@@ -826,8 +826,8 @@
       const subscription = provider.endsWith('_cli')
       const apiProvider = provider === 'openai_compatible' || provider === 'gemini_api'
       $('llm-provider').value = provider
-      $('provider-details').hidden = provider === 'ollama'
-      $('llm-base-url-field').hidden = !apiProvider
+      $('provider-details').hidden = false
+      $('llm-base-url-field').hidden = subscription
       $('llm-api-key-field').hidden = !apiProvider
       $('llm-cli-command-field').hidden = !subscription
       $('llm-connect-btn').hidden = !subscription
@@ -838,12 +838,12 @@
       $('llm-api-key').value = ''
       $('llm-api-key').placeholder = config.api_key_set ? 'Saved key is set · leave blank to keep it' : 'Leave blank if your local server needs no key'
       $('provider-help').textContent = provider === 'gemini_api'
-        ? 'Use a Gemini API key. Gemini CLI login is not used. Embeddings remain local.'
+        ? 'Use a Gemini API key. Gemini CLI login is not used. MiniLM embeddings remain local.'
         : provider === 'openai_compatible'
-        ? 'Clippy sends chat and vision requests to this API. Embeddings remain local.'
+        ? 'Clippy sends chat and vision requests to this API. MiniLM embeddings remain local.'
         : subscription
-        ? 'Clippy uses the official authenticated CLI in read-only mode. Embeddings remain local.'
-        : 'Ollama will download and manage the chat, vision, and embedding models during setup.'
+        ? 'Clippy uses the official authenticated CLI in read-only mode. MiniLM embeddings remain local.'
+        : 'Clippy can install and manage Ollama locally; capture remains accessibility and OCR only.'
     }
 
     function selectedLLMConfig() {
@@ -873,14 +873,13 @@
       $('llm-chat-model').value = provider === 'codex_cli' ? 'default' : provider === 'claude_cli' ? 'sonnet' : provider === 'gemini_api' ? 'gemini-2.5-flash' : provider === 'openai_compatible' ? 'local-chat' : 'qwen3:8b'
       $('llm-vision-model').value = provider === 'codex_cli' ? 'default' : provider === 'claude_cli' ? 'sonnet' : provider === 'gemini_api' ? 'gemini-2.5-flash' : provider === 'openai_compatible' ? 'local-vision' : 'qwen3-vl:4b'
       $('llm-cli-command').value = provider === 'codex_cli' ? 'codex' : provider === 'claude_cli' ? 'claude' : ''
-      $('provider-details').hidden = provider === 'ollama'
-      $('llm-base-url-field').hidden = !apiProvider
+      $('llm-base-url-field').hidden = subscription
       $('llm-api-key-field').hidden = !apiProvider
       $('llm-cli-command-field').hidden = !subscription
       $('llm-connect-btn').hidden = !subscription
       $('provider-help').textContent = subscription
-        ? 'Connect the official CLI account, then return here. Embeddings remain local.'
-        : apiProvider ? 'Chat and vision use this API. Embeddings remain local.' : 'Ollama manages every model locally.'
+        ? 'Connect the official CLI account, then return here. MiniLM embeddings remain local.'
+        : apiProvider ? 'Chat and vision use this API. MiniLM embeddings remain local.' : 'Ollama manages chat locally; capture uses accessibility and OCR.'
       try {
         await saveSelectedLLMConfig()
         await loadHardware()
@@ -920,6 +919,7 @@
           else btn.disabled = false
           return
         }
+        if (res.check) configureSetupMode(res.check.mode)
         showInstallScreen()
       } catch (e) {
         btn.disabled = false
@@ -929,9 +929,8 @@
     })
 
     function configureSetupMode(mode) {
-      // Ollama remains visible for external providers because it owns the
-      // loopback-only embedding model used by memory retrieval.
-      activeSteps = new Set(STEPS)
+      const external = mode !== 'ollama'
+      activeSteps = new Set(external ? ['python', 'packages', 'warmup'] : STEPS)
       completedSteps.clear()
       for (const key of STEPS) {
         const el = getStepEl(key)
