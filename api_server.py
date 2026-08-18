@@ -4,7 +4,7 @@ import sys
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -27,6 +27,8 @@ from core.backlog import get_backlog_status
 from core.capture_state import get_capture_status
 from core.diagnostics import get_diagnostics
 from core.intro_builder import start_intro_rebuild_daemon
+from core.llm_config import get_llm_config, public_llm_config, save_llm_config
+from core.llm_gateway import gateway
 from core.memory_store import get_profile, save_identity_field, set_introduction
 from core.model_residency import can_load_light, on_capture_stop, warm_for_startup
 from core.paths import get_data_dir, get_screenshots_dir
@@ -114,6 +116,15 @@ class ProfileUpdateRequest(BaseModel):
 class PrivacyUpdateRequest(BaseModel):
 
     enabled: dict[str, bool]
+
+
+class ProviderUpdateRequest(BaseModel):
+    provider: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    cli_command: str | None = None
+    chat_model: str | None = None
+    vision_model: str | None = None
 
 
 class CaptureSettingsRequest(BaseModel):
@@ -280,6 +291,34 @@ def write_privacy_settings(req: PrivacyUpdateRequest):
     return {"targets": list_privacy_targets()}
 
 
+@app.get("/settings/provider")
+def read_provider_settings():
+    return public_llm_config()
+
+
+@app.put("/settings/provider")
+def write_provider_settings(req: ProviderUpdateRequest):
+    values: dict[str, Any] = {
+        key: value
+        for key, value in req.dict(exclude_unset=True).items()
+        if value is not None
+    }
+    try:
+        return public_llm_config(save_llm_config(values))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/settings/provider/test")
+def test_provider_connection():
+    return gateway.test_connection(get_llm_config())
+
+
+@app.get("/settings/provider/capabilities")
+def provider_capabilities():
+    return gateway.capabilities(get_llm_config())
+
+
 @app.get("/settings/capture")
 def read_capture_settings():
     return get_capture_settings()
@@ -406,6 +445,7 @@ def status():
         "capture": get_capture_status(),
         "residency": load_residency(),
         "backlog": get_backlog_status(),
+        "provider": public_llm_config(),
     }
 
 

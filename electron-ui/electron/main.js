@@ -69,13 +69,17 @@ const OLLAMA_COMMAND = process.env.CLIPPY_OLLAMA || commandFromKnownPaths('ollam
 const DEFAULT_API_PORT = 8000
 let apiPort = Number(process.env.CLIPPY_API_PORT) || 0
 const OLLAMA_BASE_URL = 'http://127.0.0.1:11434'
+const GEMINI_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai'
+const GEMINI_DEFAULT_MODEL = 'gemini-2.5-flash'
 const RELEASE_REPOSITORY = 'protocorn/clippy-vision'
 const LOCAL_EMBEDDING_MODEL = 'local:sentence-transformers/all-MiniLM-L6-v2'
-
-// Hosted and subscription providers are deliberately not active in this
-// release. Keep the names here as a documented extension seam until the
-// project is ready to define their privacy and authentication guarantees.
-// Future provider IDs: gemini_api, codex_cli, claude_cli.
+// External providers are opt-in. Their prompts can include retrieved activity
+// context, while the activity database and embedding requests remain local.
+const SUBSCRIPTION_PROVIDERS = new Set(['codex_cli', 'claude_cli'])
+const CLI_DEFAULTS = {
+    codex_cli: { command: 'codex', login_args: ['login'], chat_model: 'default', vision_model: 'default' },
+    claude_cli: { command: 'claude', login_args: [], chat_model: 'sonnet', vision_model: 'sonnet' },
+}
 const OLLAMA_MAX_LOADED_MODELS = '1'
 const OLLAMA_NUM_PARALLEL = '1'
 
@@ -85,45 +89,80 @@ const DEFAULT_LLM_CONFIG = {
     api_key: '',
     cli_command: '',
     chat_model: 'qwen3:8b',
+    vision_model: 'qwen3-vl:4b',
     // Capture uses accessibility + OCR; no vision model is downloaded or required.
     embedding_model: LOCAL_EMBEDDING_MODEL,
 }
 
 function normalizeLLMConfig(values = {}) {
     const merged = { ...DEFAULT_LLM_CONFIG, ...values }
-    const requestedProvider = String(merged.provider || 'ollama').toLowerCase()
-    const supportedProvider = requestedProvider === 'ollama'
-
-    // An old hosted-provider setting must never leave its remote URL behind
-    // after being normalized to the local Ollama default.
-    merged.provider = 'ollama'
-    if (!values.base_url || !supportedProvider) {
-        merged.base_url = OLLAMA_BASE_URL
+    const requested = String(merged.provider || 'ollama').trim().toLowerCase()
+    // Accept stable aliases from environment variables and older hand-edited
+    // config files, then persist one canonical provider ID.
+    const aliases = {
+        openai: 'openai_compatible',
+        'openai-compatible': 'openai_compatible',
+        openai_compatible: 'openai_compatible',
+        local: 'openai_compatible',
+        'local-api': 'openai_compatible',
+        local_api: 'openai_compatible',
+        codex: 'codex_cli',
+        'codex-cli': 'codex_cli',
+        codex_cli: 'codex_cli',
+        claude: 'claude_cli',
+        'claude-code': 'claude_cli',
+        claude_cli: 'claude_cli',
+        gemini: 'gemini_api',
+        'gemini-api': 'gemini_api',
+        gemini_api: 'gemini_api',
+    }
+    merged.provider = aliases[requested] || (requested === 'ollama' ? 'ollama' : 'ollama')
+    if (!values.base_url || (merged.provider === 'gemini_api' && merged.base_url === 'cli://local')) {
+        merged.base_url = SUBSCRIPTION_PROVIDERS.has(merged.provider)
+            ? 'cli://local'
+            : merged.provider === 'gemini_api'
+            ? GEMINI_API_BASE_URL
+            : merged.provider === 'openai_compatible'
+            ? 'http://127.0.0.1:1234/v1'
+            : OLLAMA_BASE_URL
     }
     merged.base_url = String(merged.base_url || '').trim().replace(/\/+$/, '')
-    // Do not retain hosted credentials in a local-only build. Ollama's local
-    // endpoint does not require an API key.
-    merged.api_key = ''
-    merged.cli_command = ''
-    merged.chat_model = String(merged.chat_model || DEFAULT_LLM_CONFIG.chat_model).trim()
-    // Drop leftover vision_model keys from older installs — setup never pulls VL.
-    delete merged.vision_model
-    // Embeddings remain a local Ollama responsibility and cannot be redirected
-    // to a hosted service through the desktop settings.
+    merged.api_key = String(merged.api_key || '').trim()
+    merged.cli_command = String(merged.cli_command || '').trim()
+    for (const field of ['chat_model', 'vision_model']) {
+        merged[field] = String(merged[field] || DEFAULT_LLM_CONFIG[field]).trim()
+    }
+    if (SUBSCRIPTION_PROVIDERS.has(merged.provider)) {
+        const defaults = CLI_DEFAULTS[merged.provider]
+        if (!values.chat_model || ['qwen3:8b', ''].includes(merged.chat_model)) merged.chat_model = defaults.chat_model
+        if (!values.vision_model || ['qwen3-vl:4b', ''].includes(merged.vision_model)) merged.vision_model = defaults.vision_model
+        if (!merged.cli_command) merged.cli_command = defaults.command
+    }
+    if (merged.provider === 'gemini_api') {
+        if (!values.chat_model || ['qwen3:8b', 'auto', ''].includes(merged.chat_model)) merged.chat_model = GEMINI_DEFAULT_MODEL
+        if (!values.vision_model || ['qwen3-vl:4b', 'auto', ''].includes(merged.vision_model)) merged.vision_model = GEMINI_DEFAULT_MODEL
+        merged.cli_command = ''
+    }
+    // Bundled MiniLM keeps retrieval local for every chat provider.
     merged.embedding_model = LOCAL_EMBEDDING_MODEL
     return merged
 }
 
 function validateLLMConfig(values = {}) {
-    for (const field of ['base_url', 'chat_model']) {
+    for (const field of ['base_url', 'chat_model', 'vision_model']) {
         if (Object.prototype.hasOwnProperty.call(values, field) && !String(values[field] || '').trim()) {
             throw new Error(`${field} cannot be empty.`)
         }
     }
-    if (values.provider !== 'ollama' || !/^https?:\/\/[^\s]+$/i.test(values.base_url)) {
+    if (!SUBSCRIPTION_PROVIDERS.has(values.provider) && !/^https?:\/\/[^\s]+$/i.test(values.base_url)) {
         throw new Error('Base URL must be a valid HTTP or HTTPS URL.')
     }
-    if (values.chat_model.length > 240) throw new Error('chat_model is too long.')
+    if (SUBSCRIPTION_PROVIDERS.has(values.provider) && values.cli_command.length > 240) {
+        throw new Error('CLI command is too long.')
+    }
+    for (const field of ['chat_model', 'vision_model']) {
+        if (values[field].length > 240) throw new Error(`${field} is too long.`)
+    }
     return values
 }
 
@@ -136,6 +175,7 @@ function readLLMConfig() {
         api_key: process.env.CLIPPY_LLM_API_KEY,
         cli_command: process.env.CLIPPY_CLI_COMMAND,
         chat_model: process.env.CLIPPY_CHAT_MODEL,
+        vision_model: process.env.CLIPPY_VISION_MODEL,
     }
     return normalizeLLMConfig({ ...saved, ...Object.fromEntries(Object.entries(env).filter(([, value]) => value)) })
 }
@@ -149,6 +189,7 @@ function publicLLMConfig() {
         api_key: 'CLIPPY_LLM_API_KEY',
         cli_command: 'CLIPPY_CLI_COMMAND',
         chat_model: 'CLIPPY_CHAT_MODEL',
+        vision_model: 'CLIPPY_VISION_MODEL',
     }).filter(([, envName]) => String(process.env[envName] || '').trim()).map(([field]) => field)
     return { ...safe, api_key_set: Boolean(config.api_key), environment_overrides }
 }
@@ -156,7 +197,7 @@ function publicLLMConfig() {
 function saveLLMConfig(values = {}) {
     if (Object.prototype.hasOwnProperty.call(values, 'provider')) {
         const provider = String(values.provider || '').trim().toLowerCase()
-        const validProviders = new Set(['ollama'])
+        const validProviders = new Set(['ollama', 'openai', 'openai-compatible', 'openai_compatible', 'local', 'local-api', 'local_api', 'gemini', 'gemini-api', 'gemini_api', ...SUBSCRIPTION_PROVIDERS])
         if (!validProviders.has(provider)) throw new Error('Unsupported AI provider.')
     }
     const current = readLLMConfig()
@@ -167,23 +208,99 @@ function saveLLMConfig(values = {}) {
         targetProvider !== current.provider
     const nextValues = { ...current, ...values }
     if (providerChanged && !Object.prototype.hasOwnProperty.call(values, 'base_url')) {
-        nextValues.base_url = OLLAMA_BASE_URL
+        nextValues.base_url = SUBSCRIPTION_PROVIDERS.has(targetProvider)
+            ? 'cli://local'
+            : targetProvider === 'gemini_api'
+            ? GEMINI_API_BASE_URL
+            : targetProvider === 'ollama'
+            ? OLLAMA_BASE_URL
+            : 'http://127.0.0.1:1234/v1'
+    }
+    if (providerChanged && !Object.prototype.hasOwnProperty.call(values, 'api_key')) nextValues.api_key = ''
+    if (providerChanged && !Object.prototype.hasOwnProperty.call(values, 'cli_command')) nextValues.cli_command = ''
+    if (providerChanged) {
+        const defaults = {
+            ollama: ['qwen3:8b', 'qwen3-vl:4b'],
+            openai_compatible: ['local-chat', 'local-vision'],
+            gemini_api: [GEMINI_DEFAULT_MODEL, GEMINI_DEFAULT_MODEL],
+            codex_cli: [CLI_DEFAULTS.codex_cli.chat_model, CLI_DEFAULTS.codex_cli.vision_model],
+            claude_cli: [CLI_DEFAULTS.claude_cli.chat_model, CLI_DEFAULTS.claude_cli.vision_model],
+        }[targetProvider]
+        if (!Object.prototype.hasOwnProperty.call(values, 'chat_model')) nextValues.chat_model = defaults[0]
+        if (!Object.prototype.hasOwnProperty.call(values, 'vision_model')) nextValues.vision_model = defaults[1]
     }
     const next = normalizeLLMConfig(nextValues)
 
+    if (!providerChanged && !String(values.api_key || '').trim() && current.api_key) next.api_key = current.api_key
     validateLLMConfig(next)
     fs.mkdirSync(DATA_DIR, { recursive: true })
-    fs.writeFileSync(LLM_CONFIG_FILE, JSON.stringify(next, null, 2) + '\n')
+    fs.writeFileSync(LLM_CONFIG_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 })
+    if (process.platform !== 'win32') fs.chmodSync(LLM_CONFIG_FILE, 0o600)
     return publicLLMConfig()
 }
 
-function openProviderAuth() {
-    // Hosted and subscription sign-in is intentionally a no-op while Clippy
-    // Vision's product boundary is 100% local.
+function isExternalProvider() {
+    return readLLMConfig().provider !== 'ollama'
+}
+
+function isSubscriptionProvider(provider = readLLMConfig().provider) {
+    return SUBSCRIPTION_PROVIDERS.has(provider)
+}
+
+function providerDisplayName(provider = readLLMConfig().provider) {
     return {
-        ok: false,
-        error: 'Hosted and subscription providers are disabled. Clippy Vision uses local Ollama.',
+        codex_cli: 'Codex subscription',
+        claude_cli: 'Claude subscription',
+        gemini_api: 'Google Gemini API',
+        openai_compatible: 'OpenAI-compatible API',
+        ollama: 'Ollama',
+    }[provider] || provider
+}
+
+function shellQuote(value) {
+    return `'${String(value).replace(/'/g, "'\\''")}'`
+}
+
+function windowsQuote(value) {
+    const text = String(value)
+    return /[\s"]/u.test(text) ? `"${text.replace(/(["\\])/gu, '\\$1')}"` : text
+}
+
+function openProviderAuth(provider) {
+    // Authentication stays inside each provider's official CLI. Electron only
+    // opens a terminal and never reads or stores subscription credentials.
+    if (!isSubscriptionProvider(provider)) {
+        return { ok: false, error: 'Choose a subscription CLI provider first.' }
     }
+    const metadata = CLI_DEFAULTS[provider]
+    const config = readLLMConfig()
+    const executable = String(config.cli_command || metadata.command).trim()
+    if (!executable) return { ok: false, error: 'No CLI command is configured.' }
+    const args = metadata.login_args || []
+    let commandLine
+    if (process.platform === 'win32') {
+        commandLine = [executable, ...args].map(windowsQuote).join(' ')
+        const terminal = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/k', commandLine], {
+            detached: true, stdio: 'ignore', windowsHide: false,
+        })
+        terminal.unref()
+    } else {
+        const pathPrefix = process.platform === 'darwin' && PATH_HINTS.length
+            ? `export PATH=${shellQuote(PATH_HINTS.join(path.delimiter))}:$PATH; `
+            : ''
+        commandLine = `${pathPrefix}${[executable, ...args].map(shellQuote).join(' ')}`
+        if (process.platform === 'darwin') {
+            const script = `tell application "Terminal" to do script ${JSON.stringify(commandLine)}`
+            const terminal = spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' })
+            terminal.unref()
+        } else {
+            const terminal = spawn(process.env.TERMINAL || 'x-terminal-emulator', ['-e', 'sh', '-lc', commandLine], {
+                detached: true, stdio: 'ignore',
+            })
+            terminal.unref()
+        }
+    }
+    return { ok: true, provider, message: `Opened a terminal for ${providerDisplayName(provider)} sign-in.` }
 }
 
 function configuredOllamaBaseURL() {
@@ -192,6 +309,7 @@ function configuredOllamaBaseURL() {
 }
 
 function usesManagedOllama() {
+    if (readLLMConfig().provider !== 'ollama') return false
     const baseURL = configuredOllamaBaseURL().toLowerCase().replace(/\/+$/, '')
     return new Set([
         'http://127.0.0.1:11434',
@@ -244,6 +362,7 @@ function buildPythonEnv(extra = {}) {
         PATH: [...PATH_HINTS, process.env.PATH || ''].filter(Boolean).join(path.delimiter),
         OLLAMA_MAX_LOADED_MODELS,
         OLLAMA_NUM_PARALLEL,
+        CLIPPY_OLLAMA_URL: configuredOllamaBaseURL(),
         ...extra,
     }
 }
@@ -702,20 +821,26 @@ async function stepWarmup() {
         log('API server slow to start — continuing anyway.', 'info')
     }
 
-    // Ensure Ollama is reachable before asking the API to load weights.
-    try {
-        await pollUntilAlive(configuredOllamaBaseURL(), 1000, 30)
-    } catch (_) {
-        log('Ollama not responding — skipping model warm.', 'info')
+    const external = isExternalProvider()
+    if (!external) {
+        try {
+            await pollUntilAlive(configuredOllamaBaseURL(), 1000, 30)
+        } catch (_) {
+            log('Ollama not responding — skipping model warm.', 'info')
+        }
     }
 
-
-    // Capture uses accessibility text with OCR fallback and warms no model.
-    log('Warming the text model...', 'info')
-    stepUpdate('warmup', 'running', `Loading ${chatModel}...`)
+    log(external ? `Checking ${providerDisplayName()}...` : 'Warming the text model...', 'info')
+    stepUpdate('warmup', 'running', external ? 'Checking provider connection...' : `Loading ${chatModel}...`)
     try {
         await httpPost(apiUrl('/residency/startup'), {}, 120000)
-        log('Text model ready — capture remains model-free.', 'ok')
+        if (external) {
+            const status = await httpPost(apiUrl('/settings/provider/test'), {}, 10000)
+            if (!status?.ok) throw new Error(status?.error || `${providerDisplayName()} could not be reached.`)
+            log(status.message || `${providerDisplayName()} is ready.`, 'ok')
+        } else {
+            log('Text model ready — capture remains model-free.', 'ok')
+        }
     } catch (e) {
         log(`Model warm skipped or timed out (${e.message}) — continuing.`, 'info')
 
@@ -738,7 +863,7 @@ async function stepWarmup() {
         if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
     }
 
-    writeSetupFlag()
+    writeSetupFlag({ provider: readLLMConfig().provider })
 
     log('Setup complete!', 'ok')
     markDone('warmup', 'Ready!')
@@ -841,7 +966,9 @@ async function runPreflightChecks() {
         return { ok: false, step: 'python', reason: 'Python not found or not on PATH.' }
     }
 
-    if (!managedOllama) {
+    if (isExternalProvider()) {
+        // The API performs the authenticated provider check after it starts.
+    } else if (!managedOllama) {
         if (!(await ollamaReachable(3, 500))) {
             return { ok: false, step: 'warmup', reason: 'The configured local API is not reachable.' }
         }
@@ -888,6 +1015,8 @@ const HW_MIN = { ramGb: 8, vramGb: 0, diskGb: 8 }
 const HW_REC = { ramGb: 16, vramGb: 4, diskGb: 10 }
 const HW_MIN_MAC = { ramGb: 8, vramGb: 8, diskGb: 8 }
 const HW_REC_MAC = { ramGb: 16, vramGb: 16, diskGb: 10 }
+const HW_MIN_EXTERNAL = { ramGb: 4, vramGb: 0, diskGb: 2 }
+const HW_REC_EXTERNAL = { ramGb: 8, vramGb: 0, diskGb: 4 }
 
 function gradeResource(value, min, rec) {
     if (value < min) return 'fail'
@@ -958,9 +1087,12 @@ async function getHardwareCheck() {
     const vramRaw = await getVramGb()
     const diskGb = Math.round(diskRaw * 10) / 10
     const osId = detectOsLabel()
-    const requirements = process.platform === 'darwin' ? HW_MIN_MAC : HW_MIN
-    const recommended = process.platform === 'darwin' ? HW_REC_MAC : HW_REC
-    const vramGb = process.platform === 'darwin'
+    const external = isExternalProvider()
+    const requirements = external ? HW_MIN_EXTERNAL : process.platform === 'darwin' ? HW_MIN_MAC : HW_MIN
+    const recommended = external ? HW_REC_EXTERNAL : process.platform === 'darwin' ? HW_REC_MAC : HW_REC
+    const vramGb = external
+        ? 0
+        : process.platform === 'darwin'
         ? ramGb
         : Math.round(vramRaw * 10) / 10
     const osOk = process.platform === 'win32' || process.platform === 'darwin'
@@ -986,14 +1118,14 @@ async function getHardwareCheck() {
             vramGb,
             diskGb,
             os: osId,
-            memoryLabel: process.platform === 'darwin' ? 'Unified memory' : 'GPU VRAM',
+            memoryLabel: external ? 'Provider-hosted' : process.platform === 'darwin' ? 'Unified memory' : 'GPU VRAM',
             osLabel: osId === 'windows11' ? 'Windows 11'
                 : osId === 'windows10' ? 'Windows 10'
                 : osId === 'macos-apple-silicon' ? 'macOS · Apple Silicon'
                 : osId === 'macos-intel' ? 'macOS · Intel'
                 : osId,
         },
-        mode: usesManagedOllama() ? 'ollama' : 'external',
+        mode: external ? (isSubscriptionProvider() ? 'subscription' : 'external') : usesManagedOllama() ? 'ollama' : 'external',
     }
 }
 
@@ -1540,14 +1672,20 @@ app.whenReady().then(async () => {
         }
 
         console.log('[preflight] All checks passed — starting API')
-        sendLoadingStatus(null, 'Starting AI server and loading models…')
+        sendLoadingStatus(null, isExternalProvider()
+            ? `Starting Clippy with ${providerDisplayName()}…`
+            : 'Starting AI server and loading models…')
         await startServer()
         pollUntilAlive(apiUrl('/health'), 1000, 90)
             .then(async () => {
-                console.log('[app] API server healthy — warming text model...')
-                sendLoadingStatus(null, 'Loading text model…')
+                console.log('[app] API server healthy — preparing provider...')
+                sendLoadingStatus(null, isExternalProvider() ? 'Checking provider…' : 'Loading text model…')
                 try {
                     await httpPost(apiUrl('/residency/startup'), {}, 120000)
+                    if (isExternalProvider()) {
+                        const status = await httpPost(apiUrl('/settings/provider/test'), {}, 10000)
+                        if (!status?.ok) console.log('[app] provider check failed:', status?.error || 'unknown error')
+                    }
                     console.log('[app] residency startup warm done')
                 } catch (e) {
                     console.log('[app] residency warm skipped:', e.message)

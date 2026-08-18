@@ -1,5 +1,4 @@
 import json
-import os
 import re
 import sys
 import threading
@@ -12,11 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
   sys.path.insert(0, str(PROJECT_ROOT))
 
-try:
-  from core.llm_gateway import Priority, gateway
-except ImportError:
-  sys.path.append(os.path.join(os.path.dirname(__file__), "..", "core"))
-  from llm_gateway import Priority, gateway
+from core.llm_gateway import Priority, gateway
+
 
 @dataclass
 class RouterDecision:

@@ -541,11 +541,18 @@
       <div class="card provider-card">
         <div class="card-head">AI connection</div>
         <div class="provider-card-body">
-          <label>Provider<select id="llm-provider"><option value="ollama">Ollama-compatible local API</option></select></label>
+          <label>Provider<select id="llm-provider">
+            <option value="ollama">Ollama-compatible local API</option>
+            <option value="openai_compatible">OpenAI-compatible API</option>
+            <option value="gemini_api">Google Gemini API</option>
+            <option value="codex_cli">Codex subscription CLI</option>
+            <option value="claude_cli">Claude subscription CLI</option>
+          </select></label>
           <div class="provider-details" id="provider-details">
             <label id="llm-base-url-field">Base URL<input id="llm-base-url" placeholder="http://127.0.0.1:1234/v1" /></label>
             <div class="provider-fields">
               <label>Chat model<input id="llm-chat-model" placeholder="local-chat" /></label>
+              <label>Vision model<input id="llm-vision-model" placeholder="local-vision" /></label>
             </div>
             <label id="llm-cli-command-field" hidden>CLI command/path<input id="llm-cli-command" placeholder="Detected from PATH" /></label>
             <div class="provider-help">MiniLM embeddings are bundled and event RAG is opt-in.</div>
@@ -745,10 +752,13 @@
         ? 'macOS 12+'
         : 'Windows 10/11'
 
-      // Hosted and subscription modes remain a comment-only future extension.
-      $('hardware-summary').textContent = check.level === 'ready' ? 'Ready' : check.level === 'warn' ? 'Review' : 'Blocked'
-      $('hardware-note').textContent = check.mode === 'external'
-        ? 'The configured local API supplies chat. MiniLM, accessibility capture, and OCR stay on this Mac.'
+      const external = check.mode === 'external'
+      const subscription = check.mode === 'subscription'
+      $('hardware-summary').textContent = external
+        ? 'API provider'
+        : subscription ? 'Subscription CLI' : check.level === 'ready' ? 'Ready' : check.level === 'warn' ? 'Review' : 'Blocked'
+      $('hardware-note').textContent = external || subscription
+        ? 'Chat prompts may include retrieved activity context and are sent to the selected provider. MiniLM embeddings and the activity database remain local.'
         : 'The default text model uses roughly 5 GB on disk. Screen capture uses accessibility + OCR and does not download a vision model.'
 
       const verdict = $('verdict')
@@ -760,8 +770,12 @@
 
       if (check.level === 'ready') {
         $('verdict-icon').textContent = '✓'
-        $('verdict-title').textContent = 'Ready for full capture'
-        $('verdict-body').textContent = 'Your machine meets the recommended specs. You can install and use screen capture comfortably alongside everyday apps.'
+        $('verdict-title').textContent = external
+          ? 'Ready to connect to your API'
+          : subscription ? 'Ready to use your subscription' : 'Ready for full capture'
+        $('verdict-body').textContent = external || subscription
+          ? 'No chat or vision model is downloaded. Review the provider privacy terms and complete authentication before launching.'
+          : 'Your machine meets the recommended specs. You can install and use screen capture comfortably alongside everyday apps.'
         overrideRow.classList.remove('visible')
         override.checked = false
         continueBtn.disabled = false
@@ -807,24 +821,29 @@
     }
 
     function renderLLMConfig(config) {
-      // Keep onboarding limited to the two values needed by a local endpoint.
-      const provider = 'ollama'
+      const providers = new Set(['ollama', 'openai_compatible', 'gemini_api', 'codex_cli', 'claude_cli'])
+      const provider = providers.has(config?.provider) ? config.provider : 'ollama'
+      const subscription = provider.endsWith('_cli')
+      const apiProvider = provider === 'openai_compatible' || provider === 'gemini_api'
       $('llm-provider').value = provider
       $('provider-details').hidden = false
-      $('llm-base-url-field').hidden = false
-      $('llm-api-key-field').hidden = true
-      $('llm-cli-command-field').hidden = true
-      $('llm-connect-btn').hidden = true
-      $('llm-base-url').value = config.base_url || 'http://127.0.0.1:11434'
-      $('llm-chat-model').value = config.chat_model || 'qwen3:8b'
+      $('llm-base-url-field').hidden = subscription
+      $('llm-api-key-field').hidden = !apiProvider
+      $('llm-cli-command-field').hidden = !subscription
+      $('llm-connect-btn').hidden = !subscription
+      $('llm-base-url').value = config.base_url || (provider === 'gemini_api' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : provider === 'openai_compatible' ? 'http://127.0.0.1:1234/v1' : provider === 'ollama' ? 'http://127.0.0.1:11434' : 'cli://local')
+      $('llm-chat-model').value = config.chat_model || (provider === 'codex_cli' ? 'default' : provider === 'claude_cli' ? 'sonnet' : provider === 'gemini_api' ? 'gemini-2.5-flash' : 'qwen3:8b')
+      $('llm-vision-model').value = config.vision_model || $('llm-chat-model').value
       $('llm-cli-command').value = config.cli_command || ''
       $('llm-api-key').value = ''
       $('llm-api-key').placeholder = config.api_key_set ? 'Saved key is set · leave blank to keep it' : 'Leave blank if your local server needs no key'
-      const baseURL = $('llm-base-url').value.replace(/\/+$/, '').toLowerCase()
-      const managed = baseURL === 'http://127.0.0.1:11434' || baseURL === 'http://localhost:11434'
-      $('provider-help').textContent = managed
-        ? 'Clippy can install and manage Ollama locally.'
-        : 'Clippy will use this existing local API and skip Ollama and model downloads.'
+      $('provider-help').textContent = provider === 'gemini_api'
+        ? 'Use a Gemini API key. Gemini CLI login is not used. MiniLM embeddings remain local.'
+        : provider === 'openai_compatible'
+        ? 'Clippy sends chat and vision requests to this API. MiniLM embeddings remain local.'
+        : subscription
+        ? 'Clippy uses the official authenticated CLI in read-only mode. MiniLM embeddings remain local.'
+        : 'Clippy can install and manage Ollama locally; capture remains accessibility and OCR only.'
     }
 
     function selectedLLMConfig() {
@@ -833,6 +852,7 @@
         base_url: $('llm-base-url').value.trim(),
         cli_command: $('llm-cli-command').value.trim(),
         chat_model: $('llm-chat-model').value.trim(),
+        vision_model: $('llm-vision-model').value.trim(),
       }
       const apiKey = $('llm-api-key').value.trim()
       if (apiKey) values.api_key = apiKey
@@ -846,12 +866,20 @@
     }
 
     $('llm-provider').addEventListener('change', async () => {
-      // The select currently contains only Ollama; keep this handler so adding
-      // another local runtime later has one clear configuration entry point.
-      $('llm-provider').value = 'ollama'
-      $('llm-base-url').value = 'http://127.0.0.1:11434'
-      $('llm-chat-model').value = 'qwen3:8b'
-      $('provider-help').textContent = 'Ollama manages the chat model; capture uses accessibility text and local OCR.'
+      const provider = $('llm-provider').value
+      const apiProvider = provider === 'openai_compatible' || provider === 'gemini_api'
+      const subscription = provider.endsWith('_cli')
+      $('llm-base-url').value = provider === 'gemini_api' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : provider === 'openai_compatible' ? 'http://127.0.0.1:1234/v1' : subscription ? 'cli://local' : 'http://127.0.0.1:11434'
+      $('llm-chat-model').value = provider === 'codex_cli' ? 'default' : provider === 'claude_cli' ? 'sonnet' : provider === 'gemini_api' ? 'gemini-2.5-flash' : provider === 'openai_compatible' ? 'local-chat' : 'qwen3:8b'
+      $('llm-vision-model').value = provider === 'codex_cli' ? 'default' : provider === 'claude_cli' ? 'sonnet' : provider === 'gemini_api' ? 'gemini-2.5-flash' : provider === 'openai_compatible' ? 'local-vision' : 'qwen3-vl:4b'
+      $('llm-cli-command').value = provider === 'codex_cli' ? 'codex' : provider === 'claude_cli' ? 'claude' : ''
+      $('llm-base-url-field').hidden = subscription
+      $('llm-api-key-field').hidden = !apiProvider
+      $('llm-cli-command-field').hidden = !subscription
+      $('llm-connect-btn').hidden = !subscription
+      $('provider-help').textContent = subscription
+        ? 'Connect the official CLI account, then return here. MiniLM embeddings remain local.'
+        : apiProvider ? 'Chat and vision use this API. MiniLM embeddings remain local.' : 'Ollama manages chat locally; capture uses accessibility and OCR.'
       try {
         await saveSelectedLLMConfig()
         await loadHardware()

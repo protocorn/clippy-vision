@@ -17,6 +17,7 @@ from typing import Any, Literal
 
 import psutil
 
+from core.llm_config import get_llm_config, is_external_provider, model_for
 from core.ollama_client import (
     OllamaUnavailable,
     base_url,
@@ -118,8 +119,9 @@ def _ollama_loaded_models() -> set[str]:
     return names
 
 
-def text_model_loaded(model: str = TEXT_MODEL) -> bool:
+def text_model_loaded(model: str | None = None) -> bool:
     """True when the chat/summary model is already resident in Ollama."""
+    model = model or model_for("chat", TEXT_MODEL)
     loaded = _ollama_loaded_models()
     target = model.casefold()
     for name in loaded:
@@ -165,6 +167,8 @@ def gpu_can_host_text() -> bool:
 
 def can_cold_load_text(available: int | None = None) -> bool:
     """True if the text model can be loaded from scratch right now."""
+    if is_external_provider():
+        return True
     if not server_reachable():
         return False
     if gpu_can_host_text():
@@ -181,6 +185,8 @@ def can_load_text(available: int | None = None) -> bool:
     (as during chat), summarizer/distil/catch-up must not defer just because the
     occupied model left little *available* RAM — that memory is already paid for.
     """
+    if is_external_provider():
+        return True
     if text_model_loaded():
         return True
     return can_cold_load_text(available)
@@ -188,6 +194,8 @@ def can_load_text(available: int | None = None) -> bool:
 
 def text_unavailable_reason() -> str:
     """Why text inference cannot run right now — for logs that must be actionable."""
+    if is_external_provider():
+        return "the selected provider handles text inference"
     if text_model_loaded():
         return "text model is available"
     if not server_reachable():
@@ -321,7 +329,10 @@ def ensure_text_model(*, force: bool = False) -> bool:
     Retries are rate-limited unless force=True.
     """
     global _last_warm_attempt_mono
-    if text_model_loaded(TEXT_MODEL):
+    if is_external_provider():
+        return True
+    text_model = model_for("chat", TEXT_MODEL)
+    if text_model_loaded(text_model):
         return True
     # Extreme commit pressure usually means Windows will page-fault hard.
     if _commit_pressured() and not force:
@@ -340,7 +351,7 @@ def ensure_text_model(*, force: bool = False) -> bool:
             f"(free~{free / _GB:.1f}GB < {_TEXT_FLOOR / _GB:.1f}GB)"
         )
     try:
-        _warm(TEXT_MODEL, timeout=120)
+        _warm(text_model, timeout=120)
     except OllamaUnavailable as exc:
         print(f"[residency] text warm skipped — {exc}")
         return False
@@ -349,14 +360,14 @@ def ensure_text_model(*, force: bool = False) -> bool:
         # machine too small for the model, so reclaim it and try once more.
         if _is_out_of_memory(exc) and reap_orphaned_runners():
             try:
-                _warm(TEXT_MODEL, timeout=120)
-                return text_model_loaded(TEXT_MODEL)
+                _warm(text_model, timeout=120)
+                return text_model_loaded(text_model)
             except Exception as retry_exc:
                 print(f"[residency] text warm failed after reclaiming VRAM: {retry_exc}")
                 return False
         print(f"[residency] text warm failed: {exc}")
         return False
-    return text_model_loaded(TEXT_MODEL)
+    return text_model_loaded(text_model)
 
 
 def _unload_vision() -> None:
@@ -418,6 +429,16 @@ def warm_for_startup() -> dict:
     with _lock:
         _stop_monitor()
     before = _available()
+    config = get_llm_config()
+    if is_external_provider(config):
+        with _lock:
+            return _persist(
+                "idle",
+                reason="external_text_provider",
+                provider=config["provider"],
+                available_before_mb=_mb(before),
+            )
+    text_model = model_for("chat", TEXT_MODEL)
     print(f"[residency] startup warm (text only)  free~{before / _GB:.1f}GB")
 
     # Leftover runners from an earlier crash still hold VRAM, which is what
@@ -448,7 +469,7 @@ def warm_for_startup() -> dict:
     err = None
     try:
         try:
-            if text_model_loaded(TEXT_MODEL):
+            if text_model_loaded(text_model):
                 print(f"[residency] text already resident — skip warm  free~{before / _GB:.1f}GB")
                 reason = "already_resident"
             elif ensure_text_model(force=True):
