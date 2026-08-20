@@ -33,7 +33,10 @@ times = []
 for q in QUERIES:
     t0 = time.perf_counter()
     body = gateway.chat(
-        messages=[{"role": "system", "content": SYSTEM}, {"role": "user", "content": q}],
+        messages=[
+            {"role": "system", "content": SYSTEM},
+            {"role": "user", "content": q},
+        ],
         model="qwen3:8b",
         tools=TOOL_SCHEMAS,
         priority=Priority.INTERACTIVE,
@@ -45,4 +48,4 @@ for q in QUERIES:
     times.append(ms)
     print(f"{ms:>8.0f} ms  tool_calls={[t['function']['name'] for t in tc]}  {q!r}")
 
-print(f"\nMean tool-selection round: {sum(times)/len(times):.0f} ms")
+print(f"\nMean tool-selection round: {sum(times) / len(times):.0f} ms")

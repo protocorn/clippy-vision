@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import threading
 import tempfile
+import threading
 from pathlib import Path
 
 from core.accessibility_text import (

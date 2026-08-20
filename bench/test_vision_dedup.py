@@ -27,25 +27,27 @@ def test_vision_dedup():
     Measures compression ratio achieved by deduplication.
     """
     screenshots = list(SCREENSHOT_DIR.glob("*.jpg"))
-    
+
     if len(screenshots) == 0:
         print("\nNo screenshots found. Run screen_capture.py first to collect data.")
         return
-    
+
     # Remove already-processed screenshots from test
     screenshots = [s for s in screenshots if "_processed" not in s.stem]
-    
+
     if len(screenshots) == 0:
-        print("\nAll screenshots already processed. Collect fresh screenshots for benchmarking.")
+        print(
+            "\nAll screenshots already processed. Collect fresh screenshots for benchmarking."
+        )
         return
-    
+
     total = len(screenshots)
-    
-    print(f"\n{'='*60}")
+
+    print(f"\n{'=' * 60}")
     print(f"Vision Deduplication Efficiency Test")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Testing {total} screenshots...\n")
-    
+
     # Compute hashes
     hashes = {}
     for path in screenshots:
@@ -53,48 +55,48 @@ def test_vision_dedup():
             hashes[path.stem] = imagehash.phash(Image.open(path))
         except Exception as e:
             print(f"  ⚠️  Failed to hash {path.name}: {e}")
-    
+
     valid = [p for p in screenshots if p.stem in hashes]
-    
+
     # Union-Find clustering (same as production)
     parent = {p.stem: p.stem for p in valid}
-    
+
     def find(x: str) -> str:
         while parent[x] != x:
             parent[x] = parent[parent[x]]
             x = parent[x]
         return x
-    
+
     def union(x: str, y: str):
         parent[find(x)] = find(y)
-    
+
     # Group by similarity
     for i, pa in enumerate(valid):
-        for pb in valid[i + 1:]:
+        for pb in valid[i + 1 :]:
             if (hashes[pa.stem] - hashes[pb.stem]) <= PHASH_THRESHOLD:
                 union(pa.stem, pb.stem)
-    
+
     # Count unique groups
     groups = {}
     for p in valid:
         root = find(p.stem)
         groups.setdefault(root, []).append(p)
-    
+
     unique_groups = len(groups)
     reduction_pct = ((total - unique_groups) / total) * 100
-    
+
     # Show some group stats
     group_sizes = sorted([len(g) for g in groups.values()], reverse=True)
-    
+
     print(f"Results:")
     print(f"  Total screenshots:        {total}")
     print(f"  Unique visual groups:     {unique_groups}")
     print(f"  Duplicate screenshots:    {total - unique_groups}")
     print(f"  Largest group size:       {group_sizes[0] if group_sizes else 0}")
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  ** Vision Reduction:      {reduction_pct:.1f}%")
-    print(f"{'='*60}\n")
-    
+    print(f"{'=' * 60}\n")
+
     print(f"Resume Bullet:")
     print(f'   "Reduced vision processing by {reduction_pct:.0f}% through perceptual')
     print(f'    hashing and Union-Find clustering of duplicate screenshots"')

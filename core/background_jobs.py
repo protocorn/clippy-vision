@@ -21,10 +21,10 @@ def start_background_jobs() -> None:
             return
         _started = True
 
+    from classifier.worker import start_catch_up_worker
     from core.distil import distil, should_distil
     from core.screenshot_processor import start_screenshot_processor
     from core.summarizer import start_summarizer
-    from classifier.worker import start_catch_up_worker
 
     # Distil before worker threads touch the shared sqlite connection.
     try:

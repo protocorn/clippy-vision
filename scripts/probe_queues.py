@@ -28,7 +28,11 @@ if str(ROOT) not in sys.path:
 from core.app_settings import get_capture_settings
 from core.backlog import catch_up_allowed, get_backlog_status
 from core.capture_state import get_capture_status
-from core.distil import DISTIL_EVERY_N_SESSIONS, count_sessions_since_last_distil, should_distil
+from core.distil import (
+    DISTIL_EVERY_N_SESSIONS,
+    count_sessions_since_last_distil,
+    should_distil,
+)
 from core.model_residency import can_load_text, can_run_ocr, text_model_loaded
 from core.paths import get_screenshots_dir
 from core.storage import conn

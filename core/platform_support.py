@@ -5,6 +5,7 @@ platform-specific work here lets the event pipeline stay the same on Windows,
 macOS, and Linux while still allowing optional integrations where the host
 doesn't provide them.
 """
+
 from __future__ import annotations
 
 import os
@@ -30,7 +31,10 @@ IS_MACOS = PLATFORM == "darwin"
 _MAC_CACHE_TTL_SECONDS = 0.75
 _mac_cache_lock = threading.Lock()
 _mac_cache_at = 0.0
-_mac_cache: tuple[WindowMetadata | None, tuple[int, int, int, int] | None] = (None, None)
+_mac_cache: tuple[WindowMetadata | None, tuple[int, int, int, int] | None] = (
+    None,
+    None,
+)
 
 
 def platform_label() -> str:
@@ -84,6 +88,7 @@ def _windows_metadata() -> WindowMetadata | None:
     except Exception:
         return None
 
+
 def _windows_browser_url(window: Any, class_name: str) -> str | None:
     """Read the address bar without making UI Automation a hard dependency elsewhere."""
     try:
@@ -91,13 +96,17 @@ def _windows_browser_url(window: Any, class_name: str) -> str | None:
         if class_name == "Chrome_WidgetWin_1":
             address = window.EditControl(AutomationId="addressEditBox", searchDepth=15)
             if not address.Exists(0):
-                address = window.EditControl(Name="Address and search bar", searchDepth=15)
+                address = window.EditControl(
+                    Name="Address and search bar", searchDepth=15
+                )
         elif class_name == "MozillaWindowClass":
             address = window.EditControl(
                 SubName="Search with Google or enter address", searchDepth=15
             )
             if not address.Exists(0):
-                address = window.EditControl(SubName="Search or enter address", searchDepth=15)
+                address = window.EditControl(
+                    SubName="Search or enter address", searchDepth=15
+                )
         if address and address.Exists(0.35):
             return address.GetValuePattern().Value
     except Exception:
@@ -107,7 +116,7 @@ def _windows_browser_url(window: Any, class_name: str) -> str | None:
 
 # macOS does not expose a Win32-style foreground-window handle. System Events
 # provides the frontmost process, title, and logical bounds through AppleScript.
-_MAC_FRONTMOST_SCRIPT = r'''
+_MAC_FRONTMOST_SCRIPT = r"""
 tell application "System Events"
     set frontProc to first application process whose frontmost is true
     set appName to name of frontProc
@@ -125,7 +134,7 @@ tell application "System Events"
     end try
     return appName & linefeed & windowTitle & linefeed & boundsText
 end tell
-'''
+"""
 
 
 _MAC_BROWSER_SCRIPTS = {
@@ -158,7 +167,9 @@ def _mac_metadata() -> tuple[WindowMetadata | None, tuple[int, int, int, int] | 
     active_url = None
     browser_script = _MAC_BROWSER_SCRIPTS.get(process_name)
     if browser_script:
-        active_url = _run_command(["osascript", "-e", browser_script], timeout=1.5) or None
+        active_url = (
+            _run_command(["osascript", "-e", browser_script], timeout=1.5) or None
+        )
 
     return (
         WindowMetadata(
@@ -187,16 +198,14 @@ def get_window_metadata() -> WindowMetadata | None:
             _mac_cache_at = now
             return _mac_cache[0]
 
-
-
     # Linux support is intentionally best-effort: xdotool is optional and the
     # rest of capture should continue even when a desktop lacks it.
     title = _run_command(["xdotool", "getactivewindow", "getwindowname"])
     process_name = "unknown"
     if title:
-        process_name = _run_command(
-            ["xdotool", "getactivewindow", "getwindowpid"]
-        ) or "unknown"
+        process_name = (
+            _run_command(["xdotool", "getactivewindow", "getwindowpid"]) or "unknown"
+        )
     return WindowMetadata(
         timestamp=time.time(),
         current_window_title=title,
@@ -233,8 +242,12 @@ def get_clipboard_text() -> str | None:
 
             win32clipboard.OpenClipboard()
             try:
-                if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_UNICODETEXT):
-                    value = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                if win32clipboard.IsClipboardFormatAvailable(
+                    win32clipboard.CF_UNICODETEXT
+                ):
+                    value = win32clipboard.GetClipboardData(
+                        win32clipboard.CF_UNICODETEXT
+                    )
                     return str(value)[:2000]
                 return None
             finally:

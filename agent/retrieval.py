@@ -20,7 +20,7 @@ OUTPUT_SCHEMA = {
     "properties": {
         "sql_query": {"type": "string"},
     },
-    "required": ["sql_query"]
+    "required": ["sql_query"],
 }
 
 
@@ -128,9 +128,10 @@ Rules:
 # Safety
 # ─────────────────────────────────────────────────────────────
 _BLOCKED = re.compile(
-    r'\b(DROP|DELETE|UPDATE|INSERT|ALTER|CREATE|ATTACH|DETACH|PRAGMA|REPLACE|TRUNCATE)\b',
+    r"\b(DROP|DELETE|UPDATE|INSERT|ALTER|CREATE|ATTACH|DETACH|PRAGMA|REPLACE|TRUNCATE)\b",
     re.IGNORECASE,
 )
+
 
 def _is_safe(sql: str) -> bool:
     return sql.strip().upper().startswith("SELECT") and not _BLOCKED.search(sql)
@@ -145,10 +146,15 @@ def _is_safe(sql: str) -> bool:
 # ─────────────────────────────────────────────────────────────
 def _generate_sql(system_prompt: str, user_content: str) -> str:
     body = gateway.chat(
-        [{"role": "system", "content": system_prompt},
-         {"role": "user",   "content": user_content}],
-        model=MODEL, format=OUTPUT_SCHEMA, think=False,
-        options={"temperature": 0}, priority=Priority.INTERACTIVE,
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        model=MODEL,
+        format=OUTPUT_SCHEMA,
+        think=False,
+        options={"temperature": 0},
+        priority=Priority.INTERACTIVE,
     )
     content = body["message"]["content"]
     parsed = json.loads(content) if isinstance(content, str) else content
@@ -189,7 +195,9 @@ def _cosine(a: list, b: list) -> float:
     return dot / (norm_a * norm_b)
 
 
-def _semantic_sessions(question: str, date_sql_filter: str, limit: int = MAX_RESULT_ROWS) -> tuple[list, int]:
+def _semantic_sessions(
+    question: str, date_sql_filter: str, limit: int = MAX_RESULT_ROWS
+) -> tuple[list, int]:
     """Embed the question and re-rank sessions by cosine similarity.
 
     date_sql_filter is a WHERE fragment (without the WHERE keyword) that
@@ -215,8 +223,17 @@ def _semantic_sessions(question: str, date_sql_filter: str, limit: int = MAX_RES
     scored = []
     unembedded_ids = []
     for row in rows:
-        (summary_id, session_id, ws, we, summary, active_task,
-         entities, event_count, emb_json) = row
+        (
+            summary_id,
+            session_id,
+            ws,
+            we,
+            summary,
+            active_task,
+            entities,
+            event_count,
+            emb_json,
+        ) = row
         if emb_json:
             vec = json.loads(emb_json)
             score = _cosine(q_vec, vec)
@@ -293,7 +310,9 @@ def _rows_are_useful(rows: list) -> bool:
 # ─────────────────────────────────────────────────────────────
 def _extract_where_fragment(sql: str) -> str | None:
     """Return everything after WHERE up to ORDER BY / LIMIT / end, or None."""
-    m = re.search(r'\bWHERE\b(.+?)(?:\bORDER\s+BY\b|\bLIMIT\b|$)', sql, re.IGNORECASE | re.DOTALL)
+    m = re.search(
+        r"\bWHERE\b(.+?)(?:\bORDER\s+BY\b|\bLIMIT\b|$)", sql, re.IGNORECASE | re.DOTALL
+    )
     if m:
         return m.group(1).strip()
     return None
@@ -309,7 +328,7 @@ def _extract_where_fragment(sql: str) -> str | None:
 def search_sessions(question: str) -> str:
     """Search session summaries. Best for: broad time windows, daily/weekly
     overviews, project topics, what-did-I-work-on questions."""
-    now_ts  = int(time.time())
+    now_ts = int(time.time())
     now_str = time.strftime("%A %B %d, %Y at %H:%M (local time)")
     user_content = f"Current timestamp: {now_ts} ({now_str})\n\nQuestion: {question}"
 

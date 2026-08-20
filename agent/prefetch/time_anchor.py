@@ -44,9 +44,9 @@ def select_tier(temporal_range: TemporalRange) -> str:
     now = time.time()
     if temporal_range.start_ts > now:
         return "none"
-    raw_ttl_cutoff     = now - RAW_EVENTS_TTL_DAYS * 86400
+    raw_ttl_cutoff = now - RAW_EVENTS_TTL_DAYS * 86400
     session_ttl_cutoff = now - SESSION_EVENTS_TTL_DAYS * 86400
-    window_seconds     = temporal_range.end_ts - temporal_range.start_ts
+    window_seconds = temporal_range.end_ts - temporal_range.start_ts
     if (
         window_seconds <= EVENT_TIER_MAX_SECONDS
         and temporal_range.start_ts >= raw_ttl_cutoff
@@ -107,12 +107,12 @@ def fetch_events(temporal_range: TemporalRange) -> list[dict]:
         return []
     return [
         {
-            "timestamp":      r[0],
-            "event_type":     r[1],
-            "process_name":   r[2],
-            "window_title":   r[3],
-            "active_url":     r[4],
-            "summary":        r[5],
+            "timestamp": r[0],
+            "event_type": r[1],
+            "process_name": r[2],
+            "window_title": r[3],
+            "active_url": r[4],
+            "summary": r[5],
             "vision_activity": r[6],
             "vision_ocr_text": r[7],
         }
@@ -137,7 +137,9 @@ def fetch_sessions(temporal_range: TemporalRange) -> list[dict]:
     """
 
     try:
-        rows = conn.execute(sql, (temporal_range.start_ts, temporal_range.end_ts)).fetchall()
+        rows = conn.execute(
+            sql, (temporal_range.start_ts, temporal_range.end_ts)
+        ).fetchall()
     except Exception as e:
         print(f"[time_anchor] fetch_sessions error: {e}")
         return []
@@ -154,6 +156,7 @@ def fetch_sessions(temporal_range: TemporalRange) -> list[dict]:
         }
         for r in rows
     ]
+
 
 def compress_sessions(sessions: list[dict], threshold: float) -> list[dict]:
     """Greedy cluster compression.
@@ -191,7 +194,10 @@ def compress_sessions(sessions: list[dict], threshold: float) -> list[dict]:
     for indices in groups.values():
         representative = max(
             indices,
-            key=lambda idx: (sessions[idx]["event_count"], sessions[idx]["window_start"]),
+            key=lambda idx: (
+                sessions[idx]["event_count"],
+                sessions[idx]["window_start"],
+            ),
         )
         keep.append(sessions[representative])
 
@@ -261,12 +267,14 @@ def fetch_distiller_facts(temporal_range: TemporalRange, q_vec: list) -> list[di
             continue
         sim = cosine_similarity(q_vec, json.loads(emb_json))
         if sim >= DISTILLER_FACT_MIN_SIM:
-            scored.append({
-                "text":       text,
-                "sim":        sim,
-                "created_at": created_at,
-                "label":      label,
-            })
+            scored.append(
+                {
+                    "text": text,
+                    "sim": sim,
+                    "created_at": created_at,
+                    "label": label,
+                }
+            )
 
     scored.sort(key=lambda x: x["sim"], reverse=True)
     return scored[:MAX_DISTILLER_FACTS]
@@ -281,8 +289,10 @@ def fetch_distiller_facts(temporal_range: TemporalRange, q_vec: list) -> list[di
 ###########################################
 def format_events(events: list[dict], temporal_range: TemporalRange) -> str:
     if not events:
-        start_str = time.strftime("%Y-%m-%d %H:%M", time.localtime(temporal_range.start_ts))
-        end_str   = time.strftime("%H:%M",           time.localtime(temporal_range.end_ts))
+        start_str = time.strftime(
+            "%Y-%m-%d %H:%M", time.localtime(temporal_range.start_ts)
+        )
+        end_str = time.strftime("%H:%M", time.localtime(temporal_range.end_ts))
         return f"[events] no activity recorded between {start_str} and {end_str}."
 
     date_str = time.strftime("%Y-%m-%d", time.localtime(temporal_range.start_ts))
@@ -310,13 +320,17 @@ def format_events(events: list[dict], temporal_range: TemporalRange) -> str:
     return "\n\n---\n".join(parts)
 
 
-def format_sessions(sessions: list[dict], temporal_range: TemporalRange, total_before_dedup: int) -> str:
+def format_sessions(
+    sessions: list[dict], temporal_range: TemporalRange, total_before_dedup: int
+) -> str:
     if not sessions:
         start_str = time.strftime("%Y-%m-%d", time.localtime(temporal_range.start_ts))
-        end_str   = time.strftime("%Y-%m-%d", time.localtime(temporal_range.end_ts))
-        return f"[sessions] no activity summaries found between {start_str} and {end_str}."
+        end_str = time.strftime("%Y-%m-%d", time.localtime(temporal_range.end_ts))
+        return (
+            f"[sessions] no activity summaries found between {start_str} and {end_str}."
+        )
     start_str = time.strftime("%Y-%m-%d", time.localtime(temporal_range.start_ts))
-    end_str   = time.strftime("%Y-%m-%d", time.localtime(temporal_range.end_ts))
+    end_str = time.strftime("%Y-%m-%d", time.localtime(temporal_range.end_ts))
     header = (
         f"[activity summaries — {start_str} to {end_str}, "
         f"showing {len(sessions)} of {total_before_dedup} sessions]"
@@ -340,10 +354,9 @@ def format_sessions(sessions: list[dict], temporal_range: TemporalRange, total_b
     return "\n\n---\n".join(parts)
 
 
-
 def format_distiller(facts: list[dict], temporal_range: TemporalRange) -> str:
     start_str = time.strftime("%Y-%m-%d", time.localtime(temporal_range.start_ts))
-    end_str   = time.strftime("%Y-%m-%d", time.localtime(temporal_range.end_ts))
+    end_str = time.strftime("%Y-%m-%d", time.localtime(temporal_range.end_ts))
     if not facts:
         return (
             f"[distiller] no activity records found for {start_str} to {end_str}.\n"
@@ -400,8 +413,10 @@ def time_anchor_fetch(temporal_range: TemporalRange, q_vec: list | None = None) 
 
     return "Unknown tier"
 
+
 if __name__ == "__main__":
     import sys
+
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from agent.helpers.time_resolver import resolve_temporal_range
 

@@ -4,6 +4,7 @@ Dev (default):  <repo>/core/data/
 Packaged:       set CLIPPY_DATA_DIR to %APPDATA%/Clippy Vision/data
                 (Electron main.js sets this when spawning Python).
 """
+
 from __future__ import annotations
 
 import os

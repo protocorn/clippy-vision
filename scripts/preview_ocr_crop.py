@@ -75,8 +75,8 @@ def _write_preview(source: Path) -> None:
 
 def _grab_live() -> Path | None:
     try:
-        from PIL import ImageGrab
         import win32gui
+        from PIL import ImageGrab
     except Exception as exc:
         print(f"live capture unavailable: {exc}")
         return None

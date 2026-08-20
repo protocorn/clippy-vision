@@ -30,8 +30,8 @@ _PROFILE_MIN_SIM   = 0.25  # lower than fact threshold — fields are shorter an
 
 def _cosine_sim(a: list, b: list) -> float:
     dot = sum(x * y for x, y in zip(a, b))
-    na  = math.sqrt(sum(x * x for x in a))
-    nb  = math.sqrt(sum(y * y for y in b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
     return dot / (na * nb) if na and nb else 0.0
 
 
@@ -68,8 +68,10 @@ def semantic_memory_context_from_vec(q_vec: list) -> str:
     for sim, text, cluster_id, label, description in top:
         if cluster_id not in seen_clusters:
             seen_clusters[cluster_id] = {
-                "label": label, "description": description,
-                "facts": [], "max_sim": sim
+                "label": label,
+                "description": description,
+                "facts": [],
+                "max_sim": sim,
             }
         seen_clusters[cluster_id]["facts"].append((sim, text))
 
@@ -80,14 +82,15 @@ def semantic_memory_context_from_vec(q_vec: list) -> str:
     chars = 0
     for c in clusters_ordered:
         header = f"[{c['label']}] {c['description']}"
-        lines  = [f"  - {text}" for sim, text in c["facts"]]
-        block  = header + "\n" + "\n".join(lines)
+        lines = [f"  - {text}" for sim, text in c["facts"]]
+        block = header + "\n" + "\n".join(lines)
         if chars + len(block) > MAX_MEMORY_CHARS:
             break
         sections.append(block)
         chars += len(block)
 
     return "\n\n".join(sections) if sections else ""
+
 
 def get_autobiographical_context(q_vec: list | None = None) -> str:
     """Formatted for injection into system prompt.
@@ -159,7 +162,12 @@ def get_autobiographical_context(q_vec: list | None = None) -> str:
     for f in top_fields:
         lines.append(f"{f['field']}: {f['display']}")
 
-    return "\n".join(lines) if lines else "No profile data yet. Ask the user to share more about themselves."
+    return (
+        "\n".join(lines)
+        if lines
+        else "No profile data yet. Ask the user to share more about themselves."
+    )
+
 
 def recall_memory() -> str:
     """List clusters for the recall_memory tool."""
@@ -171,10 +179,13 @@ def recall_memory() -> str:
         lines.append(f"  [{c['label']}] {c['description']} ({c['fact_count']} facts)")
     return "\n".join(lines)
 
+
 def fetch_cluster(label: str) -> str:
     """Get all facts in a named cluster."""
     clusters = get_all_clusters()
-    match = next((c for c in clusters if c["label"].lower() == label.strip().lower()), None)
+    match = next(
+        (c for c in clusters if c["label"].lower() == label.strip().lower()), None
+    )
     if not match:
         return f"No cluster found with label '{label}'."
     facts = get_active_facts(match["cluster_id"])
@@ -182,11 +193,16 @@ def fetch_cluster(label: str) -> str:
         return f"Cluster '{label}' exists but has no active facts."
     return "\n".join(f"- {f}" for f in facts)
 
-def save_identity(field: str, value: str = "", op: str = "set", items: list[str] | None = None) -> str:
+
+def save_identity(
+    field: str, value: str = "", op: str = "set", items: list[str] | None = None
+) -> str:
     return save_identity_field(field, value=value, source="agent", op=op, items=items)
+
 
 def save_note(note: str) -> str:
     return save_note_to_memory(note)
+
 
 def delete_note(note_text: str) -> str:
     """Suppress a memory fact whose text matches note_text (case-insensitive substring).
@@ -196,10 +212,7 @@ def delete_note(note_text: str) -> str:
         "SELECT fact_id, text FROM memory_facts WHERE valid_to IS NULL"
     ).fetchall()
 
-    matched = [
-        fact_id for fact_id, text in rows
-        if needle in text.lower()
-    ]
+    matched = [fact_id for fact_id, text in rows if needle in text.lower()]
 
     if not matched:
         return f"No active memory found matching: '{note_text}'"

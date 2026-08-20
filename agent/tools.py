@@ -3,10 +3,10 @@ from agent.retrieval import search_events, search_sessions
 
 TOOLS = {
     "search_sessions": search_sessions,
-    "search_events":   search_events,
-    "save_identity":   save_identity,
-    "save_note":       save_note,
-    "delete_note":     delete_note,
+    "search_events": search_events,
+    "save_identity": save_identity,
+    "save_note": save_note,
+    "delete_note": delete_note,
 }
 
 
@@ -15,8 +15,8 @@ TOOLS = {
 # write/delete tools so it physically cannot trigger a redundant search.
 WRITE_TOOLS = {
     "save_identity": save_identity,
-    "save_note":     save_note,
-    "delete_note":   delete_note,
+    "save_note": save_note,
+    "delete_note": delete_note,
 }
 
 TOOL_SCHEMAS = [
@@ -38,7 +38,10 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "question": {"type": "string", "description": "Natural language question."}
+                    "question": {
+                        "type": "string",
+                        "description": "Natural language question.",
+                    }
                 },
                 "required": ["question"],
             },
@@ -61,7 +64,10 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "question": {"type": "string", "description": "Natural language question."}
+                    "question": {
+                        "type": "string",
+                        "description": "Natural language question.",
+                    }
                 },
                 "required": ["question"],
             },
@@ -80,12 +86,24 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "field": {"type": "string", "description": "Field name, e.g. 'name', 'hobbies'"},
-                    "value": {"type": "string", "description": "Value for scalar fields (set/override). Leave empty for list ops."},
-                    "op":    {"type": "string", "enum": ["set", "add_items", "remove_items", "override"],
-                              "description": "Operation type. Default is 'set'."},
-                    "items": {"type": "array", "items": {"type": "string"},
-                              "description": "List of items for add_items or remove_items ops."}
+                    "field": {
+                        "type": "string",
+                        "description": "Field name, e.g. 'name', 'hobbies'",
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "Value for scalar fields (set/override). Leave empty for list ops.",
+                    },
+                    "op": {
+                        "type": "string",
+                        "enum": ["set", "add_items", "remove_items", "override"],
+                        "description": "Operation type. Default is 'set'.",
+                    },
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of items for add_items or remove_items ops.",
+                    },
                 },
                 "required": ["field", "op"],
             },
@@ -99,7 +117,10 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "note": {"type": "string", "description": "The note or reminder text to store."}
+                    "note": {
+                        "type": "string",
+                        "description": "The note or reminder text to store.",
+                    }
                 },
                 "required": ["note"],
             },
@@ -117,7 +138,10 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "note_text": {"type": "string", "description": "The text or key phrase of the note to delete."}
+                    "note_text": {
+                        "type": "string",
+                        "description": "The text or key phrase of the note to delete.",
+                    }
                 },
                 "required": ["note_text"],
             },

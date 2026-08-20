@@ -391,8 +391,10 @@ def _pressure_loop() -> None:
             free = _available()
             if free >= _FREE_FLOOR:
                 continue
-            print(f"[residency] pressure free~{free / _GB:.1f}GB < floor "
-                  f"{_FREE_FLOOR / _GB:.1f}GB - demoting vision to on_demand")
+            print(
+                f"[residency] pressure free~{free / _GB:.1f}GB < floor "
+                f"{_FREE_FLOOR / _GB:.1f}GB - demoting vision to on_demand"
+            )
             _unload_vision()
             _persist("on_demand", reason="ram_pressure")
             return
@@ -403,7 +405,9 @@ def _start_monitor() -> None:
     _stop_monitor()
     _monitor_stop.clear()
     _monitor_thread = threading.Thread(
-        target=_pressure_loop, daemon=True, name="residency-pressure",
+        target=_pressure_loop,
+        daemon=True,
+        name="residency-pressure",
     )
     _monitor_thread.start()
 

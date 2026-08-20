@@ -232,7 +232,9 @@ def highlight_cell(login: str) -> str:
     return f'<a href="{commits_url}">See their commits →</a>'
 
 
-def loc_for_login(login: str, loc: dict[str, dict[str, int]], fallback_commits: int = 0) -> dict[str, int]:
+def loc_for_login(
+    login: str, loc: dict[str, dict[str, int]], fallback_commits: int = 0
+) -> dict[str, int]:
     s = loc.get(login) or loc.get(login.lower())
     if s:
         return s
@@ -262,7 +264,9 @@ def discover_logins_from_git(
     return found
 
 
-def ensure_all_contributors_entries(logins: list[str], types: dict[str, list[str]]) -> bool:
+def ensure_all_contributors_entries(
+    logins: list[str], types: dict[str, list[str]]
+) -> bool:
     """Persist newly discovered logins into .all-contributorsrc so they stick.
 
     Returns True if the file was updated.
@@ -372,7 +376,7 @@ def build_table(
         )
         name_md = (
             f'<a href="{profile}"><b>@{login}</b></a><br/>'
-            f'<sub>{types_cell(types.get(login, ["code"]))}</sub>'
+            f"<sub>{types_cell(types.get(login, ['code']))}</sub>"
         )
         lines.append(
             "| "
@@ -397,9 +401,7 @@ def replace_section(readme: str, table: str) -> str:
     )
     replacement = f"{START}\n{table}{END}"
     if not pattern.search(readme):
-        raise SystemExit(
-            f"Could not find {START} ... {END} markers in README.md"
-        )
+        raise SystemExit(f"Could not find {START} ... {END} markers in README.md")
     return pattern.sub(replacement, readme)
 
 

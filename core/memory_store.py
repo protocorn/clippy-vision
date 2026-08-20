@@ -22,8 +22,7 @@ def save_identity_field( field: str, value: str, source: str="agent", op: str="s
         return f"Saved name: {saved}"
     key = f"identity.{field}"
     existing_row = conn.execute(
-        "SELECT value FROM memory_meta WHERE key = ?",
-        (key,)
+        "SELECT value FROM memory_meta WHERE key = ?", (key,)
     ).fetchone()
     if existing_row:
         existing = json.loads(existing_row[0])
@@ -33,7 +32,6 @@ def save_identity_field( field: str, value: str, source: str="agent", op: str="s
             return f"Skipped — agent-written value for '{field}' is protected."
     else:
         existing = {}
-
 
     now = time.time()
 
@@ -46,12 +44,12 @@ def save_identity_field( field: str, value: str, source: str="agent", op: str="s
 
         # Refuse a low confidence update if the field is well established
         #  existing.get("value") != value --> value is different from the current value
-        if current_count >=5 and  existing.get("value") != value:
+        if current_count >= 5 and existing.get("value") != value:
             existing["mention_count"] = current_count + 1
             existing["updated_at"] = now
             conn.execute(
                 "INSERT OR REPLACE INTO memory_meta (key, value) VALUES (?, ?)",
-                (key, json.dumps(existing))
+                (key, json.dumps(existing)),
             )
             conn.commit()
             return f"Kept existing value for '{field}' (mentioned {existing['mention_count']}x). New value '{value}' ignored — use explicit correction to override."
@@ -65,9 +63,9 @@ def save_identity_field( field: str, value: str, source: str="agent", op: str="s
                 "field_embedding": None,
             }
             conn.execute(
-            "INSERT OR REPLACE INTO memory_meta (key, value) VALUES (?, ?)",
-            (key, json.dumps(payload))
-        )
+                "INSERT OR REPLACE INTO memory_meta (key, value) VALUES (?, ?)",
+                (key, json.dumps(payload)),
+            )
         conn.commit()
         return f"Saved {field}: {value}"
 
@@ -94,18 +92,23 @@ def save_identity_field( field: str, value: str, source: str="agent", op: str="s
                 current_items[item]["count"] += 1
                 current_items[item]["last_seen"] = now
             else:
-                current_items[item] = {"count": 1, "added_at": now, "last_seen": now, "active": True}
+                current_items[item] = {
+                    "count": 1,
+                    "added_at": now,
+                    "last_seen": now,
+                    "active": True,
+                }
 
         payload = {
-            "type":            "list",
-            "items":           current_items,
-            "source":          source,
-            "updated_at":      now,
+            "type": "list",
+            "items": current_items,
+            "source": source,
+            "updated_at": now,
             "field_embedding": None,
         }
         conn.execute(
             "INSERT OR REPLACE INTO memory_meta (key, value) VALUES (?, ?)",
-            (key, json.dumps(payload))
+            (key, json.dumps(payload)),
         )
         conn.commit()
         return f"Added to {field}: {', '.join(items)}"
@@ -128,7 +131,7 @@ def save_identity_field( field: str, value: str, source: str="agent", op: str="s
         existing["field_embedding"] = None
         conn.execute(
             "INSERT OR REPLACE INTO memory_meta (key, value) VALUES (?, ?)",
-            (key, json.dumps(existing))
+            (key, json.dumps(existing)),
         )
         conn.commit()
         return f"Removed from {field}: {', '.join(removed)}"
@@ -137,20 +140,21 @@ def save_identity_field( field: str, value: str, source: str="agent", op: str="s
     # EXPLICIT OVERRIDE
     elif op == "override":
         payload = {
-            "type":            "scalar",
-            "value":           value,
-            "mention_count":   1,
-            "source":          source,
-            "updated_at":      now,
+            "type": "scalar",
+            "value": value,
+            "mention_count": 1,
+            "source": source,
+            "updated_at": now,
             "field_embedding": None,
         }
         conn.execute(
             "INSERT OR REPLACE INTO memory_meta (key, value) VALUES (?, ?)",
-            (key, json.dumps(payload))
+            (key, json.dumps(payload)),
         )
         conn.commit()
         return f"Overrode {field}: {value}"
     return f"Unknown op '{op}' for field '{field}'."
+
 
 def get_identity() -> dict:
     """Return all identity fields as {field: display_string} dict."""
@@ -168,10 +172,11 @@ def get_identity() -> dict:
 
             # Only show active items, sorted by count descending
             active = {
-                k: v for k, v in data.get("items", {}).items()
-                if v.get("active", True)
+                k: v for k, v in data.get("items", {}).items() if v.get("active", True)
             }
-            sorted_items = sorted(active.keys(), key=lambda k: active[k]["count"], reverse=True)
+            sorted_items = sorted(
+                active.keys(), key=lambda k: active[k]["count"], reverse=True
+            )
             result[field] = ", ".join(sorted_items) if sorted_items else ""
         else:
             result[field] = data.get("value", "")
@@ -207,14 +212,14 @@ def get_introduction_meta() -> dict:
 def get_introduction() -> str:
     return get_introduction_meta()["value"]
 
+
 def set_introduction(text: str, source: str = "distiller") -> None:
     conn.execute(
         "INSERT OR REPLACE INTO memory_meta (key, value) VALUES (?, ?)",
-        ("introduction", json.dumps({
-            "value": text,
-            "source": source,
-            "updated_at": time.time()
-        }))
+        (
+            "introduction",
+            json.dumps({"value": text, "source": source, "updated_at": time.time()}),
+        ),
     )
     conn.commit()
 
@@ -252,12 +257,14 @@ def count_facts_since(since: float) -> int:
     ).fetchone()
     return int(row[0]) if row else 0
 
+
 def get_active_facts(cluster_id: str) -> list[str]:
     rows = conn.execute(
         "SELECT text FROM memory_facts WHERE cluster_id = ? AND valid_to IS NULL ORDER BY created_at ASC",
-        (cluster_id,)
+        (cluster_id,),
     ).fetchall()
     return [r[0] for r in rows]
+
 
 def get_all_clusters() -> list[dict]:
     rows = conn.execute(
@@ -279,7 +286,7 @@ def get_unresolved_conflicts(limit: int = 3) -> list[dict]:
            WHERE mc.resolved_at IS NULL
            ORDER BY mc.created_at DESC
            LIMIT ?""",
-        (limit,)
+        (limit,),
     ).fetchall()
     return [{"conflict_id": r[0], "fact_a": r[1], "fact_b": r[2]} for r in rows]
 
@@ -291,7 +298,7 @@ def resolve_conflicts_for_fact(fact_id: str, resolution: str) -> None:
         """UPDATE memory_conflicts
            SET resolved_at = ?, resolution = ?
            WHERE (fact_id_a = ? OR fact_id_b = ?) AND resolved_at IS NULL""",
-        (time.time(), resolution, fact_id, fact_id)
+        (time.time(), resolution, fact_id, fact_id),
     )
     conn.commit()
 
@@ -312,18 +319,24 @@ def get_identity_for_semantic_profile() -> list[dict]:
             continue
         data  = json.loads(val)
         if data.get("type") == "list":
-            active = {k: v for k, v in data.get("items", {}).items() if v.get("active", True)}
-            sorted_items = sorted(active.keys(), key=lambda k: active[k]["count"], reverse=True)
+            active = {
+                k: v for k, v in data.get("items", {}).items() if v.get("active", True)
+            }
+            sorted_items = sorted(
+                active.keys(), key=lambda k: active[k]["count"], reverse=True
+            )
             display = ", ".join(sorted_items) if sorted_items else ""
         else:
             display = data.get("value", "")
         if not display:
             continue
-        result.append({
-            "field":     field,
-            "display":   display,
-            "embedding": data.get("field_embedding"),  # None = dirty
-        })
+        result.append(
+            {
+                "field": field,
+                "display": display,
+                "embedding": data.get("field_embedding"),  # None = dirty
+            }
+        )
     return result
 
 
@@ -337,6 +350,6 @@ def update_field_embedding(field: str, embedding: list) -> None:
     data["field_embedding"] = embedding
     conn.execute(
         "INSERT OR REPLACE INTO memory_meta (key, value) VALUES (?, ?)",
-        (key, json.dumps(data))
+        (key, json.dumps(data)),
     )
     conn.commit()

@@ -49,16 +49,20 @@ OCR_ONLY_VERDICT = {
 # a second ADD COLUMN on some Windows SQLite builds raises SystemError and
 # kills API startup.
 
-#-----------------------------------------------------#
-#------------------- Print functions -----------------#
-#-----------------------------------------------------#
+
+# -----------------------------------------------------#
+# ------------------- Print functions -----------------#
+# -----------------------------------------------------#
 def _print_verdict(tier: int, event: dict, verdict: dict):
-    verdict_str  = verdict["verdict"].upper()
-    score        = verdict["score"]
-    reason       = verdict["reason"]
-    event_type   = event["event_type"]
+    verdict_str = verdict["verdict"].upper()
+    score = verdict["score"]
+    reason = verdict["reason"]
+    event_type = event["event_type"]
     process_name = event["process_name"] or "unknown"
-    print(f"  [TIER-{tier}] {verdict_str} (score={score}/10) | {event_type} in {process_name} | {reason}")
+    print(
+        f"  [TIER-{tier}] {verdict_str} (score={score}/10) | {event_type} in {process_name} | {reason}"
+    )
+
 
 def _print_capture_text_verdict(event: dict, verdict: dict):
     verdict_str = verdict["verdict"].upper()
@@ -77,7 +81,6 @@ def _print_capture_text_verdict(event: dict, verdict: dict):
         print(f"    next     : {verdict['suggested_action']}")
 
 
-
 def apply_verdict(event_id: str, verdict: dict):
     status      = "done"
     interesting = 0 if verdict["verdict"] == "not_interesting" else 1
@@ -85,7 +88,7 @@ def apply_verdict(event_id: str, verdict: dict):
         """UPDATE events
            SET interesting=?, interest_score=?, interest_reason=?, classification_status=?
            WHERE event_id=?""",
-        (interesting, verdict["score"], verdict["reason"], status, event_id)
+        (interesting, verdict["score"], verdict["reason"], status, event_id),
     )
     conn.commit()
     return bool(cursor.rowcount)
@@ -221,27 +224,37 @@ def lookup_duplicate_verdict(event: dict, lookback_secs: float = DUPLICATE_LOOKB
 
 
 def _row_to_event(row) -> dict:
-    (event_id, timestamp, event_type,
-     process_name, current_window_title, active_url,
-     prev_process, prev_title,
-     summary, payload) = row
+    (
+        event_id,
+        timestamp,
+        event_type,
+        process_name,
+        current_window_title,
+        active_url,
+        prev_process,
+        prev_title,
+        summary,
+        payload,
+    ) = row
 
     return {
-        "event_id":     event_id,
-        "timestamp":    timestamp,
-        "event_type":   event_type,
+        "event_id": event_id,
+        "timestamp": timestamp,
+        "event_type": event_type,
         "process_name": process_name,
-        "summary":      summary,
-        "payload":      payload,
+        "summary": summary,
+        "payload": payload,
         "window_context": {
-            "process_name":         process_name,
+            "process_name": process_name,
             "current_window_title": current_window_title,
-            "active_url":           active_url,
+            "active_url": active_url,
         },
         "previous_window_context": {
-            "process_name":         prev_process,
+            "process_name": prev_process,
             "current_window_title": prev_title,
-        } if prev_process else None,
+        }
+        if prev_process
+        else None,
     }
 
 
@@ -288,12 +301,14 @@ def classify_event(event: dict, *, allow_tier2: bool = False):
                AND classification_status = 'done'
                ORDER BY timestamp DESC LIMIT 3
            ) ORDER BY timestamp ASC""",
-        (event["event_id"],)
+        (event["event_id"],),
     ).fetchall()
 
     if recent:
         context_str = "\n".join(f"  [{r[0]}] {r[1]}: {r[2]}" for r in recent)
-        summary = f"Recent context:\n{context_str}\n\nCurrent event:\n  {event['summary']}"
+        summary = (
+            f"Recent context:\n{context_str}\n\nCurrent event:\n  {event['summary']}"
+        )
     else:
         summary = event["summary"]
 
@@ -458,7 +473,7 @@ def capture_text_worker_loop():
             if age_secs > MAX_VISION_WAIT_SECS:
                 conn.execute(
                     "UPDATE events SET classification_status='done' WHERE event_id=?",
-                    (event["event_id"],)
+                    (event["event_id"],),
                 )
                 conn.commit()
                 event_ts = time.strftime("%H:%M:%S", time.localtime(event["timestamp"]))

@@ -1,6 +1,10 @@
 import json
 import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,7 +31,7 @@ from core.backlog import get_backlog_status
 from core.capture_state import get_capture_status
 from core.diagnostics import get_diagnostics
 from core.intro_builder import start_intro_rebuild_daemon
-from core.memory_store import get_profile, save_identity_field, set_introduction
+from core.memory_store import get_profile, save_identity_field, set_introduction, get_introduction, get_identity
 from core.model_residency import can_load_light, on_capture_stop, warm_for_startup
 from core.paths import get_data_dir, get_screenshots_dir
 from core.platform_support import platform_label
@@ -48,61 +52,37 @@ async def lifespan(app: FastAPI):
 
     # Weekly intro rebuild: immediate check + periodic background loop
     start_intro_rebuild_daemon()
-
-    # Preload router classifier only when a small torch model still fits.
-    if can_load_light():
-        threading.Thread(target=load_classifier, daemon=True, name="router-classifier-warmup").start()
-
-    # Summarizer / OCR backlog / distil run with the app, not only while capture
-    # is on — pause capture stops new intake, not processing of allowed history.
-    from core.background_jobs import start_background_jobs
-
-    start_background_jobs()
-
-    # PARKED: event RAG indexer — only if rag_enabled (default off); ask contributor
-    # keep/remove. See core/rag.py and app_settings.
-    if get_capture_settings()["rag_enabled"]:
-        start_event_indexer()
-
-
-    try:
-        # Model warm is triggered explicitly by Electron (setup / normal launch)
-        # via POST /residency/startup — avoids racing a background warm with setup UI.
-        yield
-    finally:
-        stop_event_indexer(wait=True)
+    # Preload router classifier so the first chat does not pay the load cost
+    threading.Thread(
+        target=load_classifier, daemon=True, name="router-classifier-warmup"
+    ).start()
+    # Model warm is triggered explicitly by Electron (setup / normal launch)
+    # via POST /residency/startup — avoids racing a background warm with setup UI.
+    yield
 
 
 app = FastAPI(lifespan=lifespan)
 
+
 app.add_middleware(
-
     CORSMiddleware,
-
-    allow_origins=["null"],
-
+    allow_origins=["*"],
     allow_methods=["*"],
-
     allow_headers=["*"],
-
 )
 
-class QueryRequest(BaseModel):
 
+class QueryRequest(BaseModel):
     message: str
 
     conversation_id: str
 
 
-
 class NameRequest(BaseModel):
-
     name: str
 
 
-
 class ProfileUpdateRequest(BaseModel):
-
     name: str | None = None
 
     introduction: str | None = None
@@ -110,30 +90,8 @@ class ProfileUpdateRequest(BaseModel):
     identity: dict[str, str] | None = None
 
 
-
 class PrivacyUpdateRequest(BaseModel):
-
     enabled: dict[str, bool]
-
-
-class CaptureSettingsRequest(BaseModel):
-    capture_screenshots: bool | None = None
-    capture_all_monitors: bool | None = None
-    capture_clipboard: bool | None = None
-    ocr_enabled: bool | None = None
-    image_embeddings_enabled: bool | None = None
-    rag_enabled: bool | None = None
-    min_gap_seconds: float | None = None
-    background_interval_seconds: float | None = None
-    activity_debounce_seconds: float | None = None
-    raw_retention_days: int | None = None
-    screenshot_retention_days: int | None = None
-    launch_at_login: bool | None = None
-
-
-class DataClearRequest(BaseModel):
-    scopes: list[str]
-
 
 
 def _validate_user_message(message: str) -> str:
@@ -149,7 +107,6 @@ def _validate_user_message(message: str) -> str:
 
 
 @app.post("/chat")
-
 def chat(req: QueryRequest):
 
     message = _validate_user_message(req.message)
@@ -159,9 +116,7 @@ def chat(req: QueryRequest):
     return {"result": result}
 
 
-
 @app.post("/chat/stream")
-
 def chat_stream(req: QueryRequest):
 
     message = _validate_user_message(req.message)
@@ -169,45 +124,30 @@ def chat_stream(req: QueryRequest):
     def event_gen():
 
         try:
-
             for event in run_stream(message, req.conversation_id):
-
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
         except Exception as e:
-
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
-
         event_gen(),
-
         media_type="text/event-stream",
-
         headers={
-
             "Cache-Control": "no-cache",
-
             "Connection": "keep-alive",
-
             "X-Accel-Buffering": "no",
-
         },
-
     )
 
 
-
 @app.get("/user/name")
-
 def read_user_name():
 
     return {"name": get_user_name()}
 
 
-
 @app.post("/user/name")
-
 def write_user_name(req: NameRequest):
     try:
         name = set_user_name(req.name)
@@ -217,39 +157,30 @@ def write_user_name(req: NameRequest):
     return {"name": name}
 
 
-
 @app.get("/user/profile")
-
 def read_user_profile():
-    return get_profile()
 
+    return {
+        "name": get_user_name(),
+        "introduction": get_introduction(),
+        "identity": get_identity(),
+    }
 
 
 @app.post("/user/profile")
-
 def write_user_profile(req: ProfileUpdateRequest):
 
     if req.name is not None:
-        try:
-            set_user_name(req.name)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        set_user_name(req.name)
 
     if req.introduction is not None:
-
         set_introduction(req.introduction.strip(), source="user")
 
     if req.identity:
-
         for field, value in req.identity.items():
-
             field = (field or "").strip().lower().replace(" ", "_")
 
             if not field:
-
-                continue
-
-            if field in {"name", "introduction"}:
                 continue
 
             value = (value or "").strip()
@@ -259,20 +190,20 @@ def write_user_profile(req: ProfileUpdateRequest):
             # User edits from Settings always win over agent/distiller values.
             save_identity_field(field, value=value, source="user", op="override")
 
-    return get_profile()
-
+    return {
+        "name": get_user_name(),
+        "introduction": get_introduction(),
+        "identity": get_identity(),
+    }
 
 
 @app.get("/settings/privacy")
-
 def read_privacy_settings():
 
     return {"targets": list_privacy_targets()}
 
 
-
 @app.put("/settings/privacy")
-
 def write_privacy_settings(req: PrivacyUpdateRequest):
 
     set_privacy_enabled(req.enabled)
@@ -280,147 +211,52 @@ def write_privacy_settings(req: PrivacyUpdateRequest):
     return {"targets": list_privacy_targets()}
 
 
-@app.get("/settings/capture")
-def read_capture_settings():
-    return get_capture_settings()
-
-
-@app.put("/settings/capture")
-def write_capture_settings(req: CaptureSettingsRequest):
-    settings = set_capture_settings(req.dict(exclude_unset=True))
-    # PARKED: start/stop event RAG indexer with the toggle (default off).
-    if settings["rag_enabled"]:
-        start_event_indexer()
-    else:
-        stop_event_indexer()
-    return settings
-
-
-@app.get("/settings/data")
-def read_data_stats():
-    return get_data_stats()
-
-
-@app.get("/settings/data/export")
-def export_user_data():
-    return JSONResponse(content=export_data())
-
-
-@app.post("/settings/data/clear")
-def clear_user_data(req: DataClearRequest):
-    allowed = {"events", "screenshots", "conversations", "memory", "all"}
-    scopes = [
-        normalized
-        for scope in req.scopes
-        if (normalized := str(scope).strip().lower()) in allowed
-    ]
-    if not scopes:
-        raise HTTPException(status_code=400, detail="Choose at least one valid data scope.")
-    return {"cleared": clear_data(scopes), "remaining": get_data_stats()}
-
-
-@app.get("/settings/diagnostics")
-def diagnostics():
-    return get_diagnostics()
-
-
-@app.get("/screenshots")
-def screenshot_search(
-    q: str = "",
-    since: float | None = None,
-    until: float | None = None,
-    limit: int = Query(40, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-):
-    return search_screenshots(q, start_ts=since, end_ts=until, limit=limit, offset=offset)
-
-
-@app.get("/screenshots/{filename}")
-def screenshot_file(filename: str):
-    root = get_screenshots_dir().resolve()
-    candidate = (root / filename).resolve()
-    if Path(filename).name != filename or candidate.parent != root or not candidate.is_file():
-        raise HTTPException(status_code=404, detail="Screenshot not found.")
-    return FileResponse(candidate, media_type="image/jpeg")
-
-
-
 @app.get("/conversations")
-
 def conversations():
 
     return {"conversations": list_conversations()}
 
 
-
 @app.get("/conversations/search")
-
-def conversations_search(q: str = "", limit: int = Query(20, ge=1, le=100)):
+def conversations_search(q: str = "", limit: int = 20):
 
     return {"conversations": search_conversations(q, limit=limit), "query": q}
 
 
-
 @app.get("/conversations/{conversation_id}")
-
 def conversation_messages(conversation_id: str):
 
     return {
-
         "conversation_id": conversation_id,
-
         "messages": get_conversation_messages(conversation_id),
-
     }
 
 
 @app.delete("/conversations/{conversation_id}")
-
 def conversation_delete(conversation_id: str):
 
     result = delete_conversation(conversation_id)
 
     if not result["deleted"]:
-
         raise HTTPException(status_code=404, detail="Conversation not found.")
 
     return result
 
 
-
 @app.get("/health")
-
 def health():
 
     return {"status": "ok"}
 
 
-@app.get("/status")
-def status():
-    from core.model_residency import load_residency
-
-    return {
-        "status": "ok",
-        "platform": platform_label(),
-        "data_dir": str(get_data_dir()),
-        "capture": get_capture_status(),
-        "residency": load_residency(),
-        "backlog": get_backlog_status(),
-    }
-
-
 @app.post("/residency/startup")
-
 def residency_startup():
-
-    """Pin text for app launch; bundled embeddings load on demand."""
+    """Pin text + embed for app launch; vision stays idle until capture starts."""
 
     return warm_for_startup()
 
 
-
 @app.get("/residency")
-
 def residency_status():
 
     from core.model_residency import load_residency
@@ -428,15 +264,11 @@ def residency_status():
     return load_residency()
 
 
-
 @app.post("/residency/capture-stop")
-
 def residency_capture_stop():
-
-    """Record that the model-free capture process stopped."""
+    """Unload vision when Electron stops screen capture (process may be force-killed)."""
 
     return on_capture_stop()
-
 
 
 if __name__ == "__main__":

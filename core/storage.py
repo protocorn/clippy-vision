@@ -345,7 +345,7 @@ def store_event(event: Event):
     #------------------------------------------------------#
     # Vector embedding is a JSON string for now            #
     # but should be changed to a binary blob in the future #
-    #------------------------------------------------------#
+    # ------------------------------------------------------#
     prev = event["previous_window_context"]
     conn.execute(
         """INSERT OR IGNORE INTO events (
@@ -362,16 +362,13 @@ def store_event(event: Event):
             event["session_id"],
             event["timestamp"],
             event["event_type"],
-
             event["window_context"]["process_name"],
             event["window_context"]["current_window_title"],
             event["window_context"]["active_url"],
             prev["process_name"] if prev else None,
             prev["current_window_title"] if prev else None,
-
             event["summary"],
             json.dumps(event["payload"]),
-
             event["interesting"],
             event["interest_score"],
             event["interest_reason"],
@@ -413,9 +410,10 @@ def store_summary(summary: dict, vision_enriched: bool = False, embedding: list 
             summary["created_at"] + (TTL_SUMMARY_DAYS * 24 * 60 * 60),
             1 if vision_enriched else 0,
             json.dumps(embedding) if embedding else None,
-        )
+        ),
     )
     conn.commit()
+
 
 def get_summaries(since: float) -> list[dict]:
     rows = conn.execute(
@@ -425,9 +423,25 @@ def get_summaries(since: float) -> list[dict]:
         FROM sessions
         WHERE created_at > ?
         ORDER BY created_at ASC""",
-        (since,)
+        (since,),
     ).fetchall()
-    return [{"session_id": r[0], "summary_id": r[1], "created_at": r[2], "window_start": r[3], "window_end": r[4], "summary": r[5], "active_task": r[6], "entities": r[7], "event_count": r[8], "expires_at": r[9], "vision_enriched": r[10]} for r in rows]
+    return [
+        {
+            "session_id": r[0],
+            "summary_id": r[1],
+            "created_at": r[2],
+            "window_start": r[3],
+            "window_end": r[4],
+            "summary": r[5],
+            "active_task": r[6],
+            "entities": r[7],
+            "event_count": r[8],
+            "expires_at": r[9],
+            "vision_enriched": r[10],
+        }
+        for r in rows
+    ]
+
 
 def get_unsummarized_events(since: float) -> list[dict]:
     rows = conn.execute(
@@ -447,7 +461,7 @@ def get_unsummarized_events(since: float) -> list[dict]:
                  AND events.timestamp <= s.window_end
            )
            ORDER BY timestamp ASC""",
-        (since,)
+        (since,),
     ).fetchall()
     return [
         {
@@ -476,7 +490,7 @@ def get_events_for_window(window_start: float, window_end: float) -> list[dict]:
            WHERE interesting = 1
            AND timestamp BETWEEN ? AND ?
            ORDER BY timestamp ASC""",
-        (window_start, window_end)
+        (window_start, window_end),
     ).fetchall()
     return [
         {
@@ -508,11 +522,15 @@ def get_sessions_needing_refresh() -> list[dict]:
                AND e.vision_ocr_text IS NOT NULL
            )""",
     ).fetchall()
-    return [{"summary_id": r[0], "window_start": r[1], "window_end": r[2]} for r in rows]
+    return [
+        {"summary_id": r[0], "window_start": r[1], "window_end": r[2]} for r in rows
+    ]
 
 
 def mark_session_vision_enriched(summary_id: str):
-    conn.execute("UPDATE sessions SET vision_enriched = 1 WHERE summary_id = ?", (summary_id,))
+    conn.execute(
+        "UPDATE sessions SET vision_enriched = 1 WHERE summary_id = ?", (summary_id,)
+    )
     conn.commit()
 
 
@@ -520,8 +538,7 @@ def get_last_summary_time(session_id: str) -> float:
 
     # Prefer the current session's last window
     row = conn.execute(
-        "SELECT MAX(window_end) FROM sessions WHERE session_id = ?",
-        (session_id,)
+        "SELECT MAX(window_end) FROM sessions WHERE session_id = ?", (session_id,)
     ).fetchone()
     if row and row[0]:
         return row[0]

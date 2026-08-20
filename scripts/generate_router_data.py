@@ -29,9 +29,9 @@ from agent.router import OLLAMA_MODEL, classify_query
 from core.llm_gateway import Priority, gateway
 
 # --- Paths ---
-SEED_FILE      = ROOT / "core" / "data" / "router_seed.jsonl"
-OUTPUT_FILE    = ROOT / "core" / "data" / "router_generated.jsonl"
-POLICY_FILE    = ROOT / "docs" / "router_labelling_policy.md"
+SEED_FILE = ROOT / "core" / "data" / "router_seed.jsonl"
+OUTPUT_FILE = ROOT / "core" / "data" / "router_generated.jsonl"
+POLICY_FILE = ROOT / "docs" / "router_labelling_policy.md"
 
 # --- Config ---
 CATEGORIES = [
@@ -44,7 +44,9 @@ CATEGORIES = [
     "follow_up_inherit",
 ]
 
-SEEDS_PER_CATEGORY_IN_PROMPT = 5  # how many seed examples to show qwen per generation call
+SEEDS_PER_CATEGORY_IN_PROMPT = (
+    5  # how many seed examples to show qwen per generation call
+)
 
 # Topic domains injected into generation prompt to prevent coding monoculture
 TOPIC_DIVERSITY_INSTRUCTION = """
@@ -69,9 +71,9 @@ GENERATION_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "text":         {"type": "string"},
-                    "primary":      {"type": "string"},
-                    "secondary":    {"type": "array", "items": {"type": "string"}},
+                    "text": {"type": "string"},
+                    "primary": {"type": "string"},
+                    "secondary": {"type": "array", "items": {"type": "string"}},
                     "temporal_hint": {"type": "string"},
                 },
                 "required": ["text", "primary", "secondary"],
@@ -85,6 +87,7 @@ GENERATION_SCHEMA = {
 # ─────────────────────────────────────────────────────────────
 # Load helpers
 # ─────────────────────────────────────────────────────────────
+
 
 def load_policy() -> str:
     if not POLICY_FILE.exists():
@@ -132,19 +135,24 @@ def load_generated() -> list[dict]:
 # Generation prompt builder
 # ─────────────────────────────────────────────────────────────
 
+
 def _format_seed(ex: dict) -> str:
     parts = [f'  text: "{ex["text"]}"']
     if ex.get("context"):
         parts.append(f'  context: "{ex["context"]}"')
-    parts.append(f'  primary: {ex["primary"]}')
-    parts.append(f'  secondary: {json.dumps(ex.get("secondary", []))}')
+    parts.append(f"  primary: {ex['primary']}")
+    parts.append(f"  secondary: {json.dumps(ex.get('secondary', []))}")
     hint = ex.get("temporal_hint")
-    parts.append(f'  temporal_hint: {json.dumps(hint)}')
+    parts.append(f"  temporal_hint: {json.dumps(hint)}")
     return "\n".join(parts)
 
 
-def build_generation_prompt(category: str, seeds: list[dict], policy: str, n: int, existing_texts: set[str]) -> str:
-    seed_block = "\n\n".join(_format_seed(s) for s in seeds[:SEEDS_PER_CATEGORY_IN_PROMPT])
+def build_generation_prompt(
+    category: str, seeds: list[dict], policy: str, n: int, existing_texts: set[str]
+) -> str:
+    seed_block = "\n\n".join(
+        _format_seed(s) for s in seeds[:SEEDS_PER_CATEGORY_IN_PROMPT]
+    )
 
     existing_hint = ""
     if existing_texts:
@@ -213,6 +221,7 @@ Return a JSON object with an "examples" array. Each item has:
 # Core generation
 # ─────────────────────────────────────────────────────────────
 
+
 def generate_for_category(
     category: str,
     seeds: list[dict],
@@ -228,7 +237,7 @@ def generate_for_category(
         model=OLLAMA_MODEL,
         format=GENERATION_SCHEMA,
         think=False,
-        options={"temperature": 0.7},   # some creativity for diversity
+        options={"temperature": 0.7},  # some creativity for diversity
         priority=Priority.BACKGROUND,
     )
 
@@ -250,9 +259,10 @@ def consistency_check(text: str, expected_primary: str) -> bool:
 # Batch runner
 # ─────────────────────────────────────────────────────────────
 
+
 def run_batch(categories: list[str], per_category: int) -> None:
-    policy  = load_policy()
-    seeds   = load_seeds()
+    policy = load_policy()
+    seeds = load_seeds()
     already = load_generated()
 
     existing_texts: set[str] = {ex["text"] for ex in already}
@@ -266,7 +276,7 @@ def run_batch(categories: list[str], per_category: int) -> None:
             pass
 
     total_generated = 0
-    total_flagged   = 0
+    total_flagged = 0
 
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -275,7 +285,9 @@ def run_batch(categories: list[str], per_category: int) -> None:
             print(f"\n[gen] Generating {per_category} examples for: {category}")
             cat_seeds = seeds.get(category, [])
             if not cat_seeds:
-                print(f"  [warn] No seeds found for {category} — generation quality may be lower.")
+                print(
+                    f"  [warn] No seeds found for {category} — generation quality may be lower."
+                )
 
             try:
                 examples = generate_for_category(
@@ -293,26 +305,34 @@ def run_batch(categories: list[str], per_category: int) -> None:
                     continue
 
                 # Normalise fields
-                primary      = ex.get("primary", category)
-                secondary    = ex.get("secondary", [])
-                raw_hint     = ex.get("temporal_hint")
-                has_time     = primary == "time_anchored" or "time_anchored" in secondary
-                temporal_hint = (raw_hint if raw_hint and raw_hint not in ("null", "None") else None) if has_time else None
+                primary = ex.get("primary", category)
+                secondary = ex.get("secondary", [])
+                raw_hint = ex.get("temporal_hint")
+                has_time = primary == "time_anchored" or "time_anchored" in secondary
+                temporal_hint = (
+                    (
+                        raw_hint
+                        if raw_hint and raw_hint not in ("null", "None")
+                        else None
+                    )
+                    if has_time
+                    else None
+                )
 
                 # Consistency check — re-classify and compare
                 is_consistent = consistency_check(text, primary)
                 flag = not is_consistent
 
                 row = {
-                    "id":            str(uuid.uuid4())[:8],
-                    "text":          text,
-                    "context":       ex.get("context", ""),
-                    "primary":       primary,
-                    "secondary":     secondary,
+                    "id": str(uuid.uuid4())[:8],
+                    "text": text,
+                    "context": ex.get("context", ""),
+                    "primary": primary,
+                    "secondary": secondary,
                     "temporal_hint": temporal_hint,
-                    "source":        "generated",
-                    "reviewed":      False,
-                    "flagged":       flag,
+                    "source": "generated",
+                    "reviewed": False,
+                    "flagged": flag,
                 }
                 out.write(json.dumps(row) + "\n")
                 existing_texts.add(text)
@@ -320,13 +340,17 @@ def run_batch(categories: list[str], per_category: int) -> None:
                 accepted += 1
                 if flag:
                     flagged += 1
-                    print(f"  [flag] Mismatch: \"{text[:60]}...\" — generated as {primary}, router returned different")
+                    print(
+                        f'  [flag] Mismatch: "{text[:60]}..." — generated as {primary}, router returned different'
+                    )
 
             total_generated += accepted
-            total_flagged   += flagged
+            total_flagged += flagged
             print(f"  accepted={accepted}  skipped={skipped}  flagged={flagged}")
 
-    print(f"\n[done] Total generated: {total_generated}  |  Flagged for review: {total_flagged}")
+    print(
+        f"\n[done] Total generated: {total_generated}  |  Flagged for review: {total_flagged}"
+    )
     print(f"       Output: {OUTPUT_FILE}")
     if total_flagged > 0:
         print(f"\n  Run with --review-flagged to inspect flagged examples.")
@@ -336,9 +360,10 @@ def run_batch(categories: list[str], per_category: int) -> None:
 # Review mode
 # ─────────────────────────────────────────────────────────────
 
+
 def review_flagged() -> None:
     examples = load_generated()
-    flagged  = [ex for ex in examples if ex.get("flagged")]
+    flagged = [ex for ex in examples if ex.get("flagged")]
     if not flagged:
         print("No flagged examples found.")
         return
@@ -347,7 +372,9 @@ def review_flagged() -> None:
     for ex in flagged:
         print(f"  id:       {ex.get('id', '?')}")
         print(f"  text:     {ex['text'][:100]}")
-        print(f"  labeled:  primary={ex['primary']}  secondary={ex.get('secondary', [])}")
+        print(
+            f"  labeled:  primary={ex['primary']}  secondary={ex.get('secondary', [])}"
+        )
         print()
 
 
@@ -361,8 +388,8 @@ def fix_flagged(mode: str = "relabel") -> None:
     mode="accept"   : clear flags without re-running the router (manual bulk accept).
     """
     examples = load_generated()
-    unflagged   = [ex for ex in examples if not ex.get("flagged")]
-    flagged     = [ex for ex in examples if ex.get("flagged")]
+    unflagged = [ex for ex in examples if not ex.get("flagged")]
+    flagged = [ex for ex in examples if ex.get("flagged")]
 
     if not flagged:
         print("No flagged examples found — nothing to do.")
@@ -380,7 +407,7 @@ def fix_flagged(mode: str = "relabel") -> None:
         text = ex["text"]
 
         if mode == "accept":
-            ex["flagged"]  = False
+            ex["flagged"] = False
             ex["reviewed"] = True
             fixed_rows.append(ex)
             accepted += 1
@@ -398,25 +425,32 @@ def fix_flagged(mode: str = "relabel") -> None:
 
         if router_primary == ex["primary"]:
             # Router now agrees with the original label — clear flag
-            ex["flagged"]  = False
+            ex["flagged"] = False
             ex["reviewed"] = True
             fixed_rows.append(ex)
             kept += 1
             print(f"  [ok]      router agrees: {router_primary}  '{text[:60]}'")
         elif mode == "relabel":
             # Update to router's classification
-            has_time = router_primary == "time_anchored" or "time_anchored" in decision.secondary
-            ex["primary"]       = router_primary
-            ex["secondary"]     = decision.secondary
+            has_time = (
+                router_primary == "time_anchored"
+                or "time_anchored" in decision.secondary
+            )
+            ex["primary"] = router_primary
+            ex["secondary"] = decision.secondary
             ex["temporal_hint"] = decision.temporal_hint if has_time else None
-            ex["flagged"]       = False
-            ex["reviewed"]      = True
+            ex["flagged"] = False
+            ex["reviewed"] = True
             fixed_rows.append(ex)
             relabeled += 1
-            print(f"  [relabel] {ex.get('_orig_primary', '?')} ==> {router_primary}  '{text[:60]}'")
+            print(
+                f"  [relabel] {ex.get('_orig_primary', '?')} ==> {router_primary}  '{text[:60]}'"
+            )
         else:  # mode == "drop"
             dropped += 1
-            print(f"  [drop]    still mismatch (router={router_primary})  '{text[:60]}'")
+            print(
+                f"  [drop]    still mismatch (router={router_primary})  '{text[:60]}'"
+            )
 
     # Rebuild full file
     all_rows = unflagged + fixed_rows
@@ -424,7 +458,9 @@ def fix_flagged(mode: str = "relabel") -> None:
         for row in all_rows:
             f.write(json.dumps(row) + "\n")
 
-    print(f"\n[done] kept={kept}  relabeled={relabeled}  accepted={accepted}  dropped={dropped}")
+    print(
+        f"\n[done] kept={kept}  relabeled={relabeled}  accepted={accepted}  dropped={dropped}"
+    )
     print(f"       Total rows now: {len(all_rows)}")
     flagged_remaining = sum(1 for r in all_rows if r.get("flagged"))
     print(f"       Still flagged:  {flagged_remaining}")
@@ -434,8 +470,9 @@ def fix_flagged(mode: str = "relabel") -> None:
 # Stats
 # ─────────────────────────────────────────────────────────────
 
+
 def print_stats() -> None:
-    seed_data      = load_seeds()
+    seed_data = load_seeds()
     generated_data = load_generated()
 
     seed_counts = {cat: len(v) for cat, v in seed_data.items()}
@@ -449,23 +486,28 @@ def print_stats() -> None:
             if ex.get("flagged"):
                 gen_flagged[cat] += 1
 
-    print(f"\n{'Category':<22} {'Seeds':>6} {'Generated':>10} {'Flagged':>8} {'Total':>6}")
+    print(
+        f"\n{'Category':<22} {'Seeds':>6} {'Generated':>10} {'Flagged':>8} {'Total':>6}"
+    )
     print("-" * 58)
     for cat in CATEGORIES:
         s = seed_counts.get(cat, 0)
         g = gen_counts.get(cat, 0)
         f = gen_flagged.get(cat, 0)
-        print(f"  {cat:<20} {s:>6} {g:>10} {f:>8} {s+g:>6}")
+        print(f"  {cat:<20} {s:>6} {g:>10} {f:>8} {s + g:>6}")
     print("-" * 58)
     total_s = sum(seed_counts.values())
     total_g = sum(gen_counts.values())
     total_f = sum(gen_flagged.values())
-    print(f"  {'TOTAL':<20} {total_s:>6} {total_g:>10} {total_f:>8} {total_s+total_g:>6}")
+    print(
+        f"  {'TOTAL':<20} {total_s:>6} {total_g:>10} {total_f:>8} {total_s + total_g:>6}"
+    )
 
 
 # ─────────────────────────────────────────────────────────────
 # Balance mode
 # ─────────────────────────────────────────────────────────────
+
 
 def get_clean_counts() -> dict[str, int]:
     """Return per-category count of non-flagged examples (seeds + generated)."""
@@ -516,7 +558,9 @@ def run_balance(target: int, batch_cap: int) -> None:
         return
 
     total_to_gen = sum(n for _, n in work)
-    print(f"\n[balance] Generating {total_to_gen} examples across {len(work)} categories...")
+    print(
+        f"\n[balance] Generating {total_to_gen} examples across {len(work)} categories..."
+    )
 
     for cat, n in work:
         run_batch([cat], n)
@@ -529,22 +573,46 @@ def run_balance(target: int, batch_cap: int) -> None:
 # CLI
 # ─────────────────────────────────────────────────────────────
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate router training data")
-    parser.add_argument("--per-category", type=int, default=20,
-                        help="Examples to generate per category (default: 20)")
-    parser.add_argument("--categories", nargs="+", choices=CATEGORIES,
-                        help="Limit to specific categories (default: all)")
-    parser.add_argument("--balance", metavar="TARGET", type=int, default=None,
-                        help="Auto-generate only for categories below TARGET clean examples")
-    parser.add_argument("--batch-cap", type=int, default=40,
-                        help="Max examples to generate per category per balance run (default: 40)")
-    parser.add_argument("--review-flagged", action="store_true",
-                        help="Show flagged examples and exit")
-    parser.add_argument("--fix-flagged", choices=["relabel", "drop", "accept"], default=None,
-                        help="Fix flagged rows: relabel=use router label, drop=remove mismatches, accept=clear all flags")
-    parser.add_argument("--stats", action="store_true",
-                        help="Show dataset statistics and exit")
+    parser.add_argument(
+        "--per-category",
+        type=int,
+        default=20,
+        help="Examples to generate per category (default: 20)",
+    )
+    parser.add_argument(
+        "--categories",
+        nargs="+",
+        choices=CATEGORIES,
+        help="Limit to specific categories (default: all)",
+    )
+    parser.add_argument(
+        "--balance",
+        metavar="TARGET",
+        type=int,
+        default=None,
+        help="Auto-generate only for categories below TARGET clean examples",
+    )
+    parser.add_argument(
+        "--batch-cap",
+        type=int,
+        default=40,
+        help="Max examples to generate per category per balance run (default: 40)",
+    )
+    parser.add_argument(
+        "--review-flagged", action="store_true", help="Show flagged examples and exit"
+    )
+    parser.add_argument(
+        "--fix-flagged",
+        choices=["relabel", "drop", "accept"],
+        default=None,
+        help="Fix flagged rows: relabel=use router label, drop=remove mismatches, accept=clear all flags",
+    )
+    parser.add_argument(
+        "--stats", action="store_true", help="Show dataset statistics and exit"
+    )
     args = parser.parse_args()
 
     if args.review_flagged:

@@ -15,7 +15,7 @@ include = ["core*", "classifier*", "agent*"]
 line-length = 88
 
 [tool.ruff.lint]
-select = ["I", "UP", "E", "F", "B"]
+select = ["I", "UP", "E", "F", "B", "W"]
 
 ignore = [
     "E501", # Line too long

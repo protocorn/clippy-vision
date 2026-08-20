@@ -11,8 +11,10 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent.parent
-FILES = [ROOT / "core" / "data" / "router_seed.jsonl",
-         ROOT / "core" / "data" / "router_generated.jsonl"]
+FILES = [
+    ROOT / "core" / "data" / "router_seed.jsonl",
+    ROOT / "core" / "data" / "router_generated.jsonl",
+]
 
 rows = []
 for f in FILES:
@@ -27,8 +29,10 @@ print("\nPrimary distribution (clean):")
 for cat, n in Counter(r["primary"] for r in clean).most_common():
     print(f"  {cat:<20} {n}")
 
+
 def norm(t):
     return re.sub(r"[^a-z0-9 ]", "", t.lower()).strip()
+
 
 texts = [norm(r["text"]) for r in clean]
 exact_dupes = sum(n - 1 for n in Counter(texts).values() if n > 1)
@@ -51,7 +55,9 @@ for key, idxs in buckets.items():
             if r >= 0.85 and texts[idxs[a]] != texts[idxs[b]]:
                 near += 1
                 if len(examples) < 12:
-                    examples.append((round(r, 2), clean[idxs[a]]["text"], clean[idxs[b]]["text"]))
+                    examples.append(
+                        (round(r, 2), clean[idxs[a]]["text"], clean[idxs[b]]["text"])
+                    )
 
 print(f"Near-duplicate pairs (ratio>=0.85, same 4-word prefix): {near}")
 for r, a, b in examples:

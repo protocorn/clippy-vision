@@ -29,6 +29,7 @@ def search_sessions_tool(question: str) -> str:
     If the result says the info isn't there, call search_events_tool next."""
     return search_sessions(question)
 
+
 @mcp.tool()
 def search_events_tool(question: str) -> str:
     """Search individual events in the activity database.
@@ -38,11 +39,13 @@ def search_events_tool(question: str) -> str:
     If the result says the info isn't there, call search_sessions_tool next."""
     return search_events(question)
 
+
 @mcp.tool()
 def recall_memory_tool() -> str:
     """List all long-term memory clusters with labels and descriptions.
     Use when the user asks what you know about them, or before fetching a specific cluster."""
     return recall_memory()
+
 
 @mcp.tool()
 def fetch_cluster_tool(label: str) -> str:
@@ -51,8 +54,11 @@ def fetch_cluster_tool(label: str) -> str:
     Pass the cluster label exactly as returned by recall_memory_tool."""
     return fetch_cluster(label)
 
+
 @mcp.tool()
-def save_identity_tool(field: str, op: str, value: str = "", items: list[str] = None) -> str:
+def save_identity_tool(
+    field: str, op: str, value: str = "", items: list[str] = None
+) -> str:
     """Save a personal fact about the user.
     op='set' for scalar facts (name, location, job).
     op='add_items' with items=[] for adding to a list (hobbies, skills).
@@ -60,17 +66,20 @@ def save_identity_tool(field: str, op: str, value: str = "", items: list[str] = 
     op='remove_items' with items=[] to remove from a list."""
     return save_identity(field=field, value=value, op=op, items=items)
 
+
 @mcp.tool()
 def save_note_tool(note: str) -> str:
     """Save a free-form note or reminder the user wants remembered."""
     return save_note(note)
-@mcp.tool()
 
+
+@mcp.tool()
 def delete_note_tool(note_text: str) -> str:
     """Delete a note or memory fact the user wants forgotten.
     Use when the user says 'forget', 'delete', 'remove', or 'don't remember that'.
     Matches by substring — pass the key phrase or exact text from the note."""
     return delete_note(note_text)
+
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")

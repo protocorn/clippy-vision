@@ -85,17 +85,21 @@ def baseline_classify(text: str) -> str:
     # Multi-turn context => classify the last user turn
     if "\nUser:" in text or text.startswith("User:"):
         last = text.split("User:")[-1].strip()
-        return "follow_up_inherit" if _FOLLOWUP_RE.search(last) or len(last.split()) <= 6 else baseline_classify(last)
+        return (
+            "follow_up_inherit"
+            if _FOLLOWUP_RE.search(last) or len(last.split()) <= 6
+            else baseline_classify(last)
+        )
 
     if _FOLLOWUP_RE.search(text.strip()):
         return "follow_up_inherit"
 
-    has_memory   = bool(_MEMORY_RE.search(text))
-    has_recall   = bool(_SPECIFIC_RECALL_RE.search(text))
-    has_time     = bool(_TIME_ANCHOR_RE.search(text))
-    has_agg      = bool(_AGGREGATION_RE.search(text))
+    has_memory = bool(_MEMORY_RE.search(text))
+    has_recall = bool(_SPECIFIC_RECALL_RE.search(text))
+    has_time = bool(_TIME_ANCHOR_RE.search(text))
+    has_agg = bool(_AGGREGATION_RE.search(text))
     has_activity = bool(_ACTIVITY_RE.search(text))
-    has_vague    = bool(_VAGUE_TIME_RE.search(text))
+    has_vague = bool(_VAGUE_TIME_RE.search(text))
 
     personal = has_activity or has_memory or has_recall or has_vague
 

@@ -55,7 +55,11 @@ def norm(t: str) -> str:
 
 
 def is_multiturn(text: str) -> bool:
-    return bool(_USER_SPLIT_RE.match(text.strip())) or "\nUser:" in text or "\nuser:" in text
+    return (
+        bool(_USER_SPLIT_RE.match(text.strip()))
+        or "\nUser:" in text
+        or "\nuser:" in text
+    )
 
 
 def last_user_turn(text: str) -> str:
@@ -75,8 +79,12 @@ def similar(a: str, b: str, threshold: float) -> bool:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cap", type=int, default=250,
-                        help="Max generated+seed rows per category after cleaning (default: 250)")
+    parser.add_argument(
+        "--cap",
+        type=int,
+        default=250,
+        help="Max generated+seed rows per category after cleaning (default: 250)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -99,7 +107,9 @@ def main():
             r["text"] = turn
             stripped += 1
         step1.append(r)
-    print(f"[1] multi-turn stripped: {stripped}, dropped (last turn too short): {dropped_short}")
+    print(
+        f"[1] multi-turn stripped: {stripped}, dropped (last turn too short): {dropped_short}"
+    )
 
     # ── Step 2: golden-set leakage guard ──
     step2 = []
@@ -114,7 +124,9 @@ def main():
 
     # ── Step 3: near-dup dedupe (seeds first so they always win) ──
     kept: list[dict] = []
-    kept_norm_by_bucket: dict[str, list[tuple[str, str]]] = {}  # bucket -> [(norm, label)]
+    kept_norm_by_bucket: dict[
+        str, list[tuple[str, str]]
+    ] = {}  # bucket -> [(norm, label)]
     exact_seen: set[str] = set()
     dupes_exact = dupes_near = 0
 
@@ -129,13 +141,19 @@ def main():
             continue
         bk = bucket_key(n)
         # same-label near-dup within the same 4-word-prefix bucket => drop
-        if any(similar(n, kn, NEAR_DUP_RATIO) for kn, kl in kept_norm_by_bucket.get(bk, []) if kl == label):
+        if any(
+            similar(n, kn, NEAR_DUP_RATIO)
+            for kn, kl in kept_norm_by_bucket.get(bk, [])
+            if kl == label
+        ):
             dupes_near += 1
             continue
         exact_seen.add(n)
         kept_norm_by_bucket.setdefault(bk, []).append((n, label))
         kept.append({**r, "_is_seed": is_seed})
-    print(f"[3] removed exact dupes: {dupes_exact}, near dupes (>= {NEAR_DUP_RATIO}, same label): {dupes_near}")
+    print(
+        f"[3] removed exact dupes: {dupes_exact}, near dupes (>= {NEAR_DUP_RATIO}, same label): {dupes_near}"
+    )
 
     # ── Step 4: cap over-represented categories (drop generated rows only) ──
     rng = random.Random(SEED)

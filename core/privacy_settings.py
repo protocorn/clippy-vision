@@ -3,6 +3,7 @@
 When a target is enabled, matching windows are blacked out in captures
 (same path as always-redacting the Clippy Vision window).
 """
+
 from __future__ import annotations
 
 import json

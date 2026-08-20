@@ -45,18 +45,19 @@ def count_sessions_since_last_distil() -> int:
 
     return sessions_count
 
+
 def _get_meta(key: str, default=None):
-    row = conn.execute(
-        "SELECT value FROM memory_meta WHERE key = ?", (key,)
-    ).fetchone()
+    row = conn.execute("SELECT value FROM memory_meta WHERE key = ?", (key,)).fetchone()
     return json.loads(row[0]) if row else default
+
 
 def _set_meta(key: str, value):
     conn.execute(
         "INSERT OR REPLACE INTO memory_meta (key, value) VALUES (?, ?)",
-        (key, json.dumps(value))
+        (key, json.dumps(value)),
     )
     conn.commit()
+
 
 def save_note_to_memory(note: str) -> str:
     """Route a user-written note directly into the memory cluster system.
@@ -73,6 +74,7 @@ def save_note_to_memory(note: str) -> str:
         _create_cluster(note, embedding, source="agent")
 
     return f"Note saved to memory: {note[:80]}{'...' if len(note) > 80 else ''}"
+
 
 def should_distil() -> bool:
     return count_sessions_since_last_distil() >= DISTIL_EVERY_N_SESSIONS
@@ -115,8 +117,7 @@ def distil() -> None:
         # drag the whole group into the wrong existing cluster.
         dim = len(group_embs[0])
         group_centroid = [
-            sum(e[d] for e in group_embs) / len(group_embs)
-            for d in range(dim)
+            sum(e[d] for e in group_embs) / len(group_embs) for d in range(dim)
         ]
 
         cluster_id, sim = _route_fact(group_centroid)
@@ -135,23 +136,17 @@ def distil() -> None:
     version = _get_meta("profile_version", 0) + 1
     _set_meta("last_distilled_at", time.time())
     _set_meta("profile_version", version)
-    _set_meta("distilled_from_sessions",
-              _get_meta("distilled_from_sessions", 0) + len(summaries))
+    _set_meta(
+        "distilled_from_sessions",
+        _get_meta("distilled_from_sessions", 0) + len(summaries),
+    )
     print(f"  [DISTIL] Done — profile v{version}")
-
-
-
 
 
 EXTRACT_FACTS_SCHEMA = {
     "type": "object",
-    "properties": {
-        "facts": {
-            "type": "array",
-            "items": {"type": "string"}
-        }
-    },
-    "required": ["facts"]
+    "properties": {"facts": {"type": "array", "items": {"type": "string"}}},
+    "required": ["facts"],
 }
 
 EXTRACT_FACTS_SYSTEM_PROMPT = """
@@ -162,16 +157,21 @@ If no facts are found, return an empty array.
 Return JSON {"facts": [...]}.
 """
 
+
 def _extract_facts(summaries: list[dict]) -> list[str]:
     context = "\n\n".join(
-        f"[{s.get('active_task','')}] {s.get('summary','')}" for s in summaries
+        f"[{s.get('active_task', '')}] {s.get('summary', '')}" for s in summaries
     )
 
     body = gateway.chat(
-        [{"role": "system", "content": EXTRACT_FACTS_SYSTEM_PROMPT},
-         {"role": "user", "content": context}],
-        MODEL, format=EXTRACT_FACTS_SCHEMA,
-        think=False, options={"temperature": 0},
+        [
+            {"role": "system", "content": EXTRACT_FACTS_SYSTEM_PROMPT},
+            {"role": "user", "content": context},
+        ],
+        MODEL,
+        format=EXTRACT_FACTS_SCHEMA,
+        think=False,
+        options={"temperature": 0},
         priority=Priority.BACKGROUND,
     )
     content = body["message"]["content"]
@@ -188,6 +188,7 @@ def _cosine_similarity(a, b):
     if na == 0 or nb == 0:
         return 0.0
     return dot / (na * nb)
+
 
 def _cluster_batch(embeddings: list[list]) -> list[list[int]]:
     """
@@ -206,7 +207,10 @@ def _cluster_batch(embeddings: list[list]) -> list[list[int]]:
         assigned[i] = group_id
         for j in range(i + 1, n):
             if assigned[j] == -1:
-                if _cosine_similarity(embeddings[i], embeddings[j]) >= CLUSTER_THRESHOLD:
+                if (
+                    _cosine_similarity(embeddings[i], embeddings[j])
+                    >= CLUSTER_THRESHOLD
+                ):
                     assigned[j] = group_id
         group_id += 1
     groups: dict[int, list[int]] = {}
@@ -219,7 +223,10 @@ def load_centroids() -> list[dict]:
     rows = conn.execute(
         "SELECT cluster_id, label, centroid FROM memory_clusters"
     ).fetchall()
-    return [{"cluster_id": r[0], "label": r[1], "centroid": json.loads(r[2])} for r in rows]
+    return [
+        {"cluster_id": r[0], "label": r[1], "centroid": json.loads(r[2])} for r in rows
+    ]
+
 
 def _route_fact(embedding: list) -> tuple[str, float | None]:
     clusters = load_centroids()
@@ -234,6 +241,7 @@ def _route_fact(embedding: list) -> tuple[str, float | None]:
             best, best_sim = c["cluster_id"], sim
     return best, best_sim
 
+
 _WRITE_SYS = (
     "You maintain a list of durable facts about a user. Given a NEW fact and the most "
     "SIMILAR existing facts (each with its index), choose ONE action:\n"
@@ -244,7 +252,7 @@ _WRITE_SYS = (
     "incompatible values — e.g. different job, different city, different name). "
     "Set target_index to the conflicting fact's index. Do NOT silently overwrite — flag it.\n"
     "- ADD: the new fact is genuinely new information with no overlap.\n"
-    "Return JSON {\"action\", \"target_index\", \"text\"}. For ADD use target_index null and "
+    'Return JSON {"action", "target_index", "text"}. For ADD use target_index null and '
     "text = the new fact. Never invent facts."
 )
 _WRITE_SCHEMA = {
@@ -257,10 +265,13 @@ _WRITE_SCHEMA = {
     "required": ["action"],
 }
 
-def _merge_into_cluster(cluster_id: str, fact: str, embedding: list, source: str = "distiller") -> None:
+
+def _merge_into_cluster(
+    cluster_id: str, fact: str, embedding: list, source: str = "distiller"
+) -> None:
     rows = conn.execute(
         "SELECT fact_id, text, vector_embedding FROM memory_facts WHERE cluster_id = ? AND valid_to IS NULL",
-        (cluster_id,)
+        (cluster_id,),
     ).fetchall()
 
 
@@ -272,10 +283,17 @@ def _merge_into_cluster(cluster_id: str, fact: str, embedding: list, source: str
 
     similar = [{"index": i, "text": r[1]} for i, r in enumerate(rows)]
     body = gateway.chat(
-        [{"role": "system", "content": _WRITE_SYS},
-         {"role": "user", "content": json.dumps({"new_fact": fact, "similar": similar})}],
-        MODEL, format=_WRITE_SCHEMA,
-        think=False, options={"temperature": 0},
+        [
+            {"role": "system", "content": _WRITE_SYS},
+            {
+                "role": "user",
+                "content": json.dumps({"new_fact": fact, "similar": similar}),
+            },
+        ],
+        MODEL,
+        format=_WRITE_SCHEMA,
+        think=False,
+        options={"temperature": 0},
         priority=Priority.BACKGROUND,
     )
 
@@ -301,7 +319,13 @@ def _merge_into_cluster(cluster_id: str, fact: str, embedding: list, source: str
             """INSERT INTO memory_conflicts
                (conflict_id, fact_id_a, fact_id_b, cluster_id, created_at)
                VALUES (?, ?, ?, ?, ?)""",
-            (str(uuid.uuid4()), conflicting_fact_id, new_fact_id, cluster_id, time.time())
+            (
+                str(uuid.uuid4()),
+                conflicting_fact_id,
+                new_fact_id,
+                cluster_id,
+                time.time(),
+            ),
         )
         conn.commit()
         _recompute_centroid(cluster_id)
@@ -316,7 +340,7 @@ def _merge_into_cluster(cluster_id: str, fact: str, embedding: list, source: str
         # supersede the old fact
         conn.execute(
             "UPDATE memory_facts SET valid_to = ?, superseded_by = ? WHERE fact_id = ?",
-            (time.time(), new_fact_id, old_fact_id)
+            (time.time(), new_fact_id, old_fact_id),
         )
 
 
@@ -332,30 +356,44 @@ def _merge_into_cluster(cluster_id: str, fact: str, embedding: list, source: str
     return
 
 
-def _insert_fact(cluster_id: str, fact: str, embedding: list, fact_id: str | None = None, source: str = "distiller") -> None:
+def _insert_fact(
+    cluster_id: str,
+    fact: str,
+    embedding: list,
+    fact_id: str | None = None,
+    source: str = "distiller",
+) -> None:
     now = time.time()
     conn.execute(
         """INSERT INTO memory_facts
            (fact_id, cluster_id, text, vector_embedding, valid_from, created_at, source)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (fact_id or str(uuid.uuid4()), cluster_id, fact,
-         json.dumps(embedding), now, now, source)
+        (
+            fact_id or str(uuid.uuid4()),
+            cluster_id,
+            fact,
+            json.dumps(embedding),
+            now,
+            now,
+            source,
+        ),
     )
     conn.commit()
+
 
 def _recompute_centroid(cluster_id: str) -> None:
     rows = conn.execute(
         "SELECT vector_embedding FROM memory_facts WHERE cluster_id = ? AND valid_to IS NULL",
-        (cluster_id,)
+        (cluster_id,),
     ).fetchall()
     if not rows:
         return
     vecs = [json.loads(r[0]) for r in rows]
-    dim  = len(vecs[0])
+    dim = len(vecs[0])
     centroid = [sum(v[i] for v in vecs) / len(vecs) for i in range(dim)]
     conn.execute(
         "UPDATE memory_clusters SET centroid = ?, updated_at = ?, fact_count = ? WHERE cluster_id = ?",
-        (json.dumps(centroid), time.time(), len(vecs), cluster_id)
+        (json.dumps(centroid), time.time(), len(vecs), cluster_id),
     )
     conn.commit()
 
@@ -432,12 +470,15 @@ _BIO_UPDATE_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "field": {"type": "string"},
-                    "op":    {"type": "string", "enum": ["set", "add_items", "remove_items", "override"]},
+                    "op": {
+                        "type": "string",
+                        "enum": ["set", "add_items", "remove_items", "override"],
+                    },
                     "value": {"type": ["string", "null"]},
                     "items": {
                         "oneOf": [
                             {"type": "array", "items": {"type": "string"}},
-                            {"type": "null"}
+                            {"type": "null"},
                         ]
                     },
                 },
@@ -457,16 +498,21 @@ def _update_profile_from_message(user_message: str) -> None:
     current_profile = get_identity()
     profile_text = (
         "\n".join(f"{k}: {v}" for k, v in current_profile.items())
-        if current_profile else "(empty — no profile yet)"
+        if current_profile
+        else "(empty — no profile yet)"
     )
 
     prompt = f"CURRENT PROFILE:\n{profile_text}\n\nNEW MESSAGE:\n{user_message}"
 
     body = gateway.chat(
-        [{"role": "system", "content": _BIO_UPDATE_SYSTEM},
-         {"role": "user",   "content": prompt}],
-        MODEL, format=_BIO_UPDATE_SCHEMA,
-        think=False, options={"temperature": 0},
+        [
+            {"role": "system", "content": _BIO_UPDATE_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+        MODEL,
+        format=_BIO_UPDATE_SCHEMA,
+        think=False,
+        options={"temperature": 0},
         priority=Priority.BACKGROUND,
     )
     content = body["message"]["content"]
@@ -476,7 +522,7 @@ def _update_profile_from_message(user_message: str) -> None:
     saved = []
     for item in updates:
         field = (item.get("field") or "").strip().lower().replace(" ", "_")
-        op    = (item.get("op")    or "set").strip().lower()
+        op = (item.get("op") or "set").strip().lower()
         items = item.get("items") or []
         value = (item.get("value") or "").strip()
 
@@ -513,10 +559,14 @@ def _ingest_conversation(user_message: str, agent_reply: str) -> None:
 
     # Gate: skip turns with no personal content
     gate_body = gateway.chat(
-        [{"role": "system", "content": _GATE_SYSTEM},
-         {"role": "user",   "content": turn_text}],
-        MODEL, format=_GATE_SCHEMA,
-        think=False, options={"temperature": 0},
+        [
+            {"role": "system", "content": _GATE_SYSTEM},
+            {"role": "user", "content": turn_text},
+        ],
+        MODEL,
+        format=_GATE_SCHEMA,
+        think=False,
+        options={"temperature": 0},
         priority=Priority.BACKGROUND,
     )
     gate_content = gate_body["message"]["content"]
@@ -533,14 +583,22 @@ def _ingest_conversation(user_message: str, agent_reply: str) -> None:
 
     # Extract atomic facts and route into semantic clusters
     extract_body = gateway.chat(
-        [{"role": "system", "content": _CONVO_EXTRACT_SYSTEM},
-         {"role": "user",   "content": turn_text}],
-        MODEL, format=_CONVO_EXTRACT_SCHEMA,
-        think=False, options={"temperature": 0},
+        [
+            {"role": "system", "content": _CONVO_EXTRACT_SYSTEM},
+            {"role": "user", "content": turn_text},
+        ],
+        MODEL,
+        format=_CONVO_EXTRACT_SCHEMA,
+        think=False,
+        options={"temperature": 0},
         priority=Priority.BACKGROUND,
     )
     extract_content = extract_body["message"]["content"]
-    extracted = json.loads(extract_content) if isinstance(extract_content, str) else extract_content
+    extracted = (
+        json.loads(extract_content)
+        if isinstance(extract_content, str)
+        else extract_content
+    )
     facts = extracted.get("facts", [])
 
     if not facts:
@@ -554,12 +612,11 @@ def _ingest_conversation(user_message: str, agent_reply: str) -> None:
 
     for indices in groups:
         group_facts = [facts[i] for i in indices]
-        group_embs  = [embeddings[i] for i in indices]
+        group_embs = [embeddings[i] for i in indices]
 
         dim = len(group_embs[0])
         group_centroid = [
-            sum(e[d] for e in group_embs) / len(group_embs)
-            for d in range(dim)
+            sum(e[d] for e in group_embs) / len(group_embs) for d in range(dim)
         ]
 
         cluster_id, sim = _route_fact(group_centroid)
@@ -575,36 +632,42 @@ def _ingest_conversation(user_message: str, agent_reply: str) -> None:
 _LABEL_SYS = (
     "Give a short 1-3 word snake_case label and one-sentence description "
     "for the topic of this fact about a user. "
-    "Return JSON {\"label\": \"...\", \"description\": \"...\"}."
+    'Return JSON {"label": "...", "description": "..."}.'
 )
 _LABEL_SCHEMA = {
     "type": "object",
-    "properties": {
-        "label": {"type": "string"},
-        "description": {"type": "string"}
-    },
-    "required": ["label", "description"]
+    "properties": {"label": {"type": "string"}, "description": {"type": "string"}},
+    "required": ["label", "description"],
 }
+
 
 def _create_cluster(fact: str, embedding: list, source: str = "distiller") -> str:
     body = gateway.chat(
-        [{"role": "system", "content": _LABEL_SYS},
-         {"role": "user", "content": fact}],
-        MODEL, format=_LABEL_SCHEMA,
-        think=False, options={"temperature": 0},
+        [{"role": "system", "content": _LABEL_SYS}, {"role": "user", "content": fact}],
+        MODEL,
+        format=_LABEL_SCHEMA,
+        think=False,
+        options={"temperature": 0},
         priority=Priority.BACKGROUND,
     )
     content = body["message"]["content"]
-    meta    = json.loads(content) if isinstance(content, str) else content
+    meta = json.loads(content) if isinstance(content, str) else content
 
-    now        = time.time()
+    now = time.time()
     cluster_id = str(uuid.uuid4())
     conn.execute(
         """INSERT INTO memory_clusters
            (cluster_id, label, description, centroid, created_at, updated_at, fact_count)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (cluster_id, meta.get("label", "misc"), meta.get("description", ""),
-         json.dumps(embedding), now, now, 1)
+        (
+            cluster_id,
+            meta.get("label", "misc"),
+            meta.get("description", ""),
+            json.dumps(embedding),
+            now,
+            now,
+            1,
+        ),
     )
     conn.commit()
     _insert_fact(cluster_id, fact, embedding, source=source)

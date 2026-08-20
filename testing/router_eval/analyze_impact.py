@@ -25,17 +25,28 @@ records = [
 ]
 
 PREFETCH_THRESHOLDS = {
-    "aggregation": 0.50, "memory_query": 0.50, "time_anchored": 0.55,
-    "specific_recall": 0.50, "topic_search": 0.30,
+    "aggregation": 0.50,
+    "memory_query": 0.50,
+    "time_anchored": 0.55,
+    "specific_recall": 0.50,
+    "topic_search": 0.30,
 }
 ACTION_GROUP = {
-    "time_anchored": "activity_log", "topic_search": "activity_log",
-    "aggregation": "activity_log", "specific_recall": "activity_log_fine",
-    "memory_query": "memory", "casual": "none", "follow_up_inherit": "none",
+    "time_anchored": "activity_log",
+    "topic_search": "activity_log",
+    "aggregation": "activity_log",
+    "specific_recall": "activity_log_fine",
+    "memory_query": "memory",
+    "casual": "none",
+    "follow_up_inherit": "none",
 }
 
-fired = [r for r in records if PREFETCH_THRESHOLDS.get(r["pred"]) is not None
-         and r["conf"] >= PREFETCH_THRESHOLDS[r["pred"]]]
+fired = [
+    r
+    for r in records
+    if PREFETCH_THRESHOLDS.get(r["pred"]) is not None
+    and r["conf"] >= PREFETCH_THRESHOLDS[r["pred"]]
+]
 
 harmful, useless, benign, exact = [], [], [], []
 for r in fired:
@@ -49,7 +60,7 @@ for r in fired:
         harmful.append(r)
 
 n = len(records)
-print(f"Total queries: {n} | gate fired: {len(fired)} ({len(fired)/n:.0%})")
+print(f"Total queries: {n} | gate fired: {len(fired)} ({len(fired) / n:.0%})")
 print(f"  exact-correct fires: {len(exact)}")
 print(f"  benign fires (wrong label, same data source): {len(benign)}")
 print(f"  useless fires (query was casual/follow-up):   {len(useless)}")
@@ -59,10 +70,14 @@ for name, group in [("USELESS", useless), ("HARMFUL", harmful)]:
     if group:
         print(f"\n{name} fires:")
         for r in group:
-            print(f"  conf={r['conf']:.2f}  pred={r['pred']:<16} gold={r['gold']:<16} {r['text'][:60]!r}")
+            print(
+                f"  conf={r['conf']:.2f}  pred={r['pred']:<16} gold={r['gold']:<16} {r['text'][:60]!r}"
+            )
 
 # Per-category threshold sweep
-print("\n\nPer-category threshold sweep (fired-count / exact precision / group precision):")
+print(
+    "\n\nPer-category threshold sweep (fired-count / exact precision / group precision):"
+)
 for cat in PREFETCH_THRESHOLDS:
     print(f"\n  pred={cat}  (current thr={PREFETCH_THRESHOLDS[cat]})")
     preds = [r for r in records if r["pred"] == cat]

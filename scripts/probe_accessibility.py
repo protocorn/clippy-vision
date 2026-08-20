@@ -27,12 +27,12 @@ if str(ROOT) not in sys.path:
 from core.accessibility_text import (
     MIN_USEFUL_CHARS,
     UI_CHROME_LINES,
-    extract_accessibility_text,
-    is_useful_accessibility_text,
     _best_region_text,
     _collect_content_walk,
     _find_best_document,
     _text_from_control,
+    extract_accessibility_text,
+    is_useful_accessibility_text,
 )
 from core.platform_support import get_window_metadata
 from core.privacy_settings import is_clippy_window, should_redact_window

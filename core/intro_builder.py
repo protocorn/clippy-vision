@@ -77,7 +77,11 @@ def gather_intro_inputs() -> dict:
         "meta": meta,
         "identity": identity,
         "clusters": [
-            {"label": c["label"], "description": c["description"], "fact_count": c["fact_count"]}
+            {
+                "label": c["label"],
+                "description": c["description"],
+                "fact_count": c["fact_count"],
+            }
             for c in clusters
         ],
         "fact_delta": fact_delta,

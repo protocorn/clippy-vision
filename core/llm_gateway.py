@@ -38,9 +38,9 @@ _INTERACTIVE_PREEMPT_SECS = 10.0  # maximum time chat waits behind background wo
 
 
 class Priority:
-    INTERACTIVE = 0 # chat agent - user is waiting for a response
-    FOREGROUND = 10 # classifiers - image/text processing
-    BACKGROUND = 20 # summarization/distillation - background tasks
+    INTERACTIVE = 0  # chat agent - user is waiting for a response
+    FOREGROUND = 10  # classifiers - image/text processing
+    BACKGROUND = 20  # summarization/distillation - background tasks
 
 
 class Job:
@@ -85,11 +85,13 @@ class LLMGateway:
         self._current_priority: int | None = None
 
         baseline = self._measure_cpu_baseline()
-        self._cpu_pause_pct  = min(baseline + _PAUSE_HEADROOM,  _CPU_PAUSE_CEIL)
+        self._cpu_pause_pct = min(baseline + _PAUSE_HEADROOM, _CPU_PAUSE_CEIL)
         self._cpu_resume_pct = min(baseline + _RESUME_HEADROOM, _CPU_RESUME_CEIL)
-        print(f"[gateway] CPU baseline={baseline:.1f}%  "
-              f"pause>{self._cpu_pause_pct:.1f}%  "
-              f"resume<{self._cpu_resume_pct:.1f}%")
+        print(
+            f"[gateway] CPU baseline={baseline:.1f}%  "
+            f"pause>{self._cpu_pause_pct:.1f}%  "
+            f"resume<{self._cpu_resume_pct:.1f}%"
+        )
 
         self.worker = threading.Thread(target=self._worker_loop, daemon=True)
         self.worker.start()
@@ -270,7 +272,19 @@ class LLMGateway:
             if priority >= Priority.BACKGROUND:
                 time.sleep(_BG_INTER_JOB_SLEEP)
 
-    def chat(self, messages, model, *, priority=Priority.FOREGROUND, tools=None, format=None, options=None, think=None, timeout=180, keep_alive=None) -> dict | None:
+    def chat(
+        self,
+        messages,
+        model,
+        *,
+        priority=Priority.FOREGROUND,
+        tools=None,
+        format=None,
+        options=None,
+        think=None,
+        timeout=180,
+        keep_alive=None,
+    ) -> dict | None:
         payload = {
             "model": model,
             "messages": messages,
@@ -294,7 +308,19 @@ class LLMGateway:
             raise job.error
         return job.result
 
-    def chat_stream(self, messages, model, *, priority=Priority.FOREGROUND, tools=None, format=None, options=None, think=None, timeout=180, keep_alive=None):
+    def chat_stream(
+        self,
+        messages,
+        model,
+        *,
+        priority=Priority.FOREGROUND,
+        tools=None,
+        format=None,
+        options=None,
+        think=None,
+        timeout=180,
+        keep_alive=None,
+    ):
         """Yield Ollama NDJSON stream chunks for one chat call (thinking + content deltas)."""
         payload = {
             "model": model,

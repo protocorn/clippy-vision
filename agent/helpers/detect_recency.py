@@ -1,12 +1,12 @@
 import re
 
 RECENCY_WINDOW_HINT = (
-    r'\b('
-    r'few days? ago|past few days?|just recently|very recently'
-    r'|not too long ago|short(ly)? (ago|before)'
-    r'|earlier today|just now|moments? ago|minutes? ago|hours? ago'
-    r'|earlier this (morning|afternoon|evening|week)'
-    r')\b'
+    r"\b("
+    r"few days? ago|past few days?|just recently|very recently"
+    r"|not too long ago|short(ly)? (ago|before)"
+    r"|earlier today|just now|moments? ago|minutes? ago|hours? ago"
+    r"|earlier this (morning|afternoon|evening|week)"
+    r")\b"
 )
 
 RECENCY_SOFT_HINT = (
@@ -36,8 +36,8 @@ RECENCY_SOFT_HINT = (
     r'|(?:right\s+)?before\s+(?:this|now|today)'
 
     # "haven't seen it in a while" style
-    r'|a\s+while\s+back|some\s+time\s+back'
-    r')\b'
+    r"|a\s+while\s+back|some\s+time\s+back"
+    r")\b"
 )
 
 

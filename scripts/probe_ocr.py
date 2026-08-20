@@ -25,7 +25,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.accessibility_text import foreground_content_bounds, is_useful_accessibility_text
+from core.accessibility_text import (
+    foreground_content_bounds,
+    is_useful_accessibility_text,
+)
 from core.app_settings import get_capture_settings
 from core.ocr_crop import load_crop_metadata, save_crop_metadata
 from core.platform_support import get_window_metadata
@@ -47,8 +50,8 @@ def _preview(text: str, limit: int = 1000) -> str:
 
 def _grab_screenshot(path: Path) -> tuple[bool, dict]:
     try:
-        from PIL import ImageGrab
         import win32gui
+        from PIL import ImageGrab
 
         hwnd = win32gui.GetForegroundWindow()
         if hwnd:

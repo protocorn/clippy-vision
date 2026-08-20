@@ -26,11 +26,12 @@ VERDICT_SCHEMA = {
             "type": "string",
             "enum": ["interesting", "not_interesting"]
         },
-        "score":  {"type": "integer", "minimum": 0, "maximum": 10},
-        "reason": {"type": "string"}
+        "score": {"type": "integer", "minimum": 0, "maximum": 10},
+        "reason": {"type": "string"},
     },
-    "required": ["verdict", "score", "reason"]
+    "required": ["verdict", "score", "reason"],
 }
+
 
 def classify_with_llm(
     summary: str,

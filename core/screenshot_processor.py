@@ -60,21 +60,21 @@ def _get_nearest_event(screenshot_ts: float) -> dict | None:
            AND vision_suggested_action IS NULL
            ORDER BY ABS(timestamp - ?) ASC
            LIMIT 1""",
-        (screenshot_ts, NEAREST_EVENT_WINDOW_SECS, screenshot_ts)
+        (screenshot_ts, NEAREST_EVENT_WINDOW_SECS, screenshot_ts),
     ).fetchone()
 
     if not row:
         return None
 
     return {
-        "event_id":     row[0],
-        "timestamp":    row[1],
-        "event_type":   row[2],
+        "event_id": row[0],
+        "timestamp": row[1],
+        "event_type": row[2],
         "process_name": row[3],
         "window_context": {
-            "process_name":         row[3],
+            "process_name": row[3],
             "current_window_title": row[4],
-            "active_url":           row[5],
+            "active_url": row[5],
         },
         "summary": row[6],
         "payload": row[7],
@@ -90,14 +90,14 @@ def _get_window_context_at(screenshot_ts: float) -> dict:
            AND timestamp <= ?
            ORDER BY timestamp DESC
            LIMIT 1""",
-        (screenshot_ts,)
+        (screenshot_ts,),
     ).fetchone()
 
     if row:
         return {
-            "process_name":         row[0],
+            "process_name": row[0],
             "current_window_title": row[1],
-            "active_url":           row[2],
+            "active_url": row[2],
         }
     return {"process_name": "unknown", "current_window_title": "", "active_url": None}
 
@@ -114,7 +114,7 @@ def _create_screenshot_event(screenshot_ts: float) -> dict:
             timestamp=screenshot_ts,
             current_window_title=window_ctx["current_window_title"],
             active_url=window_ctx["active_url"],
-            process_name=window_ctx["process_name"]
+            process_name=window_ctx["process_name"],
         ),
         previous_window_context=None,
         payload={},
@@ -124,26 +124,26 @@ def _create_screenshot_event(screenshot_ts: float) -> dict:
         image_embedding_model=None,
         interest_score=None,
         interest_reason=None,
-        interesting=None
+        interesting=None,
     )
     store_event(event)
 
     # Lock out of text classifier — vision-only, set to done by apply_vision_verdict
     conn.execute(
         "UPDATE events SET classification_status='screenshot_only' WHERE event_id=?",
-        (event_id,)
+        (event_id,),
     )
     conn.commit()
 
     return {
-        "event_id":   event_id,
-        "timestamp":  screenshot_ts,
+        "event_id": event_id,
+        "timestamp": screenshot_ts,
         "event_type": "screenshot_analysis",
         "process_name": window_ctx["process_name"],
         "window_context": {
-            "process_name":         window_ctx["process_name"],
+            "process_name": window_ctx["process_name"],
             "current_window_title": window_ctx["current_window_title"],
-            "active_url":           window_ctx["active_url"],
+            "active_url": window_ctx["active_url"],
         },
         "summary": f"Background screenshot of {window_ctx['process_name']} - {window_ctx['current_window_title']}",
     }
@@ -305,7 +305,9 @@ def _process_group(group: list[Path]) -> bool:
 
     rep_event = _get_nearest_event(rep_ts)
     if rep_event is None:
-        print(f"  [screenshot_processor] No nearby event for {representative.name} — creating screenshot_analysis event")
+        print(
+            f"  [screenshot_processor] No nearby event for {representative.name} — creating screenshot_analysis event"
+        )
         rep_event = _create_screenshot_event(rep_ts)
     else:
         print(
@@ -365,7 +367,9 @@ def _process_group(group: list[Path]) -> bool:
         if not applied:
             continue
         _mark_as_processed(path)
-        print(f"  [screenshot_processor] Copied verdict to duplicate {path.name[:20]}... [{other_event['event_id'][:8]}]")
+        print(
+            f"  [screenshot_processor] Copied verdict to duplicate {path.name[:20]}... [{other_event['event_id'][:8]}]"
+        )
 
     return _mark_as_processed(representative)
 

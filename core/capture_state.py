@@ -1,4 +1,5 @@
 """Tiny cross-process state file for desktop and browser status indicators."""
+
 from __future__ import annotations
 
 import json
@@ -31,8 +32,6 @@ def set_capture_status(active: bool, pid: int | None = None) -> dict:
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         tmp.replace(path)
     except OSError:
-
-
         pass
     return payload
 

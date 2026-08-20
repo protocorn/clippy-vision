@@ -21,7 +21,7 @@
   },
   "keywords": [],
   "devDependencies": {
-    "electron": "^43.1.1",
+    "electron": "^43.4.1",
     "electron-builder": "^26.15.3"
   },
   "build": {
@@ -77,11 +77,17 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ],
       "category": "public.app-category.productivity",

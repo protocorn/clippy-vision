@@ -21,7 +21,7 @@ tests = [
 ]
 
 for q in tests:
-    tr  = resolve_temporal_range(q)
+    tr = resolve_temporal_range(q)
     art = detect_artifact_type(q)
     kws = keywords_from_query(q)
     rec = detect_recency_hint(q)

@@ -2,6 +2,7 @@
 cases. Judge calls go through the gateway at temperature 0 and are counted separately
 so judging cost never contaminates a strategy's own cost score.
 """
+
 import json
 
 import _paths  # noqa: F401
@@ -14,9 +15,13 @@ _JUDGE_SYS = (
     "and the GROUND_TRUTH answer, decide whether the retrieved facts let someone answer the "
     "question correctly and consistently with the ground truth. "
     "correct=true only if the needed current information is present and not contradicted. "
-    "Return JSON {\"correct\": true|false}."
+    'Return JSON {"correct": true|false}.'
 )
-_JUDGE_SCHEMA = {"type": "object", "properties": {"correct": {"type": "boolean"}}, "required": ["correct"]}
+_JUDGE_SCHEMA = {
+    "type": "object",
+    "properties": {"correct": {"type": "boolean"}},
+    "required": ["correct"],
+}
 
 
 class Grader:
@@ -29,11 +34,24 @@ class Grader:
     def _judge(self, question, facts, ground_truth):
         self.judge_calls += 1
         body = gateway.chat(
-            [{"role": "system", "content": _JUDGE_SYS},
-             {"role": "user", "content": json.dumps(
-                 {"question": question, "facts": facts, "ground_truth": ground_truth})}],
-            _JUDGE_MODEL, format=_JUDGE_SCHEMA, think=False,
-            options={"temperature": 0}, priority=Priority.FOREGROUND,
+            [
+                {"role": "system", "content": _JUDGE_SYS},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "question": question,
+                            "facts": facts,
+                            "ground_truth": ground_truth,
+                        }
+                    ),
+                },
+            ],
+            _JUDGE_MODEL,
+            format=_JUDGE_SCHEMA,
+            think=False,
+            options={"temperature": 0},
+            priority=Priority.FOREGROUND,
         )
         content = body["message"]["content"]
         out = json.loads(content) if isinstance(content, str) else content

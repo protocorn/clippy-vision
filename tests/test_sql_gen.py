@@ -17,11 +17,11 @@ from pathlib import Path
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-DB_PATH    = Path(__file__).parent.parent / "core" / "data" / "events.db"
+DB_PATH = Path(__file__).parent.parent / "core" / "data" / "events.db"
 RESULTS_DIR = Path(__file__).parent / "results"
 OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL      = "qwen3:8b"
-RUNS       = 3   # how many times to run the full battery
+MODEL = "qwen3:8b"
+RUNS = 3  # how many times to run the full battery
 
 # ── Schema injected into every prompt ─────────────────────────────────────────
 
@@ -31,7 +31,7 @@ OUTPUT_SCHEMA = {
         "reasoning": {"type": "string"},
         "sql_query": {"type": "string"},
     },
-    "required": ["reasoning", "sql_query"]
+    "required": ["reasoning", "sql_query"],
 }
 
 SCHEMA = """
@@ -114,72 +114,77 @@ Rules:
 - If the user asks "this week" and the target weekend has not happened yet, interpret weekend as the most recent past Saturday/Sunday unless the user explicitly asks about the future.
 """
 
-SYSTEM_PROMPT = SCHEMA.strip() + "\n\nGenerate a single SELECT query to answer the user's question in structured JSON format."
+SYSTEM_PROMPT = (
+    SCHEMA.strip()
+    + "\n\nGenerate a single SELECT query to answer the user's question in structured JSON format."
+)
 
 # ── Test queries ──────────────────────────────────────────────────────────────
 # Grouped by type so the summary is easier to read
 
 TEST_QUERIES = [
     # --- relative time and calendar boundaries ---
-    ("relative_time",    "what did I do earlier today?"),
-    ("relative_time",    "what was I doing late last night?"),
-    ("relative_time",    "show me my activity for the past 90 minutes"),
-    ("relative_time",    "what did I work on during the first half of this week?"),
-
+    ("relative_time", "what did I do earlier today?"),
+    ("relative_time", "what was I doing late last night?"),
+    ("relative_time", "show me my activity for the past 90 minutes"),
+    ("relative_time", "what did I work on during the first half of this week?"),
     # --- explicit ranges and ordering ---
-    ("range",            "what happened between 2pm and 5pm yesterday?"),
-    ("range",            "summarize my work from the start of this month until now"),
-    ("range",            "show the first thing and last thing I did today"),
-
+    ("range", "what happened between 2pm and 5pm yesterday?"),
+    ("range", "summarize my work from the start of this month until now"),
+    ("range", "show the first thing and last thing I did today"),
     # --- patterns and habits ---
-    ("pattern",          "which days of the week am I most active?"),
-    ("pattern",          "what do I tend to do after opening Chrome?"),
-    ("pattern",          "do I usually switch apps a lot during coding sessions?"),
-
+    ("pattern", "which days of the week am I most active?"),
+    ("pattern", "what do I tend to do after opening Chrome?"),
+    ("pattern", "do I usually switch apps a lot during coding sessions?"),
     # --- aggregates and duration ---
-    ("aggregate",        "which process took the most of my time recently?"),
-    ("aggregate",        "how many interesting events did I have today compared to yesterday?"),
-    ("aggregate",        "what is my average session length over the last 7 days?"),
-    ("aggregate",        "which active tasks appear most often in my session summaries?"),
-
+    ("aggregate", "which process took the most of my time recently?"),
+    (
+        "aggregate",
+        "how many interesting events did I have today compared to yesterday?",
+    ),
+    ("aggregate", "what is my average session length over the last 7 days?"),
+    ("aggregate", "which active tasks appear most often in my session summaries?"),
     # --- semantic / fuzzy lookup ---
-    ("semantic",         "find moments where I seemed stuck or debugging something"),
-    ("semantic",         "did I look at anything related to databases recently?"),
-    ("semantic",         "find sessions about building or testing an agent"),
-
+    ("semantic", "find moments where I seemed stuck or debugging something"),
+    ("semantic", "did I look at anything related to databases recently?"),
+    ("semantic", "find sessions about building or testing an agent"),
     # --- sequence and transition questions ---
-    ("sequence",         "what did I do immediately after using WhatsApp?"),
-    ("sequence",         "what app did I usually open before Cursor?"),
-    ("sequence",         "show me cases where I moved from browser research into coding"),
-
+    ("sequence", "what did I do immediately after using WhatsApp?"),
+    ("sequence", "what app did I usually open before Cursor?"),
+    ("sequence", "show me cases where I moved from browser research into coding"),
     # --- low-signal / edge behavior ---
-    ("edge",             "was there any long idle or low-activity period today?"),
-    ("edge",             "show me recent events with no useful summary or empty OCR"),
-    ("edge",             "what is one surprising thing in my recent activity?"),
+    ("edge", "was there any long idle or low-activity period today?"),
+    ("edge", "show me recent events with no useful summary or empty OCR"),
+    ("edge", "what is one surprising thing in my recent activity?"),
 ]
 
 # ── Safety gate ───────────────────────────────────────────────────────────────
 
 _BLOCKED = re.compile(
-    r'\b(DROP|DELETE|UPDATE|INSERT|ALTER|CREATE|ATTACH|DETACH|PRAGMA|REPLACE|TRUNCATE)\b',
-    re.IGNORECASE
+    r"\b(DROP|DELETE|UPDATE|INSERT|ALTER|CREATE|ATTACH|DETACH|PRAGMA|REPLACE|TRUNCATE)\b",
+    re.IGNORECASE,
 )
+
 
 def is_safe(sql: str) -> bool:
     return sql.strip().upper().startswith("SELECT") and not _BLOCKED.search(sql)
 
+
 # ── Ollama call ───────────────────────────────────────────────────────────────
+
 
 def generate_sql(query: str) -> tuple[str | None, str | None]:
     """Returns (sql, reasoning). Both are None on failure."""
     now_str = time.strftime("%A %B %d, %Y at %H:%M (local time)")
-    now_ts  = int(time.time())
-    user_content = f"Current date/time: {now_str} (Unix timestamp: {now_ts})\n\nQuestion: {query}"
+    now_ts = int(time.time())
+    user_content = (
+        f"Current date/time: {now_str} (Unix timestamp: {now_ts})\n\nQuestion: {query}"
+    )
     payload = {
         "model": MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": user_content},
+            {"role": "user", "content": user_content},
         ],
         "format": OUTPUT_SCHEMA,
         "stream": False,
@@ -196,14 +201,16 @@ def generate_sql(query: str) -> tuple[str | None, str | None]:
         content = body["message"]["content"]
         # Ollama may return content as a string or already-parsed dict
         result = content if isinstance(content, dict) else json.loads(content)
-        sql       = result.get("sql_query", "").strip()
+        sql = result.get("sql_query", "").strip()
         reasoning = result.get("reasoning", "").strip()
         return (sql or None, reasoning or None)
     except Exception as e:
         print(f"  [generate_sql ERROR] {type(e).__name__}: {e}")
         return None, None
 
+
 # ── Execute ───────────────────────────────────────────────────────────────────
+
 
 def run_query(sql: str, conn: sqlite3.Connection) -> list | str:
     try:
@@ -211,7 +218,9 @@ def run_query(sql: str, conn: sqlite3.Connection) -> list | str:
     except sqlite3.Error as e:
         return f"SQL ERROR: {e}"
 
+
 # ── Single run ────────────────────────────────────────────────────────────────
+
 
 def run_once(run_num: int, conn: sqlite3.Connection, out_path: Path) -> dict:
     """Run the full battery once. Returns per-query results dict."""
@@ -274,7 +283,9 @@ def run_once(run_num: int, conn: sqlite3.Connection, out_path: Path) -> dict:
         results[query] = status
         print(f"  → {status}")
 
-    summary_line = f"\nRUN {run_num} TOTALS: {passed} passed / {failed} failed / {blocked} blocked"
+    summary_line = (
+        f"\nRUN {run_num} TOTALS: {passed} passed / {failed} failed / {blocked} blocked"
+    )
     lines.append("\n" + "=" * 70)
     lines.append(summary_line)
     lines.append("=" * 70)
@@ -285,7 +296,9 @@ def run_once(run_num: int, conn: sqlite3.Connection, out_path: Path) -> dict:
 
     return results
 
+
 # ── Cross-run summary ─────────────────────────────────────────────────────────
+
 
 def write_summary(all_results: list[dict], summary_path: Path) -> None:
     lines = []
@@ -301,23 +314,31 @@ def write_summary(all_results: list[dict], summary_path: Path) -> None:
         pass_count = outcomes.count("PASS")
         short_q = (query[:49] + "…") if len(query) > 50 else query
         flag = "✓" if pass_count == RUNS else ("~" if pass_count > 0 else "✗")
-        lines.append(f"  {flag} [{category}] {short_q:<46} {pass_count}/{RUNS}  {outcomes}")
+        lines.append(
+            f"  {flag} [{category}] {short_q:<46} {pass_count}/{RUNS}  {outcomes}"
+        )
 
     # Overall counts
-    total_pass    = sum(v == "PASS"                        for r in all_results for v in r.values())
-    total_blocked = sum(v == "BLOCKED"                     for r in all_results for v in r.values())
-    total_invalid = sum(v in ("INVALID", "ERROR", "NO_SQL") for r in all_results for v in r.values())
+    total_pass = sum(v == "PASS" for r in all_results for v in r.values())
+    total_blocked = sum(v == "BLOCKED" for r in all_results for v in r.values())
+    total_invalid = sum(
+        v in ("INVALID", "ERROR", "NO_SQL") for r in all_results for v in r.values()
+    )
     total = len(TEST_QUERIES) * RUNS
 
     lines.append("\n" + "=" * 70)
-    lines.append(f"OVERALL: {total_pass}/{total} passed | {total_invalid} failed | {total_blocked} blocked")
+    lines.append(
+        f"OVERALL: {total_pass}/{total} passed | {total_invalid} failed | {total_blocked} blocked"
+    )
     lines.append("=" * 70)
 
     summary_path.write_text("\n".join(lines), encoding="utf-8")
     print(f"\nSummary saved → {summary_path}")
     print("\n".join(lines[-6:]))  # print just the tail to terminal
 
+
 # ── Main ──────────────────────────────────────────────────────────────────────
+
 
 def main():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -327,9 +348,9 @@ def main():
     all_results = []
 
     for run_num in range(1, RUNS + 1):
-        print(f"\n{'#'*70}")
+        print(f"\n{'#' * 70}")
         print(f"# RUN {run_num} of {RUNS}")
-        print(f"{'#'*70}\n")
+        print(f"{'#' * 70}\n")
         out_path = RESULTS_DIR / f"sql_gen_{session_ts}_run{run_num}.txt"
         results = run_once(run_num, conn, out_path)
         all_results.append(results)

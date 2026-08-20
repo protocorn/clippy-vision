@@ -1,12 +1,13 @@
 """Quick diagnostic: ingest the stream into the Hybrid strategy and show what it
 stored + what it retrieves for each query, so we can see why hit-rate is low.
 """
+
 import _paths  # noqa: F401
 import dataset
 from strategies import Hybrid
 
 h = Hybrid()
-for (t, fid, text, canon) in dataset.stream():
+for t, fid, text, canon in dataset.stream():
     h.add(text, t)
 
 print("\n=== TYPED CORE ===")
@@ -23,4 +24,4 @@ for q in dataset.QUERIES:
     print(f"\n[{q['id']}] {q['q']}")
     print(f"   expect={q.get('expect')} forbid={q.get('forbid')}")
     for hpos, ht in enumerate(hits):
-        print(f"   {hpos+1}. {ht}")
+        print(f"   {hpos + 1}. {ht}")

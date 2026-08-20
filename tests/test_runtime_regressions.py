@@ -787,6 +787,7 @@ class RuntimeRegressionTests(unittest.TestCase):
     def test_ollama_errors_carry_server_message(self):
         """A bare 'HTTP Error 500' hides the cause; the body must be surfaced."""
         import urllib.error
+
         from core import ollama_client
 
         body = io.BytesIO(json.dumps({"error": "model requires more system memory"}).encode())
@@ -1040,8 +1041,8 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertEqual(status, "deferred")
 
     def test_backlog_status_auto_catch_up_gates(self):
-        from core.backlog import get_backlog_status
         from core import backlog as backlog_mod
+        from core.backlog import get_backlog_status
 
         backlog_mod._cooldown_until = 0.0
         backlog_mod._deferred_skip_until.clear()

@@ -8,6 +8,7 @@ Fairness contract:
   - Each strategy counts its own LLM and embedding calls so cost is comparable.
   - Embedding cache is PER-strategy, so no strategy free-rides on another's work.
 """
+
 import json
 import math
 import time
@@ -52,10 +53,12 @@ class MemoryStrategy:
     def _chat_json(self, system, user, schema):
         self.llm_calls += 1
         body = gateway.chat(
-            [{"role": "system", "content": system},
-             {"role": "user", "content": user}],
-            MODEL, format=schema, think=False,
-            options={"temperature": 0}, priority=Priority.FOREGROUND,
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            MODEL,
+            format=schema,
+            think=False,
+            options={"temperature": 0},
+            priority=Priority.FOREGROUND,
         )
         content = body["message"]["content"]
         return json.loads(content) if isinstance(content, str) else content
@@ -107,9 +110,13 @@ class Control(MemoryStrategy):
 # ---------------------------------------------------------------------------
 _LABEL_SYS = (
     "Give a short 1-3 word snake_case label for the topic of this fact about a user. "
-    "Return JSON {\"label\": \"...\"}."
+    'Return JSON {"label": "..."}.'
 )
-_LABEL_SCHEMA = {"type": "object", "properties": {"label": {"type": "string"}}, "required": ["label"]}
+_LABEL_SCHEMA = {
+    "type": "object",
+    "properties": {"label": {"type": "string"}},
+    "required": ["label"],
+}
 
 
 class Clusters(MemoryStrategy):
@@ -128,16 +135,24 @@ class Clusters(MemoryStrategy):
             if sim > best_sim:
                 best, best_sim = c, sim
         if best is None or best_sim < self.THRESHOLD:
-            label = self._chat_json(_LABEL_SYS, fact, _LABEL_SCHEMA).get("label", "misc")
-            self.clusters.append({"label": label, "centroid": list(v), "items": [(fact, v)]})
+            label = self._chat_json(_LABEL_SYS, fact, _LABEL_SCHEMA).get(
+                "label", "misc"
+            )
+            self.clusters.append(
+                {"label": label, "centroid": list(v), "items": [(fact, v)]}
+            )
         else:
             best["items"].append((fact, v))
             n = len(best["items"])
-            best["centroid"] = [(c * (n - 1) + x) / n for c, x in zip(best["centroid"], v)]
+            best["centroid"] = [
+                (c * (n - 1) + x) / n for c, x in zip(best["centroid"], v)
+            ]
 
     def query(self, text, k=5):
         qv = self._embed(text)
-        routed = sorted(self.clusters, key=lambda c: _cos(qv, c["centroid"]), reverse=True)[:2]
+        routed = sorted(
+            self.clusters, key=lambda c: _cos(qv, c["centroid"]), reverse=True
+        )[:2]
         pool = [it for c in routed for it in c["items"]]
         return self._topk(qv, pool, k)
 
@@ -155,7 +170,7 @@ _WRITE_SYS = (
     "- UPDATE: the new fact supersedes or refines exactly one existing fact; set "
     "target_index to that fact's index and text to the single best up-to-date fact.\n"
     "- ADD: the new fact is genuinely new information.\n"
-    "Return JSON {\"action\", \"target_index\", \"text\"}. For ADD use target_index null and "
+    'Return JSON {"action", "target_index", "text"}. For ADD use target_index null and '
     "text = the new fact. Never invent facts."
 )
 _WRITE_SCHEMA = {
@@ -174,9 +189,13 @@ def _decide_and_apply(strategy, items, fact, vec):
     if not items:
         items.append([fact, vec])
         return
-    order = sorted(range(len(items)), key=lambda i: _cos(vec, items[i][1]), reverse=True)[:3]
+    order = sorted(
+        range(len(items)), key=lambda i: _cos(vec, items[i][1]), reverse=True
+    )[:3]
     similar = [{"index": i, "text": items[i][0]} for i in order]
-    out = strategy._chat_json(_WRITE_SYS, json.dumps({"new_fact": fact, "similar": similar}), _WRITE_SCHEMA)
+    out = strategy._chat_json(
+        _WRITE_SYS, json.dumps({"new_fact": fact, "similar": similar}), _WRITE_SCHEMA
+    )
     action = (out.get("action") or "ADD").upper()
     target = out.get("target_index")
     text = out.get("text") or fact
@@ -213,8 +232,8 @@ _ROUTE_SYS = (
     "Classify a fact about a user into a profile slot. Slots:\n"
     "name, location, employment, education, editor, os_shell, fav_language, hobbies.\n"
     "If the fact clearly fits one slot, return that slot and the concise value to store. "
-    "If it does not fit any, return slot \"none\".\n"
-    "Return JSON {\"slot\", \"value\"}."
+    'If it does not fit any, return slot "none".\n'
+    'Return JSON {"slot", "value"}.'
 )
 _ROUTE_SCHEMA = {
     "type": "object",
@@ -225,12 +244,20 @@ _ROUTE_SCHEMA = {
 
 class Hybrid(MemoryStrategy):
     name = "C: hybrid"
-    SCALARS = {"name", "location", "employment", "education", "editor", "os_shell", "fav_language"}
+    SCALARS = {
+        "name",
+        "location",
+        "employment",
+        "education",
+        "editor",
+        "os_shell",
+        "fav_language",
+    }
     LISTS = {"hobbies"}
 
     def __init__(self):
         super().__init__()
-        self.typed = {}     # slot -> value | [values]
+        self.typed = {}  # slot -> value | [values]
         self.longtail = []  # [text, vec]
 
     def _add(self, fact, ts):
@@ -239,7 +266,7 @@ class Hybrid(MemoryStrategy):
         slot = (out.get("slot") or "none").strip().lower()
         value = (out.get("value") or fact).strip()
         if slot in self.SCALARS:
-            self.typed[slot] = value           # overwrite == supersession
+            self.typed[slot] = value  # overwrite == supersession
         elif slot in self.LISTS:
             lst = self.typed.setdefault(slot, [])
             if value.lower() not in {x.lower() for x in lst}:
@@ -269,7 +296,9 @@ class Hybrid(MemoryStrategy):
         return out
 
     def _pool(self):
-        return [(t, self._embed(t)) for t in self._typed_sentences()] + [(t, v) for t, v in self.longtail]
+        return [(t, self._embed(t)) for t in self._typed_sentences()] + [
+            (t, v) for t, v in self.longtail
+        ]
 
     def query(self, text, k=5):
         return self._topk(self._embed(text), self._pool(), k)
@@ -305,15 +334,21 @@ class ClustersMerge(MemoryStrategy):
             if sim > best_sim:
                 best, best_sim = c, sim
         if best is None or best_sim < self.THRESHOLD:
-            label = self._chat_json(_LABEL_SYS, fact, _LABEL_SCHEMA).get("label", "misc")
-            self.clusters.append({"label": label, "centroid": list(v), "items": [[fact, v]]})
+            label = self._chat_json(_LABEL_SYS, fact, _LABEL_SCHEMA).get(
+                "label", "misc"
+            )
+            self.clusters.append(
+                {"label": label, "centroid": list(v), "items": [[fact, v]]}
+            )
         else:
             _decide_and_apply(self, best["items"], fact, v)
             self._recentroid(best)
 
     def query(self, text, k=5):
         qv = self._embed(text)
-        routed = sorted(self.clusters, key=lambda c: _cos(qv, c["centroid"]), reverse=True)[:2]
+        routed = sorted(
+            self.clusters, key=lambda c: _cos(qv, c["centroid"]), reverse=True
+        )[:2]
         pool = [(it[0], it[1]) for c in routed for it in c["items"]]
         return self._topk(qv, pool, k)
 

@@ -59,11 +59,7 @@ SUMMARY_SCHEMA = {
         "active_task": {"type": "string"},
         "entities": {"type": "array", "items": {"type": "string"}},
     },
-    "required": [
-        "summary",
-        "active_task",
-        "entities"
-    ],
+    "required": ["summary", "active_task", "entities"],
 }
 SYSTEM_PROMPT = """You summarize computer work sessions from activity events.
 
@@ -326,7 +322,11 @@ def summarizer_loop():
                 )
                 summary = summarize_window(session_events, source_session_id)
                 if summary:
-                    store_summary(summary, vision_enriched=False, embedding=summary.pop("embedding", None))
+                    store_summary(
+                        summary,
+                        vision_enriched=False,
+                        embedding=summary.pop("embedding", None),
+                    )
                     print(f"  [SUMMARIZER] Done — {summary['active_task']}")
                     print(f"               {summary['summary'][:120]}...")
 
@@ -350,7 +350,9 @@ def summarizer_loop():
         elapsed = time.time() - tick_start
         sleep_for = INTERVAL_SEC if failed else max(0.0, INTERVAL_SEC - elapsed)
         if elapsed > 1:
-            print(f"  [SUMMARIZER] Work took {elapsed:.0f}s, sleeping {sleep_for:.0f}s until next tick")
+            print(
+                f"  [SUMMARIZER] Work took {elapsed:.0f}s, sleeping {sleep_for:.0f}s until next tick"
+            )
         time.sleep(sleep_for)
 
 

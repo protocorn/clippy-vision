@@ -43,13 +43,65 @@ from rapidfuzz.distance import DamerauLevenshtein
 _cal = parsedatetime.Calendar()
 
 _TEMPORAL_VOCAB = [
-    "today", "yesterday", "tomorrow", "next", "last", "year", "years",
-    "months", "weeks", "days", "hours", "minutes", "seconds",
-    "morning", "afternoon", "evening", "night", "midnight", "noon", "breakfast", "lunch", "dinner", "supper",
-    "dawn", "dusk", "previous", "prior", "earlier", "before", "after", "past", "weekday", "weekend",
-    "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
-    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
-    "ago", "coming", "upcoming", "following", "early", "late", "tonight",
+    "today",
+    "yesterday",
+    "tomorrow",
+    "next",
+    "last",
+    "year",
+    "years",
+    "months",
+    "weeks",
+    "days",
+    "hours",
+    "minutes",
+    "seconds",
+    "morning",
+    "afternoon",
+    "evening",
+    "night",
+    "midnight",
+    "noon",
+    "breakfast",
+    "lunch",
+    "dinner",
+    "supper",
+    "dawn",
+    "dusk",
+    "previous",
+    "prior",
+    "earlier",
+    "before",
+    "after",
+    "past",
+    "weekday",
+    "weekend",
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "ago",
+    "coming",
+    "upcoming",
+    "following",
+    "early",
+    "late",
+    "tonight",
 ]
 _TEMPORAL_VOCAB_SET = set(_TEMPORAL_VOCAB)
 
@@ -78,14 +130,46 @@ _PROTECTED_WORDS = {
     "text", "sext", "neft", "jute", "pearl", "nearly", "roaming"
 }
 
-_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
+_WEEKDAYS = [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+]
+_MONTHS = [
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+]
 
-_MODIFIER_WORDS = ["last", "next", "previous", "prior", "earlier", "before", "past", "coming", "upcoming", "following"]
+_MODIFIER_WORDS = [
+    "last",
+    "next",
+    "previous",
+    "prior",
+    "earlier",
+    "before",
+    "past",
+    "coming",
+    "upcoming",
+    "following",
+]
 _FUTURE_MODIFIERS = ("next", "coming", "upcoming", "following")
 
 _WEEKEND_RE = re.compile(
-    r'\b(?:(?P<modifier>last|past|previous|prior|next|coming|following|this)\s+)?week[- ]?end\b',
+    r"\b(?:(?P<modifier>last|past|previous|prior|next|coming|following|this)\s+)?week[- ]?end\b",
     re.IGNORECASE,
 )
 
@@ -94,9 +178,9 @@ _WEEKEND_RE = re.compile(
 # parsedatetime treats "last 3 days" as a single future day — handle rolling
 # windows ourselves ("last/past/over the last N days|weeks|months|hours").
 _ROLLING_WINDOW_RE = re.compile(
-    r'\b(?:(?:over|in|from)\s+(?:the\s+)?)?'
-    r'(?:last|past|previous|prior)\s+'
-    r'(?P<n>\d+)\s+(?P<unit>days?|weeks?|months?|hours?)\b',
+    r"\b(?:(?:over|in|from)\s+(?:the\s+)?)?"
+    r"(?:last|past|previous|prior)\s+"
+    r"(?P<n>\d+)\s+(?P<unit>days?|weeks?|months?|hours?)\b",
     re.IGNORECASE,
 )
 
@@ -152,9 +236,26 @@ _INTENT_VOCAB = [
     "hoping", "planning", "thinking", "wondering", "plans", "wants", "excited",
 
     # past-tense verbs
-    "happened", "spent", "worked", "watched", "walked", "talked", "looked",
-    "checked", "called", "cooked", "cleaned", "visited", "finished",
-    "completed", "enjoyed", "managed", "built", "wrote", "browsed", "searched",
+    "happened",
+    "spent",
+    "worked",
+    "watched",
+    "walked",
+    "talked",
+    "looked",
+    "checked",
+    "called",
+    "cooked",
+    "cleaned",
+    "visited",
+    "finished",
+    "completed",
+    "enjoyed",
+    "managed",
+    "built",
+    "wrote",
+    "browsed",
+    "searched",
 ]
 _INTENT_VOCAB_SET = set(_INTENT_VOCAB)
 
@@ -167,8 +268,20 @@ _INTENT_VOCAB_SET = set(_INTENT_VOCAB)
 # never corrected TO ("want"→"wants" is 1 edit; without this, the corrector
 # would "fix" a legitimate word).
 _INTENT_PASSTHROUGH = {
-    "want", "plan", "hope", "wish", "went", "felt", "will", "shall",
-    "did", "was", "were", "had", "met", "saw",
+    "want",
+    "plan",
+    "hope",
+    "wish",
+    "went",
+    "felt",
+    "will",
+    "shall",
+    "did",
+    "was",
+    "were",
+    "had",
+    "met",
+    "saw",
 }
 
 _CORRECTION_TARGETS = _TEMPORAL_VOCAB + _INTENT_VOCAB
@@ -200,7 +313,9 @@ _PAST_REGRET_RE = re.compile(
 # present/future hedge — strip it before the past-cue check so the bare
 # "was"/"were" doesn't mask genuine future intent later in the sentence
 # ("I was wondering if I should visit this weekend").
-_HEDGE_RE = re.compile(r"\b(?:was|were)\s+(?:wondering|thinking|hoping|planning|going|gonna|about)\b")
+_HEDGE_RE = re.compile(
+    r"\b(?:was|were)\s+(?:wondering|thinking|hoping|planning|going|gonna|about)\b"
+)
 
 _PAST_CUES_RE = re.compile(
     r"\b(?:was|were|did|had|went|felt|met|saw|spent|worked|watched|walked|talked"
@@ -225,10 +340,16 @@ _FUTURE_CUES_RE = re.compile(
     # "love to" are transparent ("I would like to see..." = request,
     # "I would like to go hiking..." = future plan); "not" excluded because
     # "could not finish" is past narration
-    r"|\b(?:can|could|would)\s+(?:i|we)\s+(?:like\s+to\s+|love\s+to\s+)?(?!(?:" + _REQUEST_VERBS + r"|not)\b)\w+"
-    r"|\b(?:i|we)\s+(?:can|could|would)\s+(?:like\s+to\s+|love\s+to\s+)?(?!(?:" + _REQUEST_VERBS + r"|not)\b)\w+"
+    r"|\b(?:can|could|would)\s+(?:i|we)\s+(?:like\s+to\s+|love\s+to\s+)?(?!(?:"
+    + _REQUEST_VERBS
+    + r"|not)\b)\w+"
+    r"|\b(?:i|we)\s+(?:can|could|would)\s+(?:like\s+to\s+|love\s+to\s+)?(?!(?:"
+    + _REQUEST_VERBS
+    + r"|not)\b)\w+"
     r"|\b(?:gonna|wanna|gotta)\b"
-    r"|\b(?:going|want|wants|plan|hope|hoping|planning|intend|wish)\s+to\s+(?!" + _REQUEST_VERBS + r"\b)"
+    r"|\b(?:going|want|wants|plan|hope|hoping|planning|intend|wish)\s+to\s+(?!"
+    + _REQUEST_VERBS
+    + r"\b)"
     r"|\bthinking\s+(?:of|about)\s+\w+ing\b"
     r"|\bplans?\s+for\b|\bany\s+plans\b|\babout\s+to\b"
     r"|\blooking\s+forward\b|\bcan'?t\s+wait\b|\bexcited\s+(?:for|about|to)\b"
@@ -269,6 +390,7 @@ def _max_allowed_edits(word_len: int) -> int:
         return 2
     else:
         return 3
+
 
 def normalize_temporal_words(query: str) -> str:
     """Fuzzy-correct only words that closely and UNAMBIGUOUSLY resemble a
@@ -365,7 +487,9 @@ def _rolling_window_delta(n: int, unit: str) -> tuple[timedelta, str]:
     return timedelta(days=30 * n), "month"
 
 
-def weekend_bounds(now: datetime, modifier: str | None, intent: str | None) -> tuple[datetime, datetime] | None:
+def weekend_bounds(
+    now: datetime, modifier: str | None, intent: str | None
+) -> tuple[datetime, datetime] | None:
     """Anchor on the CURRENT calendar week's Saturday, not the most recent
     Saturday — asked on a Thursday, "last weekend" means the weekend that just
     passed (5 days ago), not two weekends back.
@@ -411,7 +535,9 @@ def _finalize(phrase: str, start: datetime, end: datetime, granularity: str, now
     treat it as unresolved rather than "no activity found"."""
     if start > now:
         return None
-    end = min(end, now)  # clip any range that straddles "now" (today, this week, this month)
+    end = min(
+        end, now
+    )  # clip any range that straddles "now" (today, this week, this month)
     return TemporalRange(
         phrase=phrase,
         start_ts=start.timestamp(),
@@ -420,7 +546,9 @@ def _finalize(phrase: str, start: datetime, end: datetime, granularity: str, now
     )
 
 
-def resolve_temporal_range(query: str, now: datetime | None = None) -> TemporalRange | None:
+def resolve_temporal_range(
+    query: str, now: datetime | None = None
+) -> TemporalRange | None:
     """Resolve the first time expression in `query` into an absolute
     [start, end) epoch range anchored to `now`. Returns None if nothing is
     found, OR if the expression refers to the future — caller falls back to
@@ -501,7 +629,9 @@ def resolve_temporal_range(query: str, now: datetime | None = None) -> TemporalR
         n = int(hours_ago_match.group("n"))
         u = hours_ago_match.group("unit").lower().rstrip("s").replace("min", "minute")
         delta = timedelta(hours=n) if u == "hour" else timedelta(minutes=n)
-        return _finalize(hours_ago_match.group(0).strip(), now - delta, now, "hour", now)
+        return _finalize(
+            hours_ago_match.group(0).strip(), now - delta, now, "hour", now
+        )
 
     try:
         matches = _cal.nlp(normalized, sourceTime=now)
@@ -531,13 +661,18 @@ def resolve_temporal_range(query: str, now: datetime | None = None) -> TemporalR
     # week") means the user is asking about something that hasn't happened
     # yet — reject immediately rather than let it fall through to a branch
     # that might resolve it forward anyway.
-    if any(mod in phrase for mod in _FUTURE_MODIFIERS) or any(prefix.endswith(mod) for mod in _FUTURE_MODIFIERS):
+    if any(mod in phrase for mod in _FUTURE_MODIFIERS) or any(
+        prefix.endswith(mod) for mod in _FUTURE_MODIFIERS
+    ):
         return None
 
     if "yesterday" in phrase:
         start, end = day_bounds(now - timedelta(days=1))
         granularity = "day"
-    elif any(k in phrase for k in ("today", "this morning", "this afternoon", "this evening", "tonight")):
+    elif any(
+        k in phrase
+        for k in ("today", "this morning", "this afternoon", "this evening", "tonight")
+    ):
         start, end = day_bounds(now)
         granularity = "day"
     elif "last week" in phrase or "previous week" in phrase:
@@ -595,7 +730,11 @@ def resolve_temporal_range(query: str, now: datetime | None = None) -> TemporalR
             or any(prefix.endswith(mod) for mod in _MODIFIER_WORDS)
             or prefix.endswith("this")
         )
-        if has_weekday and (not has_modifier or intent == "past") and anchor_dt.date() > now.date():
+        if (
+            has_weekday
+            and (not has_modifier or intent == "past")
+            and anchor_dt.date() > now.date()
+        ):
             anchor_dt = anchor_dt - timedelta(weeks=1)
         start, end = day_bounds(anchor_dt)
         granularity = "day"

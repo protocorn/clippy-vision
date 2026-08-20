@@ -74,10 +74,10 @@ def _parse_json_safe(text: str) -> dict:
     repaired = text.rstrip()
 
     # Strip any trailing partial token (open string, trailing comma)
-    repaired = re.sub(r',\s*$', '', repaired)
-    repaired = re.sub(r',\s*"[^"]*$', '', repaired)
-    if not repaired.endswith('}'):
-        repaired += '}'
+    repaired = re.sub(r",\s*$", "", repaired)
+    repaired = re.sub(r',\s*"[^"]*$', "", repaired)
+    if not repaired.endswith("}"):
+        repaired += "}"
     try:
         return json.loads(repaired)
     except json.JSONDecodeError:
@@ -98,11 +98,11 @@ def _parse_json_safe(text: str) -> dict:
     if verdict not in ("interesting", "not_interesting"):
         verdict = "not_interesting"
     result = {
-        "verdict":          verdict,
-        "score":            _extract("score", 0),
-        "reason":           _extract("reason", "parse error — partial response"),
-        "ocr_text":         _extract("ocr_text", ""),
-        "user_activity":    _extract("user_activity", ""),
+        "verdict": verdict,
+        "score": _extract("score", 0),
+        "reason": _extract("reason", "parse error — partial response"),
+        "ocr_text": _extract("ocr_text", ""),
+        "user_activity": _extract("user_activity", ""),
         "suggested_action": _extract("suggested_action"),
     }
 
@@ -115,9 +115,7 @@ def _parse_json_safe(text: str) -> dict:
 
 def classify_with_vision(event: dict, screenshot_paths: list) -> dict:
     ctx = event["window_context"]
-    ctx_str = (
-        f"{ctx.get('process_name', '')} — {ctx.get('current_window_title', '')}"
-    )
+    ctx_str = f"{ctx.get('process_name', '')} — {ctx.get('current_window_title', '')}"
     if ctx.get("active_url"):
         ctx_str += f" ({ctx['active_url']})"
 
@@ -131,14 +129,15 @@ def classify_with_vision(event: dict, screenshot_paths: list) -> dict:
 
     images = [_encode_image(screenshot_paths[0])]
 
-
     body = gateway.chat(
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_content, "images": images},
         ],
-        model=MODEL, format=VERDICT_SCHEMA,
-        options={"temperature": 0}, priority=Priority.FOREGROUND,
+        model=MODEL,
+        format=VERDICT_SCHEMA,
+        options={"temperature": 0},
+        priority=Priority.FOREGROUND,
     )
 
     content = body["message"]["content"]

@@ -4,6 +4,7 @@ import parsedatetime
 
 _cal = parsedatetime.Calendar()
 
+
 def _extract_temporal_hint(query: str) -> dict | None:
     """Deterministically resolve a time expression in the query, anchored to now.
     Only called when the classifier already signals time_anchored — see gating below."""
@@ -15,6 +16,7 @@ def _extract_temporal_hint(query: str) -> dict | None:
         "phrase": matched_text.strip(),
         "resolved": dt.isoformat(),
     }
+
 
 if __name__ == "__main__":
     while True:
