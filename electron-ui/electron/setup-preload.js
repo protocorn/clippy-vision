@@ -42,6 +42,10 @@ contextBridge.exposeInMainWorld('setup', {
 
     retryStep: (key) => ipcRenderer.invoke('retry-step', key),
 
+    getSetupContext: () => ipcRenderer.invoke('get-setup-context'),
+
+    startRecoverySetup: () => ipcRenderer.invoke('start-recovery-setup'),
+
 
     launch: () => ipcRenderer.invoke('launch-app'),
 

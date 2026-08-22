@@ -322,6 +322,7 @@ let captureProcess = null
 let apiProcess    = null
 let ollamaProcess = null
 let isQuitting    = false
+let awayActive    = false
 
 app.on('second-instance', () => {
     if (setupWindow && !setupWindow.isDestroyed()) {
@@ -413,6 +414,8 @@ function runCommand(cmd, args, opts = {}) {
     })
 }
 
+const REQUIRED_MODELS = ['qwen3:8b']
+
 function ollamaListHasModel(output, required) {
     const expected = String(required || '').trim()
     if (!expected) return false
@@ -420,6 +423,110 @@ function ollamaListHasModel(output, required) {
         const actual = line.trim().split(/\s+/)[0]
         return actual === expected || (!expected.includes(':') && actual === `${expected}:latest`)
     })
+}
+
+function requiredChatModels() {
+    const chatModel = String(readLLMConfig().chat_model || REQUIRED_MODELS[0]).trim()
+    return [...new Set([...REQUIRED_MODELS, chatModel].filter(Boolean))]
+}
+
+function tagsHaveModel(tags, required) {
+    const expected = String(required || '').trim()
+    if (!expected) return false
+    const names = (tags && Array.isArray(tags.models) ? tags.models : []).map((row) => (
+        String((row && (row.name || row.model)) || '').trim()
+    ))
+    return names.some((actual) => (
+        actual === expected || (!expected.includes(':') && actual === `${expected}:latest`)
+    ))
+}
+
+function fetchOllamaTags(timeoutMs = 4000) {
+    return new Promise((resolve) => {
+        try {
+            const url = new URL('/api/tags', `${configuredOllamaBaseURL().replace(/\/+$/, '')}/`)
+            const req = http.get({
+                hostname: url.hostname,
+                port: url.port || (url.protocol === 'https:' ? 443 : 80),
+                path: url.pathname + url.search,
+            }, (res) => {
+                let body = ''
+                res.setEncoding('utf8')
+                res.on('data', (chunk) => { body += chunk })
+                res.on('end', () => {
+                    try { resolve(JSON.parse(body)) } catch (_) { resolve(null) }
+                })
+            })
+            req.on('error', () => resolve(null))
+            req.setTimeout(timeoutMs, () => { req.destroy(); resolve(null) })
+        } catch (_) {
+            resolve(null)
+        }
+    })
+}
+
+async function ollamaHasModel(name) {
+    const tags = await fetchOllamaTags()
+    if (tags && tagsHaveModel(tags, name)) return true
+    const list = await runCommand(OLLAMA_COMMAND, ['list'])
+    return ollamaListHasModel(list.stdout, name) || ollamaListHasModel(list.stderr, name)
+}
+
+function describePreflightFailure(step, reason) {
+    const model = String(readLLMConfig().chat_model || REQUIRED_MODELS[0]).trim()
+    const copy = {
+        python: {
+            title: 'Python is missing',
+            detail: 'Clippy needs Python 3.9+ on PATH. Install it, then continue.',
+        },
+        ollama: {
+            title: 'Ollama is not installed',
+            detail: 'Install Ollama so Clippy can run the local chat model.',
+        },
+        'ollama-service': {
+            title: 'Ollama is not running',
+            detail: 'Start Ollama, then continue. Clippy uses it for chat.',
+        },
+        models: {
+            title: `Chat model ${model} is missing`,
+            detail: `${model} is not installed in Ollama. It may have been deleted. Re-download it to continue chatting.`,
+        },
+        packages: {
+            title: 'Python packages are missing',
+            detail: 'One or more required packages need to be reinstalled.',
+        },
+        warmup: {
+            title: 'The chat model could not be loaded',
+            detail: 'Ollama is reachable but the model failed to load. Free some memory, then try again.',
+        },
+    }
+    const known = copy[step] || {
+        title: 'Clippy is not ready',
+        detail: 'A startup check failed. Fix the issue below, then continue.',
+    }
+    return {
+        ok: false,
+        step,
+        reason: reason || known.detail,
+        title: known.title,
+        detail: known.detail,
+    }
+}
+
+function classifyChatError(rawError) {
+    const text = String(rawError || '')
+    const folded = text.toLowerCase()
+    if (!folded) return null
+    if (folded.includes('not found') || (folded.includes('http 404') && folded.includes('model'))) {
+        return describePreflightFailure('models', text)
+    }
+    if (folded.includes('not reachable') || folded.includes('econnrefused')) {
+        return describePreflightFailure('ollama-service', text)
+    }
+    if (folded.includes('model requires more') || folded.includes('error loading model')) {
+        return describePreflightFailure('warmup', text)
+    }
+    return null
 }
 
 
@@ -825,8 +932,6 @@ async function runSetup(startFrom = 'python') {
 
 
 
-const REQUIRED_MODELS = ['qwen3:8b']
-
 async function runPreflightChecks() {
     // Every normal launch verifies the local runtime before starting the API,
     // which turns missing models or permissions into a recoverable setup step.
@@ -838,33 +943,34 @@ async function runPreflightChecks() {
 
     const py = await runCommand(PYTHON_COMMAND, ['--version'])
     if (py.code !== 0) {
-        return { ok: false, step: 'python', reason: 'Python not found or not on PATH.' }
+        return describePreflightFailure('python', 'Python not found or not on PATH.')
     }
 
     if (!managedOllama) {
         if (!(await ollamaReachable(3, 500))) {
-            return { ok: false, step: 'warmup', reason: 'The configured local API is not reachable.' }
+            return describePreflightFailure('warmup', 'The configured local API is not reachable.')
         }
     } else {
         const ol = await runCommand(OLLAMA_COMMAND, ['--version'])
         if (ol.code !== 0) {
-            return { ok: false, step: 'ollama', reason: 'Ollama not found or not on PATH.' }
+            return describePreflightFailure('ollama', 'Ollama not found or not on PATH.')
         }
 
         // Residency limits apply to whichever server owns the port; a running
         // server is adopted as-is rather than restarted, because killing it
         // starts a bind war with the Ollama tray app.
         if (!(await ensureOllamaServing({ waitTries: 20 }))) {
-            return { ok: false, step: 'ollama-service', reason: 'Ollama service could not be started.' }
-        }
-
-        const list = await runCommand(OLLAMA_COMMAND, ['list'])
-        const missing = REQUIRED_MODELS.filter((name) => !ollamaListHasModel(list.stdout, name))
-        if (missing.length > 0) {
-            return { ok: false, step: 'models', reason: `Missing models: ${missing.join(', ')}` }
+            return describePreflightFailure('ollama-service', 'Ollama service could not be started.')
         }
     }
 
+    const missing = []
+    for (const name of requiredChatModels()) {
+        if (!(await ollamaHasModel(name))) missing.push(name)
+    }
+    if (missing.length > 0) {
+        return describePreflightFailure('models', `Missing models: ${missing.join(', ')}`)
+    }
 
     // Import checks are a cheap proxy for the full capture dependency set.
     const pkgCheck = await runCommand(PYTHON_COMMAND, [
@@ -872,10 +978,10 @@ async function runPreflightChecks() {
         'import fastapi, uvicorn, pynput, mss, PIL, psutil, imagehash, transformers, torch, sklearn',
     ])
     if (pkgCheck.code !== 0) {
-        return { ok: false, step: 'packages', reason: 'One or more Python packages are missing.' }
+        return describePreflightFailure('packages', 'One or more Python packages are missing.')
     }
 
-    return { ok: true, step: null, reason: null }
+    return { ok: true, step: null, reason: null, title: null, detail: null }
 }
 
 
@@ -1003,6 +1109,8 @@ async function getHardwareCheck() {
 
 let setupStartFrom = 'python'
 let setupInstallStarted = false
+let setupRecovery = null
+let allowMainClose = false
 
 function createSetupWindow() {
     // Setup is a separate, isolated window so install logs and the hardware
@@ -1144,7 +1252,7 @@ function createMainWindow() {
 
 
     mainWindow.on('close', (event) => {
-        if (!isQuitting) {
+        if (!isQuitting && !allowMainClose) {
             event.preventDefault()
             mainWindow.hide()
         }
@@ -1319,6 +1427,53 @@ function toggleCapture() {
     else startCapture()
 }
 
+async function setAway(away) {
+    try {
+        const response = await fetch(apiUrl('/skills/xyz/away'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ away: Boolean(away) }),
+        })
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const data = await response.json()
+        awayActive = Boolean(data.away)
+    } catch (error) {
+        console.error('[XYZ] away toggle failed', error)
+        return awayActive
+    }
+    rebuildTrayMenu()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('away-status-changed', awayActive)
+    }
+    if (Notification.isSupported()) {
+        new Notification({
+            title: 'Clippy Vision',
+            body: awayActive
+                ? 'Away — watching the focused tab for your skill rules'
+                : 'Back — tab refresh is paused',
+            silent: false,
+        }).show()
+    }
+    return awayActive
+}
+
+function toggleAway() {
+    return setAway(!awayActive)
+}
+
+async function refreshAwayFromApi() {
+    try {
+        const response = await fetch(apiUrl('/skills/xyz/away'))
+        if (!response.ok) return
+        const data = await response.json()
+        awayActive = Boolean(data.away)
+        rebuildTrayMenu()
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('away-status-changed', awayActive)
+        }
+    } catch (_) { /* API may still be starting */ }
+}
+
 
 
 
@@ -1328,6 +1483,7 @@ function rebuildTrayMenu() {
     if (!tray) return
     tray.setContextMenu(Menu.buildFromTemplate([
         { label: isCapturing() ? 'Stop Capture' : 'Start Capture', click: toggleCapture },
+        { label: awayActive ? "I'm Back" : "I'm Away", click: () => toggleAway() },
         { type: 'separator' },
         { label: 'Open Chat', click: showMainWindow },
         { type: 'separator' },
@@ -1355,6 +1511,9 @@ function createTray() {
 // Expose only narrow, validated desktop actions to the isolated renderer.
 ipcMain.handle('toggle-capture',     () => { toggleCapture();  return isCapturing() })
 ipcMain.handle('get-capture-status', () => isCapturing())
+ipcMain.handle('toggle-away',        () => toggleAway())
+ipcMain.handle('get-away-status',    () => awayActive)
+ipcMain.handle('set-away-status',    (_event, away) => setAway(Boolean(away)))
 ipcMain.handle('get-login-item', () => app.getLoginItemSettings().openAtLogin)
 ipcMain.handle('set-login-item', (_event, enabled) => {
     const openAtLogin = Boolean(enabled)
@@ -1427,7 +1586,43 @@ ipcMain.handle('retry-step', (_event, key) => {
     runSetup(key)
 })
 
+ipcMain.handle('get-setup-context', () => ({
+    recover: Boolean(setupRecovery),
+    fromStep: setupStartFrom,
+    title: setupRecovery && setupRecovery.title,
+    detail: setupRecovery && setupRecovery.detail,
+}))
+
+ipcMain.handle('start-recovery-setup', () => {
+    if (setupInstallStarted) {
+        return { ok: true, alreadyStarted: true }
+    }
+    setupInstallStarted = true
+    doneSoFar = 0
+    setImmediate(() => runSetup(setupStartFrom))
+    return { ok: true }
+})
+
+ipcMain.handle('check-runtime-health', async (_event, rawError) => {
+    const check = await runPreflightChecks()
+    if (!check.ok) return check
+    return classifyChatError(rawError) || { ok: true, step: null, reason: null, title: null, detail: null }
+})
+
+ipcMain.handle('fix-runtime-issue', (_event, payload = {}) => {
+    const issue = payload && typeof payload === 'object' ? payload : {}
+    const step = issue.step || 'models'
+    redirectToSetup(step, {
+        title: issue.title,
+        detail: issue.detail,
+        reason: issue.reason,
+        step,
+    })
+    return { ok: true }
+})
+
 ipcMain.handle('launch-app', () => {
+    setupRecovery = null
     if (setupWindow && !setupWindow.isDestroyed()) setupWindow.close()
     createTray()
     createMainWindow()
@@ -1477,10 +1672,15 @@ function sendLoadingStatus(title, sub) {
     }
 }
 
-function redirectToSetup(fromStep) {
+function redirectToSetup(fromStep, recovery = null) {
     try { fs.unlinkSync(SETUP_FLAG) } catch (_) {}
-    setupStartFrom = fromStep
+    setupStartFrom = fromStep || 'python'
+    setupRecovery = recovery && typeof recovery === 'object'
+        ? { ...recovery, step: setupStartFrom }
+        : describePreflightFailure(setupStartFrom)
+    allowMainClose = true
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close()
+    allowMainClose = false
     mainWindow = null
     if (tray) { tray.destroy(); tray = null }
     createSetupWindow()
@@ -1535,7 +1735,7 @@ app.whenReady().then(async () => {
 
         if (!check.ok) {
             console.error(`[preflight] Failed at step "${check.step}": ${check.reason}`)
-            redirectToSetup(check.step)
+            redirectToSetup(check.step, check)
             return
         }
 
@@ -1547,13 +1747,27 @@ app.whenReady().then(async () => {
                 console.log('[app] API server healthy — warming text model...')
                 sendLoadingStatus(null, 'Loading text model…')
                 try {
-                    await httpPost(apiUrl('/residency/startup'), {}, 120000)
+                    const warm = await httpPost(apiUrl('/residency/startup'), {}, 120000)
+                    const warmError = String((warm && warm.error) || '')
+                    const classified = classifyChatError(warmError)
+                    if (classified) {
+                        console.error('[app] residency warm failed:', warmError)
+                        redirectToSetup(classified.step, classified)
+                        return
+                    }
                     console.log('[app] residency startup warm done')
                 } catch (e) {
+                    const classified = classifyChatError(e.message)
+                    if (classified) {
+                        console.error('[app] residency warm failed:', e.message)
+                        redirectToSetup(classified.step, classified)
+                        return
+                    }
                     console.log('[app] residency warm skipped:', e.message)
                 }
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     mainWindow.webContents.send('api-ready')
+                    refreshAwayFromApi()
                 }
             })
             .catch(() => {

@@ -37,4 +37,10 @@ def start_background_jobs() -> None:
     start_screenshot_processor()
     start_summarizer()
     start_catch_up_worker()
+    try:
+        from skills.when_x_then_y import start_xyz_worker
+
+        start_xyz_worker()
+    except Exception as exc:
+        print(f"[background] XYZ skill worker skipped: {exc}")
     print("[background] Summarizer, screenshot, and classification catch-up workers started")

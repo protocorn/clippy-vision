@@ -19,4 +19,5 @@ numpy
 httpx
 rapidfuzz
 parsedatetime>=2.6
+trafilatura
 ruff

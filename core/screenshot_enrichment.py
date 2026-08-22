@@ -37,17 +37,17 @@ def merge_ocr_text(*values: str | None) -> str:
 def choose_screen_text(accessibility_text: str = "", ocr_text: str = "") -> str:
     """
     One best source for vision_ocr_text:
-      1) useful a11y → a11y only (OCR skipped upstream)
-      2) else useful OCR → OCR only (drop a11y noise)
-      3) else a11y fallback (even if weak), then OCR crumbs
+      1) useful OCR → OCR only (a11y is crop geometry, not the stored text)
+      2) else useful a11y → a11y fallback when OCR is empty/junk
+      3) else a11y crumbs, then OCR crumbs
     """
     a11y = normalize_accessibility_text(accessibility_text)
     ocr = merge_ocr_text(ocr_text)
 
-    if is_useful_accessibility_text(a11y):
-        return a11y[:_MAX_SCREEN_CHARS]
     if is_useful_accessibility_text(ocr):
         return ocr[:_MAX_SCREEN_CHARS]
+    if is_useful_accessibility_text(a11y):
+        return a11y[:_MAX_SCREEN_CHARS]
     if a11y.strip():
         return a11y[:_MAX_SCREEN_CHARS]
     return ocr[:_MAX_SCREEN_CHARS]
@@ -115,7 +115,7 @@ def enrich_screenshot(
                 )
 
     accessibility_text = _captured_accessibility_text(path, stat)
-    should_run_ocr = settings["ocr_enabled"] and not is_useful_accessibility_text(accessibility_text)
+    should_run_ocr = settings["ocr_enabled"]
     ocr_text = extract_screenshot_ocr(path) if should_run_ocr else ""
     captured_text = choose_screen_text(accessibility_text, ocr_text)
     # CLIP/image embeddings: gated by image_embeddings_enabled (default off;

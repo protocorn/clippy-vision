@@ -521,7 +521,7 @@
 
   <header>
     <span class="header-title">Clippy Vision setup</span>
-    <span class="header-version">One-time setup</span>
+    <span class="header-version" id="header-version">One-time setup</span>
   </header>
 
   <div class="screen active" id="screen-hardware">
@@ -618,7 +618,14 @@
   </div>
 
   <div class="screen" id="screen-install">
-    <p class="tagline">Preparing Clippy. This only happens once.</p>
+    <p class="tagline" id="install-tagline">Preparing Clippy. This only happens once.</p>
+    <div class="verdict warn" id="recovery-banner" role="status" style="display:none; margin-bottom:12px;">
+      <div class="verdict-icon">!</div>
+      <div>
+        <div class="verdict-title" id="recovery-title">Something Clippy needs is missing</div>
+        <div class="verdict-body" id="recovery-detail">Fix the failed step below, then launch again.</div>
+      </div>
+    </div>
 
     <div class="steps" id="steps-list">
       <div class="step pending" id="step-python" data-key="python">
@@ -995,6 +1002,23 @@
       overallText.style.color = '#A8906C'
     }
 
+    async function startRecovery(ctx) {
+      $('header-version').textContent = 'Repair'
+      $('install-tagline').textContent = 'Fix the missing piece, then continue.'
+      const banner = $('recovery-banner')
+      banner.style.display = 'flex'
+      $('recovery-title').textContent = ctx.title || 'Something Clippy needs is missing'
+      $('recovery-detail').textContent = ctx.detail || 'The failed step is highlighted below.'
+      showInstallScreen()
+      const startIdx = Math.max(0, STEPS.indexOf(ctx.fromStep || 'python'))
+      for (let i = 0; i < startIdx; i++) {
+        setStepState(STEPS[i], 'done', 'Already OK')
+      }
+      if (window.setup && window.setup.startRecoverySetup) {
+        await window.setup.startRecoverySetup()
+      }
+    }
+
     if (window.setup) {
       window.setup.onStepUpdate(({ key, state, sub }) => {
         setStepState(key, state, sub)
@@ -1031,7 +1055,14 @@
         showLaunchButton()
       })
 
-      loadHardware()
+      if (window.setup.getSetupContext) {
+        window.setup.getSetupContext().then((ctx) => {
+          if (ctx && ctx.recover) return startRecovery(ctx)
+          loadHardware()
+        }).catch(() => loadHardware())
+      } else {
+        loadHardware()
+      }
     } else {
       $('hw-loading').textContent = 'window.setup not available. Is setup-preload.js loaded?'
     }

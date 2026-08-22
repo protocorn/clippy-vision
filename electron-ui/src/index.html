@@ -771,6 +771,41 @@
       animation: pulse 1.2s ease-in-out infinite;
     }
 
+    #away-btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: inherit;
+      background: var(--panel);
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+
+    #away-btn.active {
+      background: var(--success-bg);
+      color: var(--success);
+      border-color: var(--success-border);
+    }
+
+    .skill-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .skill-check input {
+      width: auto;
+      min-width: 0;
+      flex: 0;
+    }
+
     @keyframes pulse {
 
       0%,
@@ -820,6 +855,58 @@
       flex-direction: column;
       gap: 8px;
       max-width: min(70%, 560px);
+    }
+
+    .message.bot.has-repair {
+      max-width: min(86%, 440px);
+      background: var(--danger-bg);
+      border-color: var(--danger-border);
+    }
+
+    .runtime-issue {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .runtime-issue-title {
+      font-weight: 600;
+      color: var(--danger);
+      font-size: 14px;
+    }
+
+    .runtime-issue-detail {
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.5;
+      opacity: 0.9;
+    }
+
+    .runtime-issue-raw {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .runtime-issue-fix {
+      align-self: flex-start;
+      padding: 8px 14px;
+      background: var(--accent-fill);
+      color: var(--bg);
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .runtime-issue-fix:hover {
+      background: var(--accent-fill-hover);
+    }
+
+    .runtime-issue-fix:disabled {
+      opacity: 0.6;
+      cursor: default;
     }
 
     .think-block {
@@ -1643,7 +1730,33 @@
 
     .skill-add-btn {
       margin-top: 4px;
+    }
 
+    .skill-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .skill-save-btn {
+      background: var(--accent);
+      color: #fff;
+      border-color: transparent;
+    }
+
+    .skill-save-status {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .skill-save-status.ok {
+      color: var(--success);
+    }
+
+    .skill-save-status.error {
+      color: var(--danger);
     }
   </style>
 </head>
@@ -1683,6 +1796,9 @@
         <button id="capture-btn" title="Toggle screen capture">
           <span class="capture-dot"></span>
           <span id="capture-label">Start Capture</span>
+        </button>
+        <button id="away-btn" title="While Away, Clippy can watch the focused tab and optionally refresh it">
+          <span id="away-label">I'm Away</span>
         </button>
       </div>
     </header>
@@ -1848,7 +1964,7 @@
         <div class="skill-card-head">
           <div class="skill-card-text">
             <div class="skill-card-title"><strong>When you see X, do Y</strong></div>
-            <p>When something appears on screen, Clippy runs a rule you wrote.</p>
+            <p>Watch a website in the background, or the focused tab while you are Away. Optional refresh only runs when you allow it and are idle.</p>
           </div>
           <label class="toggle">
             <input type="checkbox" id="skill-see-x-toggle" />
@@ -1857,7 +1973,11 @@
         </div>
         <div class="skill-card-body">
           <div id="skill-rules"></div>
-          <button type="button" id="skill-add-rule" class="header-btn skill-add-btn">+ Add rule</button>
+          <div class="skill-actions">
+            <button type="button" id="skill-add-rule" class="header-btn skill-add-btn">+ Add rule</button>
+            <button type="button" id="skill-save-rules" class="header-btn skill-save-btn">Save rules</button>
+            <span id="skill-save-status" class="skill-save-status"></span>
+          </div>
         </div>
       </article>
 
@@ -1930,6 +2050,8 @@
     const settingsBack = document.getElementById('settings-back')
     const captureBtn = document.getElementById('capture-btn')
     const captureLabel = document.getElementById('capture-label')
+    const awayBtn = document.getElementById('away-btn')
+    const awayLabel = document.getElementById('away-label')
     const chatMain = document.getElementById('chat-main')
     const welcomeInput = document.getElementById('welcome-input')
     const welcomeSend = document.getElementById('welcome-send')
@@ -1947,13 +2069,14 @@
     const convSearch = document.getElementById('conv-search')
     const convSearchHint = document.getElementById('conv-search-hint')
 
-    const SKILLS_KEY = 'clippy.skills.v1'
     const skillsBtn = document.getElementById('skills-btn')
     const skillsBack = document.getElementById('skills-back')
     const skillSeeXToggle = document.getElementById('skill-see-x-toggle')
     const skillSeeXCard = document.getElementById('skill-see-x')
     const skillRulesEl = document.getElementById('skill-rules')
     const skillAddRuleBtn = document.getElementById('skill-add-rule')
+    const skillSaveRulesBtn = document.getElementById('skill-save-rules')
+    const skillSaveStatus = document.getElementById('skill-save-status')
 
 
     let searchTimer = null
@@ -2000,37 +2123,93 @@
       }
     }
 
-
-    function loadSkillsState() {
-      try {
-        const raw = localStorage.getItem(SKILLS_KEY)
-        if (!raw) return defaultSkillsState()
-        const parsed = JSON.parse(raw)
-        const base = defaultSkillsState()
-        if (parsed && parsed.skills) {
-          Object.assign(base.skills, parsed.skills)
-        }
-        return base
-      } catch {
-        return defaultSkillsState()
-      }
-    }
-
-    function saveSkillsState(state) {
-      localStorage.setItem(SKILLS_KEY, JSON.stringify(state))
-    }
-
-    let skillsState = loadSkillsState()
-
     function newRule() {
       return {
         id: 'r' + Date.now().toString(36),
-        textContains: '',
-        appContains: '',
-        action: 'notify',
-        cooldownMinutes: 30,
+        mode: 'background',
+        source_url: '',
+        keywords: [],
+        poll_seconds: 60,
         enabled: true,
+        cooldown_seconds: 120,
+        alert_message: 'XYZ match: {title}',
+        parser: 'auto',
+        require_all_keywords: false,
+        phrases: [],
+        near: [],
+        near_chars: 100,
+        intent: '',
+        generator_prompt: '',
+        allow_refresh: false,
+        refresh_seconds: 120,
+        refresh_only_when_away: true,
       }
+    }
+
+    let skillsState = defaultSkillsState()
+    let xyzSavedSnapshot = '[]'
+
+    function setSkillSaveStatus(text, kind) {
+      skillSaveStatus.textContent = text || ''
+      skillSaveStatus.classList.remove('ok', 'error')
+      if (kind) skillSaveStatus.classList.add(kind)
+    }
+
+    function markRulesDirty() {
+      const current = JSON.stringify(skillsState.skills['see-x-do-y'].rules || [])
+      if (current !== xyzSavedSnapshot) setSkillSaveStatus('Unsaved changes')
+      else setSkillSaveStatus('')
+    }
+
+    function markRulesClean() {
+      xyzSavedSnapshot = JSON.stringify(skillsState.skills['see-x-do-y'].rules || [])
+      setSkillSaveStatus('Saved.', 'ok')
+    }
+
+    function ruleIsReady(rule) {
+      const hasUrl = !!(rule.source_url || '').trim()
+      const hasIntent = !!(rule.intent || '').trim()
+      const hasKeywords = (rule.keywords || []).some((k) => (k || '').trim())
+      return hasUrl && (hasIntent || hasKeywords)
+    }
+
+    async function persistXyzEnabled() {
+      const skill = skillsState.skills['see-x-do-y']
+      await window.clippy.saveXyzSkill({ enabled: !!skill.enabled })
+    }
+
+    async function saveXyzRules() {
+      const skill = skillsState.skills['see-x-do-y']
+      const saved = JSON.parse(xyzSavedSnapshot || '[]')
+      const savedById = {}
+      saved.forEach((rule) => { if (rule && rule.id) savedById[rule.id] = rule })
+
+      const ready = []
+      for (const rule of skill.rules || []) {
+        if (!ruleIsReady(rule)) continue
+        const prev = savedById[rule.id]
+        if (prev && (prev.source_url || '').trim() !== (rule.source_url || '').trim()) {
+          rule.id = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+        }
+        ready.push(rule)
+      }
+      if (ready.length !== (skill.rules || []).length) {
+        setSkillSaveStatus('Fill URL and intent (or keywords) before saving a rule.', 'error')
+        if (!ready.length) return
+      }
+      skill.rules = ready
+      await window.clippy.saveXyzSkill({
+        enabled: !!skill.enabled,
+        rules: ready,
+      })
+      markRulesClean()
+      renderRules()
+    }
+
+    function addField(row, labelText, el) {
+      const label = document.createElement('label')
+      label.textContent = labelText
+      row.append(label, el)
     }
 
     function renderRules() {
@@ -2039,83 +2218,114 @@
       if (!skill.rules.length) {
         const empty = document.createElement('p')
         empty.className = 'skill-empty'
-        empty.textContent = 'No rules yet. Add one so Clippy knows what to watch for.'
+        empty.textContent = 'No rules yet. Add a URL to watch, then describe when Clippy should alert you. Hit Save rules when you are ready.'
         skillRulesEl.appendChild(empty)
         return
       }
       skill.rules.forEach((rule, index) => {
         const card = document.createElement('div')
         card.className = 'skill-rule'
-        const whenRow = document.createElement('div')
-        whenRow.className = 'skill-rule-row'
-        const whenLabel = document.createElement('label')
-        whenLabel.textContent = 'When'
-        const appInput = document.createElement('input')
-        appInput.type = 'text'
-        appInput.placeholder = 'any app'
-        appInput.value = rule.appContains
-        appInput.addEventListener('input', () => {
-          skill.rules[index].appContains = appInput.value
-          saveSkillsState(skillsState)
+
+        const urlRow = document.createElement('div')
+        urlRow.className = 'skill-rule-row'
+        const urlInput = document.createElement('input')
+        urlInput.type = 'url'
+        urlInput.placeholder = 'https://news.ycombinator.com/newest'
+        urlInput.value = rule.source_url || ''
+        urlInput.addEventListener('input', () => {
+          skill.rules[index].source_url = urlInput.value
+          markRulesDirty()
         })
-        const seeInput = document.createElement('input')
-        seeInput.type = 'text'
-        seeInput.placeholder = 'I see (text on screen)'
-        seeInput.value = rule.textContains
-        seeInput.addEventListener('input', () => {
-          skill.rules[index].textContains = seeInput.value
-          saveSkillsState(skillsState)
+        addField(urlRow, 'URL', urlInput)
+
+        const intentRow = document.createElement('div')
+        intentRow.className = 'skill-rule-row'
+        const intentInput = document.createElement('input')
+        intentInput.type = 'text'
+        intentInput.placeholder = 'Notify when a new post appears at the top'
+        intentInput.value = rule.intent || ''
+        intentInput.addEventListener('input', () => {
+          skill.rules[index].intent = intentInput.value
+          markRulesDirty()
         })
-        whenRow.append(whenLabel, appInput, seeInput)
-        const thenRow = document.createElement('div')
-        thenRow.className = 'skill-rule-row'
-        const thenLabel = document.createElement('label')
-        thenLabel.textContent = 'Then'
-        const actionSelect = document.createElement('select')
-          ;[
-            ['notify', 'Notify me'],
-            ['chat', 'Open a chat (soon)'],
-          ].forEach(([value, label]) => {
-            const opt = document.createElement('option')
-            opt.value = value
-            opt.textContent = label
-            if (value !== 'notify') opt.disabled = true
-            if (rule.action === value) opt.selected = true
-            actionSelect.appendChild(opt)
-          })
-        actionSelect.addEventListener('change', () => {
-          skill.rules[index].action = actionSelect.value
-          saveSkillsState(skillsState)
+        addField(intentRow, 'Intent', intentInput)
+
+        const kwRow = document.createElement('div')
+        kwRow.className = 'skill-rule-row'
+        const kwInput = document.createElement('input')
+        kwInput.type = 'text'
+        kwInput.placeholder = 'optional keywords, comma-separated'
+        kwInput.value = (rule.keywords || []).join(', ')
+        kwInput.addEventListener('input', () => {
+          skill.rules[index].keywords = kwInput.value.split(',').map((s) => s.trim()).filter(Boolean)
+          markRulesDirty()
         })
-        thenRow.append(thenLabel, actionSelect)
+        addField(kwRow, 'Keywords', kwInput)
+
+        const modeRow = document.createElement('div')
+        modeRow.className = 'skill-rule-row'
+        const modeSelect = document.createElement('select')
+        ;[
+          ['background', 'Background (HTTP poll)'],
+          ['foreground', 'Foreground (focused tab)'],
+          ['both', 'Both'],
+        ].forEach(([value, label]) => {
+          const opt = document.createElement('option')
+          opt.value = value
+          opt.textContent = label
+          if (rule.mode === value) opt.selected = true
+          modeSelect.appendChild(opt)
+        })
+        modeSelect.addEventListener('change', () => {
+          skill.rules[index].mode = modeSelect.value
+          markRulesDirty()
+          renderRules()
+        })
+        addField(modeRow, 'Watch', modeSelect)
+
+        const refreshRow = document.createElement('div')
+        refreshRow.className = 'skill-rule-row'
+        const refreshLabel = document.createElement('label')
+        refreshLabel.className = 'skill-check'
+        const refreshBox = document.createElement('input')
+        refreshBox.type = 'checkbox'
+        refreshBox.checked = !!rule.allow_refresh
+        refreshBox.disabled = rule.mode === 'background'
+        refreshBox.addEventListener('change', () => {
+          skill.rules[index].allow_refresh = refreshBox.checked
+          markRulesDirty()
+        })
+        refreshLabel.append(refreshBox, document.createTextNode('Allow F5 while Away (only if idle)'))
+        refreshRow.append(refreshLabel)
+
         const metaRow = document.createElement('div')
         metaRow.className = 'skill-rule-row'
-        const coolLabel = document.createElement('label')
-        coolLabel.textContent = 'Wait'
         const coolInput = document.createElement('input')
         coolInput.className = 'skill-cooldown'
         coolInput.type = 'number'
-        coolInput.min = '1'
-        coolInput.value = String(rule.cooldownMinutes)
+        coolInput.min = '15'
+        coolInput.value = String(rule.cooldown_seconds || 120)
         coolInput.addEventListener('input', () => {
           const n = parseInt(coolInput.value, 10)
-          skill.rules[index].cooldownMinutes = Number.isFinite(n) && n > 0 ? n : 30
-          saveSkillsState(skillsState)
+          skill.rules[index].cooldown_seconds = Number.isFinite(n) && n > 0 ? n : 120
+          markRulesDirty()
         })
         const coolHint = document.createElement('span')
         coolHint.style.cssText = 'font-size:12px;color:var(--muted)'
-        coolHint.textContent = 'minutes before repeating'
+        coolHint.textContent = 'seconds between alerts'
         const delBtn = document.createElement('button')
         delBtn.type = 'button'
         delBtn.className = 'identity-remove'
         delBtn.textContent = 'Delete'
         delBtn.addEventListener('click', () => {
           skill.rules.splice(index, 1)
-          saveSkillsState(skillsState)
+          markRulesDirty()
           renderRules()
         })
-        metaRow.append(coolLabel, coolInput, coolHint, delBtn)
-        card.append(whenRow, thenRow, metaRow)
+        addField(metaRow, 'Wait', coolInput)
+        metaRow.append(coolHint, delBtn)
+
+        card.append(urlRow, intentRow, kwRow, modeRow, refreshRow, metaRow)
         skillRulesEl.appendChild(card)
       })
     }
@@ -2127,13 +2337,30 @@
       renderRules()
     }
 
-    function openSkills() {
+    async function loadXyzFromApi() {
+      const data = await window.clippy.getXyzSkill()
+      skillsState.skills['see-x-do-y'].enabled = !!data.enabled
+      skillsState.skills['see-x-do-y'].rules = Array.isArray(data.rules) ? data.rules : []
+      xyzSavedSnapshot = JSON.stringify(skillsState.skills['see-x-do-y'].rules)
+      setSkillSaveStatus('')
+      setAwayUI(!!data.away)
+    }
+
+    async function openSkills() {
       closeDrawer()
-      skillsState = loadSkillsState()
+      try {
+        await loadXyzFromApi()
+      } catch (err) {
+        console.error('Could not load skill rules', err)
+      }
       syncSeeXCard()
       showView(skillsView)
     }
     function closeSkills() {
+      const current = JSON.stringify(skillsState.skills['see-x-do-y'].rules || [])
+      if (current !== xyzSavedSnapshot && !confirm('You have unsaved rule changes. Discard them?')) {
+        return
+      }
       showView(chatView)
       if (chatMain.classList.contains('is-welcome')) welcomeInput.focus()
       else inputBox.focus()
@@ -2260,6 +2487,7 @@
       }
 
       const label = toggle.querySelector('.think-label')
+      let failed = false
 
       return {
         root,
@@ -2288,7 +2516,13 @@
           thinkBlock.classList.add('is-pending')
           label.textContent = text || 'Thinking'
         },
+        beginFail() {
+          failed = true
+          thinkBlock.classList.remove('is-pending')
+          thinkBlock.style.display = 'none'
+        },
         finalize() {
+          if (failed) return
           thinkBlock.classList.remove('is-pending')
           label.textContent = thinkBody.textContent.trim() ? 'Thought' : 'Thinking'
           if (!thinkBody.textContent.trim()) {
@@ -2298,12 +2532,58 @@
           updateCopyVisibility()
         },
         fail(message) {
+          failed = true
           thinkBlock.classList.remove('is-pending')
           thinkBlock.style.display = 'none'
           rawContent = ''
+          root.classList.remove('has-repair')
           messageBody.classList.remove('md')
           messageBody.textContent = message
           messageBody.style.color = 'var(--danger)'
+          updateCopyVisibility()
+        },
+        failRepair(issue, rawMessage) {
+          failed = true
+          thinkBlock.classList.remove('is-pending')
+          thinkBlock.style.display = 'none'
+          rawContent = ''
+          root.classList.add('has-repair')
+          messageBody.classList.remove('md')
+          messageBody.style.color = ''
+          messageBody.replaceChildren()
+
+          const card = document.createElement('div')
+          card.className = 'runtime-issue'
+          const title = document.createElement('div')
+          title.className = 'runtime-issue-title'
+          title.textContent = issue.title || 'Clippy is not ready'
+          const detail = document.createElement('div')
+          detail.className = 'runtime-issue-detail'
+          detail.textContent = issue.detail || 'A required dependency is missing.'
+          const raw = document.createElement('div')
+          raw.className = 'runtime-issue-raw'
+          raw.textContent = rawMessage || issue.reason || ''
+          const fixBtn = document.createElement('button')
+          fixBtn.type = 'button'
+          fixBtn.className = 'runtime-issue-fix'
+          fixBtn.textContent = 'Fix and continue'
+          fixBtn.addEventListener('click', async () => {
+            if (!window.clippy.fixRuntimeIssue) return
+            fixBtn.disabled = true
+            fixBtn.textContent = 'Opening setup…'
+            try {
+              await window.clippy.fixRuntimeIssue(issue)
+            } catch (err) {
+              fixBtn.disabled = false
+              fixBtn.textContent = 'Fix and continue'
+              raw.textContent = err.message || 'Could not open setup.'
+            }
+          })
+          card.appendChild(title)
+          card.appendChild(detail)
+          if (raw.textContent) card.appendChild(raw)
+          card.appendChild(fixBtn)
+          messageBody.appendChild(card)
           updateCopyVisibility()
         },
       }
@@ -2689,6 +2969,37 @@
       }
     }
 
+    function looksLikeRuntimeFailure(message) {
+      const text = String(message || '').toLowerCase()
+      return (
+        text.includes('ollama')
+        || text.includes('not found')
+        || text.includes('not reachable')
+        || text.includes('http 404')
+        || text.includes('http 500')
+        || text.includes('model requires more')
+        || text.includes('error loading model')
+      )
+    }
+
+    async function handleChatFailure(shell, rawMessage) {
+      const text = String(rawMessage || 'unknown')
+      if (shell.beginFail) shell.beginFail()
+      if (!looksLikeRuntimeFailure(text) || !window.clippy.checkRuntimeHealth) {
+        shell.fail(`Error: ${text}`)
+        return
+      }
+      let issue = null
+      try {
+        issue = await window.clippy.checkRuntimeHealth(text)
+      } catch (_) { /* fall through to the raw error */ }
+      if (issue && issue.ok === false) {
+        shell.failRepair(issue, text)
+        return
+      }
+      shell.fail(`Error: ${text}`)
+    }
+
     async function send(fromWelcome = false) {
       const source = fromWelcome ? welcomeInput : inputBox
       const text = source.value.trim()
@@ -2723,7 +3034,9 @@
           else if (event.type === 'thinking') s.appendThinking(event.delta || '')
           else if (event.type === 'content') s.appendContent(event.delta || '')
           else if (event.type === 'reset_content') s.resetContent()
-          else if (event.type === 'error') s.fail(`Error: ${event.message || 'unknown'}`)
+          else if (event.type === 'error') {
+            handleChatFailure(s, event.message || 'unknown')
+          }
           else if (event.type === 'done') s.finalize()
         })
         if (pendingReply && pendingReply.conversationId === requestConvId) {
@@ -2732,7 +3045,7 @@
         refreshConversationList()
       } catch (error) {
         if (pendingReply && pendingReply.conversationId === requestConvId) {
-          pendingReply.shell.fail(`Error: ${error.message}`)
+          await handleChatFailure(pendingReply.shell, error.message)
         }
       } finally {
         if (pendingReply && pendingReply.conversationId === requestConvId) {
@@ -2760,6 +3073,7 @@
         showView(chatView)
         const active = await window.clippy.getCaptureStatus()
         setCaptureUI(active)
+        try { setAwayUI(await window.clippy.getAwayStatus()) } catch (_) { /* ignore */ }
         setChatMode('welcome')
         syncDrawerLayout()
       } catch (error) {
@@ -2839,6 +3153,7 @@
           showView(chatView)
           const active = await window.clippy.getCaptureStatus()
           setCaptureUI(active)
+          try { setAwayUI(await window.clippy.getAwayStatus()) } catch (_) { /* ignore */ }
           setChatMode('welcome')
           syncDrawerLayout()
         } else {
@@ -2918,12 +3233,27 @@
       }
     }
 
+    function setAwayUI(away) {
+      awayBtn.classList.toggle('active', !!away)
+      awayLabel.textContent = away ? "I'm Back" : "I'm Away"
+    }
+
     captureBtn.addEventListener('click', async () => {
       captureBtn.disabled = true
       try {
         await window.clippy.toggleCapture()
       } finally {
         captureBtn.disabled = false
+      }
+    })
+
+    awayBtn.addEventListener('click', async () => {
+      awayBtn.disabled = true
+      try {
+        const away = await window.clippy.toggleAway()
+        setAwayUI(away)
+      } finally {
+        awayBtn.disabled = false
       }
     })
 
@@ -2954,6 +3284,9 @@
     // keep button in sync when tray toggles capture
     window.clippy.onCaptureStatusChanged((active) => {
       setCaptureUI(active)
+    })
+    window.clippy.onAwayStatusChanged((away) => {
+      setAwayUI(away)
     })
 
     function setStatus(el, text, kind) {
@@ -3210,13 +3543,23 @@
 
     skillSeeXToggle.addEventListener('change', () => {
       skillsState.skills['see-x-do-y'].enabled = skillSeeXToggle.checked
-      saveSkillsState(skillsState)
+      persistXyzEnabled().catch((err) => console.error(err))
       syncSeeXCard()
     })
     skillAddRuleBtn.addEventListener('click', () => {
       skillsState.skills['see-x-do-y'].rules.push(newRule())
-      saveSkillsState(skillsState)
+      markRulesDirty()
       renderRules()
+    })
+    skillSaveRulesBtn.addEventListener('click', async () => {
+      skillSaveRulesBtn.disabled = true
+      try {
+        await saveXyzRules()
+      } catch (err) {
+        setSkillSaveStatus(`Could not save: ${err.message}`, 'error')
+      } finally {
+        skillSaveRulesBtn.disabled = false
+      }
     })
     skillsBtn.addEventListener('click', openSkills)
     skillsBack.addEventListener('click', closeSkills)

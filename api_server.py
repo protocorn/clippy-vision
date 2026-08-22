@@ -135,6 +135,15 @@ class DataClearRequest(BaseModel):
     scopes: list[str]
 
 
+class XyzAwayRequest(BaseModel):
+    away: bool
+
+
+class XyzConfigRequest(BaseModel):
+    enabled: bool | None = None
+    rules: list[dict] | None = None
+
+
 
 def _validate_user_message(message: str) -> str:
     text = (message or "").strip()
@@ -407,6 +416,57 @@ def status():
         "residency": load_residency(),
         "backlog": get_backlog_status(),
     }
+
+
+def _xyz_payload():
+    from dataclasses import asdict
+    from skills.when_x_then_y import get_away, load_config, load_rules
+
+    return {
+        "enabled": load_config()["enabled"],
+        "away": get_away(),
+        "rules": [asdict(rule) for rule in load_rules()],
+    }
+
+
+@app.get("/skills/xyz")
+def xyz_get():
+    return _xyz_payload()
+
+
+@app.put("/skills/xyz")
+def xyz_put(req: XyzConfigRequest):
+    from dataclasses import asdict, fields as dc_fields
+    from skills.when_x_then_y import Rule, save_config, save_rules
+
+    if req.enabled is not None:
+        save_config({"enabled": req.enabled})
+    if req.rules is not None:
+        allowed = {f.name for f in dc_fields(Rule)}
+        rules = []
+        for row in req.rules:
+            if not isinstance(row, dict):
+                continue
+            try:
+                rules.append(Rule(**{k: v for k, v in row.items() if k in allowed}))
+            except TypeError:
+                continue
+        save_rules(rules)
+    return _xyz_payload()
+
+
+@app.get("/skills/xyz/away")
+def xyz_away_get():
+    from skills.when_x_then_y import get_away
+
+    return {"away": get_away()}
+
+
+@app.post("/skills/xyz/away")
+def xyz_away_set(req: XyzAwayRequest):
+    from skills.when_x_then_y import set_away
+
+    return set_away(req.away)
 
 
 @app.post("/residency/startup")
