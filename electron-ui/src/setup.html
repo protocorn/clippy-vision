@@ -90,10 +90,34 @@
       padding: 22px 26px 18px;
       gap: 12px;
       min-height: 0;
-      overflow-y: auto;
+      overflow: hidden;
     }
 
     .screen.active { display: flex; }
+
+    .screen-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: scroll;
+      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .screen-scroll > * {
+      flex-shrink: 0;
+    }
+
+    #hw-content {
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    #hw-content.is-visible {
+      display: flex;
+    }
 
     .tagline {
       font-size: 14px;
@@ -147,7 +171,6 @@
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 12px;
-      overflow: hidden;
     }
 
     .card-head {
@@ -173,7 +196,37 @@
     .system-details > summary::after { content: '+'; font-size: 16px; font-weight: 400; }
     .system-details[open] > summary::after { content: '−'; }
     .system-details .summary-status { color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; }
-    .system-details-body { overflow-x: auto; }
+    .system-details-body { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    @media (max-width: 560px) {
+      .screen { padding: 16px 16px 14px; }
+      table.req thead { display: none; }
+      table.req tbody, table.req tr, table.req th, table.req td { display: block; width: 100%; }
+      table.req tr {
+        padding: 10px 0 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      table.req tr:last-child { border-bottom: none; }
+      table.req th {
+        width: auto;
+        padding: 0 0 6px;
+        color: var(--text);
+        font-weight: 650;
+      }
+      table.req td {
+        padding: 4px 0;
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      table.req td::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 500;
+      }
+      table.req td:empty { display: none; }
+    }
 
     table.req {
       width: 100%;
@@ -525,11 +578,12 @@
   </header>
 
   <div class="screen active" id="screen-hardware">
+    <div class="screen-scroll">
     <p class="tagline">Choose where Clippy should run AI. You can change this later in Settings.</p>
 
     <div id="hw-loading" class="hw-loading">Checking your system…</div>
 
-    <div id="hw-content" style="display:none; flex-direction:column; gap:12px; flex:1; min-height:0;">
+    <div id="hw-content">
       <div id="verdict" class="verdict ready" role="status">
         <div class="verdict-icon" id="verdict-icon">✓</div>
         <div>
@@ -537,6 +591,52 @@
           <div class="verdict-body" id="verdict-body"></div>
         </div>
       </div>
+
+      <details class="card system-details" id="system-details" open>
+        <summary class="card-head"><span>System check</span><span class="summary-status" id="hardware-summary">Checking…</span></summary>
+        <div class="system-details-body">
+          <table class="req">
+          <thead>
+            <tr>
+              <th>Resource</th>
+              <td>Minimum</td>
+              <td>Recommended</td>
+              <td class="col-yours">Your PC</td>
+              <td></td>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th>System RAM</th>
+              <td data-label="Minimum" id="min-ram">—</td>
+              <td data-label="Recommended" id="rec-ram">—</td>
+              <td class="col-yours" data-label="Your PC" id="you-ram">—</td>
+              <td data-label="Status"><span class="pill ok" id="pill-ram"><span class="dot"></span><span>OK</span></span></td>
+            </tr>
+            <tr>
+              <th id="memory-label">GPU VRAM</th>
+              <td data-label="Minimum" id="min-vram">—</td>
+              <td data-label="Recommended" id="rec-vram">—</td>
+              <td class="col-yours" data-label="Your PC" id="you-vram">—</td>
+              <td data-label="Status"><span class="pill ok" id="pill-vram"><span class="dot"></span><span>OK</span></span></td>
+            </tr>
+            <tr>
+              <th>Free disk</th>
+              <td data-label="Minimum" id="min-disk">—</td>
+              <td data-label="Recommended" id="rec-disk">—</td>
+              <td class="col-yours" data-label="Your PC" id="you-disk">—</td>
+              <td data-label="Status"><span class="pill ok" id="pill-disk"><span class="dot"></span><span>OK</span></span></td>
+            </tr>
+            <tr>
+              <th>OS</th>
+              <td colspan="2" data-label="Requirement" id="os-requirement">Windows 10/11 or macOS</td>
+              <td class="col-yours" data-label="Your PC" id="you-os">—</td>
+              <td data-label="Status"><span class="pill ok" id="pill-os"><span class="dot"></span><span>OK</span></span></td>
+            </tr>
+          </tbody>
+          </table>
+        </div>
+      </details>
 
       <div class="card provider-card">
         <div class="card-head">AI connection</div>
@@ -556,52 +656,6 @@
         </div>
       </div>
 
-      <details class="card system-details" id="system-details">
-        <summary class="card-head"><span>System check</span><span class="summary-status" id="hardware-summary">Checking…</span></summary>
-        <div class="system-details-body">
-          <table class="req">
-          <thead>
-            <tr>
-              <th>Resource</th>
-              <td>Minimum</td>
-              <td>Recommended</td>
-              <td class="col-yours">Your PC</td>
-              <td></td>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <th>System RAM</th>
-              <td id="min-ram">—</td>
-              <td id="rec-ram">—</td>
-              <td class="col-yours" id="you-ram">—</td>
-              <td><span class="pill ok" id="pill-ram"><span class="dot"></span><span>OK</span></span></td>
-            </tr>
-            <tr>
-              <th id="memory-label">GPU VRAM</th>
-              <td id="min-vram">—</td>
-              <td id="rec-vram">—</td>
-              <td class="col-yours" id="you-vram">—</td>
-              <td><span class="pill ok" id="pill-vram"><span class="dot"></span><span>OK</span></span></td>
-            </tr>
-            <tr>
-              <th>Free disk</th>
-              <td id="min-disk">—</td>
-              <td id="rec-disk">—</td>
-              <td class="col-yours" id="you-disk">—</td>
-              <td><span class="pill ok" id="pill-disk"><span class="dot"></span><span>OK</span></span></td>
-            </tr>
-            <tr>
-              <th>OS</th>
-              <td colspan="2" id="os-requirement">Windows 10/11 or macOS</td>
-              <td class="col-yours" id="you-os">—</td>
-              <td><span class="pill ok" id="pill-os"><span class="dot"></span><span>OK</span></span></td>
-            </tr>
-          </tbody>
-          </table>
-        </div>
-      </details>
-
       <p class="note" id="hardware-note">
         Use the managed Ollama default, or point Clippy at an existing local API to skip the chat-model download.
       </p>
@@ -611,6 +665,7 @@
         <span>I understand capture may lag or freeze other apps on this machine, and still want to continue.</span>
       </label>
     </div>
+    </div>
 
     <div class="hw-actions">
       <button type="button" class="primary" id="btn-continue" disabled>Continue setup</button>
@@ -618,6 +673,7 @@
   </div>
 
   <div class="screen" id="screen-install">
+    <div class="screen-scroll">
     <p class="tagline" id="install-tagline">Preparing Clippy. This only happens once.</p>
     <div class="verdict warn" id="recovery-banner" role="status" style="display:none; margin-bottom:12px;">
       <div class="verdict-icon">!</div>
@@ -687,6 +743,7 @@
       <summary>Install log</summary>
       <div class="log-wrap"><div id="log"></div></div>
     </details>
+    </div>
 
     <div class="bottom">
       <div id="bottom-left">
@@ -727,7 +784,7 @@
     function renderHardware(check) {
       hwCheck = check
       $('hw-loading').style.display = 'none'
-      $('hw-content').style.display = 'flex'
+      $('hw-content').classList.add('is-visible')
       configureSetupMode(check.mode)
 
       $('min-ram').textContent = gb(check.min.ramGb)

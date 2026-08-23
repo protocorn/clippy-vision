@@ -33,8 +33,11 @@ No fixed timeline, ordered by priority rather than by date.
 **Version 1.2.0 (Shipped)**
 - [x] Screen capture support for macOS along with a macOS release
 
-**Version 1.2.1 (Current)**
+**Version 1.2.1 (Shipped)**
 - [x] Capture cascade: accessibility APIs first (UI Automation on Windows, AXUIElement on macOS), RapidOCR when that text is empty or too thin. Shared entry points live in `core/accessibility_text.py` and `core/screenshot_enrichment.py`. Classification of the frame uses the extracted text (`build_capture_text_verdict`); it does not call a vision model.
+
+**Version 1.2.2 (Current)**
+- [x] Setup window: resizable, sized to the work area, and scrollable so the hardware table and Continue/Launch stay usable on small screens (GitHub #44).
 - [ ] Prove the cascade stays cheap: skip OCR when accessibility text already clears `is_useful_accessibility_text`, and add a `bench/` run that reports a11y-enough / OCR-used / empty-text rates. `bench/test_classification_cascade.py` today measures classification tiers (rules → features → LLM), not this text-source split. Without that number, OCR can quietly run on every frame and the efficiency win erodes.
 
 **Version 1.3.0 (Next in pipeline)**

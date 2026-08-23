@@ -1,5 +1,5 @@
 const {
-    app, BrowserWindow, Tray, Menu,
+    app, BrowserWindow, Tray, Menu, screen,
     nativeImage, ipcMain, Notification, shell, dialog, globalShortcut
 } = require('electron')
 const { spawn }  = require('child_process')
@@ -10,6 +10,13 @@ const https      = require('https')
 const net        = require('net')
 const os         = require('os')
 
+const IS_PACKAGED = app.isPackaged
+if (!IS_PACKAGED) {
+    // Installed Clippy and `npm start` share appId; without a separate userData
+    // the installer instance steals the lock and `npm start` exits instantly.
+    app.setPath('userData', path.join(__dirname, '..', '.dev-electron'))
+}
+
 // Keep one desktop process alive so a second launch focuses the existing tray app.
 if (!app.requestSingleInstanceLock()) {
     app.quit()
@@ -18,7 +25,6 @@ if (!app.requestSingleInstanceLock()) {
 // Packaged builds keep mutable state in Electron's user-data directory. During
 // development the repository data directory is used so local runs behave the
 // same way without copying state into an installation folder.
-const IS_PACKAGED     = app.isPackaged
 const ROOT            = IS_PACKAGED
     ? path.join(process.resourcesPath, 'clippy')
     : path.join(__dirname, '../..')
@@ -1114,12 +1120,24 @@ let allowMainClose = false
 function createSetupWindow() {
     // Setup is a separate, isolated window so install logs and the hardware
     // gate never compete with the main chat renderer.
+    if (setupWindow && !setupWindow.isDestroyed()) {
+        setupWindow.show()
+        setupWindow.focus()
+        return
+    }
     setupInstallStarted = false
+    const work = screen.getPrimaryDisplay().workAreaSize
+    const minWidth = Math.min(480, work.width)
+    const minHeight = Math.min(520, work.height)
+    const width = Math.min(720, Math.max(minWidth, work.width - 48))
+    const height = Math.min(840, Math.max(minHeight, work.height - 48))
     setupWindow = new BrowserWindow({
-        width: 640,
-        height: 720,
-        resizable: false,
-        maximizable: false,
+        width,
+        height,
+        minWidth,
+        minHeight,
+        resizable: true,
+        maximizable: true,
         icon: ICON_ACTIVE,
         webPreferences: {
             preload: path.join(__dirname, 'setup-preload.js'),

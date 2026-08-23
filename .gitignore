@@ -121,3 +121,4 @@ data/
 electron-ui/node_modules/
 electron-ui/dist/
 electron-ui/build/
+electron-ui/.dev-electron/
