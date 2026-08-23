@@ -135,10 +135,6 @@ class DataClearRequest(BaseModel):
     scopes: list[str]
 
 
-class XyzAwayRequest(BaseModel):
-    away: bool
-
-
 class XyzConfigRequest(BaseModel):
     enabled: bool | None = None
     rules: list[dict] | None = None
@@ -420,11 +416,10 @@ def status():
 
 def _xyz_payload():
     from dataclasses import asdict
-    from skills.when_x_then_y import get_away, load_config, load_rules
+    from skills.when_x_then_y import load_config, load_rules
 
     return {
         "enabled": load_config()["enabled"],
-        "away": get_away(),
         "rules": [asdict(rule) for rule in load_rules()],
     }
 
@@ -453,20 +448,6 @@ def xyz_put(req: XyzConfigRequest):
                 continue
         save_rules(rules)
     return _xyz_payload()
-
-
-@app.get("/skills/xyz/away")
-def xyz_away_get():
-    from skills.when_x_then_y import get_away
-
-    return {"away": get_away()}
-
-
-@app.post("/skills/xyz/away")
-def xyz_away_set(req: XyzAwayRequest):
-    from skills.when_x_then_y import set_away
-
-    return set_away(req.away)
 
 
 @app.post("/residency/startup")

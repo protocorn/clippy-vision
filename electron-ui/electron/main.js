@@ -322,7 +322,6 @@ let captureProcess = null
 let apiProcess    = null
 let ollamaProcess = null
 let isQuitting    = false
-let awayActive    = false
 
 app.on('second-instance', () => {
     if (setupWindow && !setupWindow.isDestroyed()) {
@@ -1427,53 +1426,6 @@ function toggleCapture() {
     else startCapture()
 }
 
-async function setAway(away) {
-    try {
-        const response = await fetch(apiUrl('/skills/xyz/away'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ away: Boolean(away) }),
-        })
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        const data = await response.json()
-        awayActive = Boolean(data.away)
-    } catch (error) {
-        console.error('[XYZ] away toggle failed', error)
-        return awayActive
-    }
-    rebuildTrayMenu()
-    if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('away-status-changed', awayActive)
-    }
-    if (Notification.isSupported()) {
-        new Notification({
-            title: 'Clippy Vision',
-            body: awayActive
-                ? 'Away — watching the focused tab for your skill rules'
-                : 'Back — tab refresh is paused',
-            silent: false,
-        }).show()
-    }
-    return awayActive
-}
-
-function toggleAway() {
-    return setAway(!awayActive)
-}
-
-async function refreshAwayFromApi() {
-    try {
-        const response = await fetch(apiUrl('/skills/xyz/away'))
-        if (!response.ok) return
-        const data = await response.json()
-        awayActive = Boolean(data.away)
-        rebuildTrayMenu()
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('away-status-changed', awayActive)
-        }
-    } catch (_) { /* API may still be starting */ }
-}
-
 
 
 
@@ -1483,7 +1435,6 @@ function rebuildTrayMenu() {
     if (!tray) return
     tray.setContextMenu(Menu.buildFromTemplate([
         { label: isCapturing() ? 'Stop Capture' : 'Start Capture', click: toggleCapture },
-        { label: awayActive ? "I'm Back" : "I'm Away", click: () => toggleAway() },
         { type: 'separator' },
         { label: 'Open Chat', click: showMainWindow },
         { type: 'separator' },
@@ -1511,9 +1462,6 @@ function createTray() {
 // Expose only narrow, validated desktop actions to the isolated renderer.
 ipcMain.handle('toggle-capture',     () => { toggleCapture();  return isCapturing() })
 ipcMain.handle('get-capture-status', () => isCapturing())
-ipcMain.handle('toggle-away',        () => toggleAway())
-ipcMain.handle('get-away-status',    () => awayActive)
-ipcMain.handle('set-away-status',    (_event, away) => setAway(Boolean(away)))
 ipcMain.handle('get-login-item', () => app.getLoginItemSettings().openAtLogin)
 ipcMain.handle('set-login-item', (_event, enabled) => {
     const openAtLogin = Boolean(enabled)
@@ -1767,7 +1715,6 @@ app.whenReady().then(async () => {
                 }
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     mainWindow.webContents.send('api-ready')
-                    refreshAwayFromApi()
                 }
             })
             .catch(() => {

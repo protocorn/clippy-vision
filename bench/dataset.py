@@ -36,7 +36,7 @@ FACTS = [
     (13, "f13", "Sahil uses Windows with PowerShell.", "os_shell"),
     (14, "f14", "Sahil's editor of choice is Cursor.", "editor"),
 
-    (15, "f15", "Clippy_Vision's vision classifier uses qwen3-vl to read screenshots.", "clippy"),
+    (15, "f15", "Clippy_Vision reads screen text with accessibility APIs and OCR, not a vision model.", "clippy"),
     (16, "f16", "Sahil is optimizing the SQL query generator in Clippy_Vision.", "clippy"),
     (17, "f17", "Clippy_Vision stores activity events in SQLite.", "clippy"),
 
@@ -83,7 +83,7 @@ QUERIES = [
     {"id": "q06", "q": "What project is Sahil building to monitor his activity?", "grade": "judge",
      "expect": ["Clippy_Vision"], "forbid": [], "answer": "Clippy_Vision, a personal AI activity monitor"},
     {"id": "q07", "q": "What models does Clippy_Vision use?", "grade": "judge",
-     "expect": ["qwen3"], "forbid": [], "answer": "local Ollama models, qwen3 and qwen3-vl"},
+     "expect": ["qwen3"], "forbid": [], "answer": "local Ollama text model qwen3:8b; screen text from accessibility APIs and OCR"},
     {"id": "q08", "q": "What other project does Sahil work on besides Clippy_Vision?", "grade": "det",
      "expect": ["Launchway"], "forbid": []},
     {"id": "q09", "q": "What does Sahil drink in the morning now?", "grade": "det",

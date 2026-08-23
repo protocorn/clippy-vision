@@ -175,10 +175,6 @@ contextBridge.exposeInMainWorld('clippy', {
 
     getCaptureStatus: () => ipcRenderer.invoke('get-capture-status'),
 
-    toggleAway: () => ipcRenderer.invoke('toggle-away'),
-
-    getAwayStatus: () => ipcRenderer.invoke('get-away-status'),
-
     getXyzSkill: async () => {
         const response = await fetch(await apiUrl('/skills/xyz'))
         if (!response.ok) throw new Error(await getErrorMessage(response))
@@ -193,10 +189,6 @@ contextBridge.exposeInMainWorld('clippy', {
         })
         if (!response.ok) throw new Error(await getErrorMessage(response))
         return response.json()
-    },
-
-    onAwayStatusChanged: (callback) => {
-        ipcRenderer.on('away-status-changed', (_event, away) => callback(away))
     },
 
     onCaptureStatusChanged: (callback) => {

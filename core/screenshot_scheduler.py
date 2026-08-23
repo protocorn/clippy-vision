@@ -8,8 +8,8 @@ import imagehash
 import mss
 from PIL import Image, ImageDraw
 
-# Vision owns screenshot scheduling and privacy redaction. Model inference is
-# performed by the downstream processor after a frame has been written.
+# Screenshot scheduling and privacy redaction. Text extraction is
+# performed by screenshot_processor after a frame has been written.
 try:
     from core.paths import get_screenshots_dir
 except ImportError:
@@ -303,10 +303,10 @@ def start_background_capture() -> None:
         purge_expired_screenshots()
         time.sleep(get_capture_settings()["background_interval_seconds"])
 
-def start_vision_daemon() -> threading.Thread:
+def start_screenshot_daemon() -> threading.Thread:
     # A daemon thread lets the desktop process exit without waiting on the
     # long-lived background loop.
     t = threading.Thread(target=start_background_capture, daemon=True)
     t.start()
-    print("Vision daemon started")
+    print("Screenshot scheduler started")
     return t

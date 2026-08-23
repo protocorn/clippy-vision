@@ -11,10 +11,8 @@ from core.backlog import (
     set_catch_up_running,
 )
 from core.capture_state import get_capture_status
-from core.model_residency import can_load_text, can_run_ocr, ensure_text_model
-from core.screenshot_enrichment import enrich_screenshot
+from core.model_residency import can_load_text, ensure_text_model
 from core.storage import conn
-from core.vision import get_screenshots_near
 
 from .tier_one_classifier import tier1_score
 from .tier_two_classifier import classify_with_llm
@@ -24,16 +22,6 @@ POLL_SECS = 2
 CATCH_UP_POLL_SECS = 5
 CATCH_UP_BATCH = 5
 DUPLICATE_LOOKBACK_SECS = 30 * 60
-MAX_VISION_WAIT_SECS = 300  # skip vision enrichment if event has been waiting longer than this
-
-DEFAULT_SCREENSHOT_VERDICT = {
-    "verdict": "not_interesting",
-    "score": 5,
-    "reason": "No screenshots found near event time",
-    "ocr_text": "",
-    "user_activity": "",
-    "suggested_action": None,
-}
 
 OCR_ONLY_VERDICT = {
     "verdict": "not_interesting",
@@ -59,23 +47,6 @@ def _print_verdict(tier: int, event: dict, verdict: dict):
     event_type   = event["event_type"]
     process_name = event["process_name"] or "unknown"
     print(f"  [TIER-{tier}] {verdict_str} (score={score}/10) | {event_type} in {process_name} | {reason}")
-
-def _print_capture_text_verdict(event: dict, verdict: dict):
-    verdict_str = verdict["verdict"].upper()
-    process_name = event["process_name"] or "unknown"
-    print(
-        f"  [SCREEN TEXT] {verdict_str} (score={verdict['score']}/10) | "
-        f"{event['event_type']} in {process_name} | {verdict['reason']}"
-    )
-    if verdict.get("user_activity"):
-        print(f"    activity : {verdict['user_activity']}")
-    if verdict.get("ocr_text"):
-        ocr = verdict["ocr_text"].replace("\n", " ")
-        preview = ocr[:120] + ("..." if len(ocr) > 120 else "")
-        print(f"    ocr      : {preview}")
-    if verdict.get("suggested_action"):
-        print(f"    next     : {verdict['suggested_action']}")
-
 
 
 def apply_verdict(event_id: str, verdict: dict):
@@ -315,35 +286,6 @@ def classify_event(event: dict, *, allow_tier2: bool = False):
     _print_verdict(2, event, verdict)
     apply_verdict(event["event_id"], verdict)
 
-def classify_capture_text_event(event: dict):
-    screenshots = get_screenshots_near(event["timestamp"], max_count=1)
-    if not screenshots:
-        _print_capture_text_verdict(event, DEFAULT_SCREENSHOT_VERDICT)
-        apply_vision_verdict(event["event_id"], DEFAULT_SCREENSHOT_VERDICT)
-        return
-
-
-    # Show timing context before sending to the model
-    event_ts   = time.strftime("%H:%M:%S", time.localtime(event["timestamp"]))
-    shot_ts_ms = int(screenshots[0].stem.split("_", 1)[0])
-    shot_ts    = time.strftime("%H:%M:%S", time.localtime(shot_ts_ms / 1000))
-    shot_delta = int(event["timestamp"] - shot_ts_ms / 1000)
-    vision_lag = int(time.time() - event["timestamp"])
-    print(
-        f"  [SCREEN TEXT] event@{event_ts} | screenshot@{shot_ts} "
-        f"(Δ{shot_delta:+d}s vs event) | processing lag {vision_lag}s"
-    )
-
-    try:
-        ocr_text, image_embedding, image_embedding_model = enrich_screenshot(screenshots[0])
-    except Exception as e:
-        print(f"  [SCREEN TEXT] Screenshot enrichment failed: {e}")
-        ocr_text, image_embedding, image_embedding_model = "", None, None
-
-    verdict = build_capture_text_verdict(event, ocr_text)
-    _print_capture_text_verdict(event, verdict)
-    apply_vision_verdict(event["event_id"], verdict, image_embedding, image_embedding_model, screenshots[0].name)
-
 
 def _fetch_status_rows(status: str, limit: int, newest_first: bool = False):
     order = "DESC" if newest_first else "ASC"
@@ -430,41 +372,6 @@ def catch_up_loop():
             classify_event(_row_to_event(row), allow_tier2=True)
         set_catch_up_running(False)
         time.sleep(1.0)
-
-
-def capture_text_worker_loop():
-    """Legacy OCR path kept for tests; production OCR is API screenshot_processor."""
-    print("[worker] Screen text worker started")
-    while True:
-        if not can_run_ocr():
-            time.sleep(5)
-            continue
-        rows = conn.execute(
-            """SELECT event_id, timestamp, event_type,
-                      process_name, current_window_title, active_url,
-                      previous_process_name, previous_window_title,
-                      summary, payload
-               FROM events
-               WHERE classification_status = 'screenshot_only'
-               ORDER BY timestamp DESC
-               LIMIT 5"""
-        ).fetchall()
-        if not rows:
-            time.sleep(5)
-            continue
-        for row in rows:
-            event = _row_to_event(row)
-            age_secs = time.time() - event["timestamp"]
-            if age_secs > MAX_VISION_WAIT_SECS:
-                conn.execute(
-                    "UPDATE events SET classification_status='done' WHERE event_id=?",
-                    (event["event_id"],)
-                )
-                conn.commit()
-                event_ts = time.strftime("%H:%M:%S", time.localtime(event["timestamp"]))
-                print(f"  [SCREEN TEXT] Skipped stale event@{event_ts} ({age_secs:.0f}s old > {MAX_VISION_WAIT_SECS}s limit)")
-                continue
-            classify_capture_text_event(event)
 
 
 def start_live_worker():

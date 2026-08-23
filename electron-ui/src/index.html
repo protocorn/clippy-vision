@@ -771,27 +771,6 @@
       animation: pulse 1.2s ease-in-out infinite;
     }
 
-    #away-btn {
-      padding: 6px 14px;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-family: inherit;
-      background: var(--panel);
-      color: var(--muted);
-      border: 1px solid var(--border);
-    }
-
-    #away-btn.active {
-      background: var(--success-bg);
-      color: var(--success);
-      border-color: var(--success-border);
-    }
-
     .skill-check {
       display: flex;
       align-items: center;
@@ -1797,9 +1776,6 @@
           <span class="capture-dot"></span>
           <span id="capture-label">Start Capture</span>
         </button>
-        <button id="away-btn" title="While Away, Clippy can watch the focused tab and optionally refresh it">
-          <span id="away-label">I'm Away</span>
-        </button>
       </div>
     </header>
 
@@ -1964,7 +1940,7 @@
         <div class="skill-card-head">
           <div class="skill-card-text">
             <div class="skill-card-title"><strong>When you see X, do Y</strong></div>
-            <p>Watch a website in the background, or the focused tab while you are Away. Optional refresh only runs when you allow it and are idle.</p>
+            <p>Watch a website in the background, or the focused tab when you are not typing. Optional F5 waits 10 minutes with no mouse or keyboard — it cannot tell reading from stepped-away, so leave it off unless a reload is safe.</p>
           </div>
           <label class="toggle">
             <input type="checkbox" id="skill-see-x-toggle" />
@@ -2050,8 +2026,6 @@
     const settingsBack = document.getElementById('settings-back')
     const captureBtn = document.getElementById('capture-btn')
     const captureLabel = document.getElementById('capture-label')
-    const awayBtn = document.getElementById('away-btn')
-    const awayLabel = document.getElementById('away-label')
     const chatMain = document.getElementById('chat-main')
     const welcomeInput = document.getElementById('welcome-input')
     const welcomeSend = document.getElementById('welcome-send')
@@ -2142,7 +2116,6 @@
         generator_prompt: '',
         allow_refresh: false,
         refresh_seconds: 120,
-        refresh_only_when_away: true,
       }
     }
 
@@ -2295,7 +2268,7 @@
           skill.rules[index].allow_refresh = refreshBox.checked
           markRulesDirty()
         })
-        refreshLabel.append(refreshBox, document.createTextNode('Allow F5 while Away (only if idle)'))
+        refreshLabel.append(refreshBox, document.createTextNode('Allow F5 after 10 min with no mouse/keyboard (reading still counts)'))
         refreshRow.append(refreshLabel)
 
         const metaRow = document.createElement('div')
@@ -2343,7 +2316,6 @@
       skillsState.skills['see-x-do-y'].rules = Array.isArray(data.rules) ? data.rules : []
       xyzSavedSnapshot = JSON.stringify(skillsState.skills['see-x-do-y'].rules)
       setSkillSaveStatus('')
-      setAwayUI(!!data.away)
     }
 
     async function openSkills() {
@@ -3073,7 +3045,6 @@
         showView(chatView)
         const active = await window.clippy.getCaptureStatus()
         setCaptureUI(active)
-        try { setAwayUI(await window.clippy.getAwayStatus()) } catch (_) { /* ignore */ }
         setChatMode('welcome')
         syncDrawerLayout()
       } catch (error) {
@@ -3153,7 +3124,6 @@
           showView(chatView)
           const active = await window.clippy.getCaptureStatus()
           setCaptureUI(active)
-          try { setAwayUI(await window.clippy.getAwayStatus()) } catch (_) { /* ignore */ }
           setChatMode('welcome')
           syncDrawerLayout()
         } else {
@@ -3233,27 +3203,12 @@
       }
     }
 
-    function setAwayUI(away) {
-      awayBtn.classList.toggle('active', !!away)
-      awayLabel.textContent = away ? "I'm Back" : "I'm Away"
-    }
-
     captureBtn.addEventListener('click', async () => {
       captureBtn.disabled = true
       try {
         await window.clippy.toggleCapture()
       } finally {
         captureBtn.disabled = false
-      }
-    })
-
-    awayBtn.addEventListener('click', async () => {
-      awayBtn.disabled = true
-      try {
-        const away = await window.clippy.toggleAway()
-        setAwayUI(away)
-      } finally {
-        awayBtn.disabled = false
       }
     })
 
@@ -3284,9 +3239,6 @@
     // keep button in sync when tray toggles capture
     window.clippy.onCaptureStatusChanged((active) => {
       setCaptureUI(active)
-    })
-    window.clippy.onAwayStatusChanged((away) => {
-      setAwayUI(away)
     })
 
     function setStatus(el, text, kind) {

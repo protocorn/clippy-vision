@@ -37,7 +37,7 @@ from core.accessibility_text import (
 from core.platform_support import get_window_metadata
 from core.privacy_settings import is_clippy_window, should_redact_window
 from core.screenshot_enrichment import choose_screen_text
-from core.vision import _foreground_accessibility_text
+from core.screenshot_scheduler import _foreground_accessibility_text
 
 POLL_SECS = 5
 

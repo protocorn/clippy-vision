@@ -32,15 +32,12 @@ except ImportError:
     from paths import get_data_dir
 
 TEXT_MODEL = "qwen3:8b"
-VL_MODEL = "qwen3-vl:4b"
 # Ollama's model runner across versions and platforms.
 _RUNNER_PROCESS_NAMES = ("llama-server", "ollama_llama_server")
 
-VisionPolicy = Literal["idle", "pinned", "on_demand"]
+VisionPolicy = Literal["idle"]
 
 _GB = 1024**3
-_EST_VL = 3.5 * _GB
-_FREE_FLOOR = 3.5 * _GB
 _OCR_FLOOR = 0.5 * _GB
 _LIGHT_FLOOR = 1.0 * _GB
 _TEXT_FLOOR = 1.5 * _GB
@@ -48,19 +45,15 @@ _TEXT_FLOOR = 1.5 * _GB
 # what raises "paging file is too small" (os error 1455) and ONNX bad_alloc,
 # even while physical RAM still looks free.
 _COMMIT_PRESSURE_PCT = 75.0
-_PRESSURE_INTERVAL_S = 30
 _PS_CACHE_TTL_S = 5.0
 
 KEEP_ALIVE_PINNED = "1h"
-KEEP_ALIVE_VL_EPHEMERAL = "5m"
 KEEP_ALIVE_UNLOAD = 0
 
 _OLLAMA = base_url()
 _STATE_NAME = "model_residency.json"
 
 _policy: VisionPolicy = "idle"
-_monitor_stop = threading.Event()
-_monitor_thread: threading.Thread | None = None
 _lock = threading.Lock()
 _ps_cache: tuple[float, set[str]] | None = None
 _last_warm_attempt_mono = 0.0
@@ -81,12 +74,6 @@ def _available() -> int:
 
 def _mb(n: int) -> int:
     return round(n / (1024 * 1024))
-
-
-def _can_pin_vision(available: int | None = None) -> bool:
-    """True if VL plus a free-RAM floor still fits."""
-    free = _available() if available is None else available
-    return free >= _EST_VL + _FREE_FLOOR
 
 
 def _commit_pressured() -> bool:
@@ -227,14 +214,7 @@ def load_residency() -> dict:
         _policy = "idle"
         return {"vision": _policy}
 
-    vision = data.get("vision") or data.get("mode")  # mode: legacy dual/single
-    if vision == "dual":
-        vision = "pinned"
-    elif vision == "single":
-        vision = "on_demand"
-    if vision not in ("idle", "pinned", "on_demand"):
-        vision = "idle"
-    _policy = vision  # type: ignore[assignment]
+    _policy = "idle"
     data["vision"] = _policy
     return data
 
@@ -254,13 +234,10 @@ def _persist(vision: VisionPolicy, **extra: Any) -> dict:
 
 
 def keep_alive_for(model: str) -> str | int:
-    if "vl" not in (model or "").lower():
-        return KEEP_ALIVE_PINNED
-    if _policy == "pinned":
-        return KEEP_ALIVE_PINNED
-    if _policy == "on_demand":
-        return KEEP_ALIVE_VL_EPHEMERAL
-    return KEEP_ALIVE_UNLOAD
+    # Never keep a leftover vision-language runner in RAM.
+    if "vl" in (model or "").lower():
+        return KEEP_ALIVE_UNLOAD
+    return KEEP_ALIVE_PINNED
 
 
 def _ollama_post(path: str, body: dict, timeout: float = 90) -> None:
@@ -359,55 +336,6 @@ def ensure_text_model(*, force: bool = False) -> bool:
     return text_model_loaded(TEXT_MODEL)
 
 
-def _unload_vision() -> None:
-    print(f"[residency] unload {VL_MODEL}")
-    try:
-        _ollama_post(
-            "/api/generate",
-            {
-                "model": VL_MODEL,
-                "prompt": "ping",
-                "stream": False,
-                "keep_alive": KEEP_ALIVE_UNLOAD,
-            },
-            timeout=30,
-        )
-    except OSError as e:
-        print(f"[residency] unload failed: {e}")
-
-
-def _stop_monitor() -> None:
-    global _monitor_thread
-    _monitor_stop.set()
-    _monitor_thread = None
-
-
-def _pressure_loop() -> None:
-    """While vision is pinned, demote to on-demand if free RAM collapses."""
-    while not _monitor_stop.wait(_PRESSURE_INTERVAL_S):
-        with _lock:
-            if _policy != "pinned":
-                return
-            free = _available()
-            if free >= _FREE_FLOOR:
-                continue
-            print(f"[residency] pressure free~{free / _GB:.1f}GB < floor "
-                  f"{_FREE_FLOOR / _GB:.1f}GB - demoting vision to on_demand")
-            _unload_vision()
-            _persist("on_demand", reason="ram_pressure")
-            return
-
-
-def _start_monitor() -> None:
-    global _monitor_thread
-    _stop_monitor()
-    _monitor_stop.clear()
-    _monitor_thread = threading.Thread(
-        target=_pressure_loop, daemon=True, name="residency-pressure",
-    )
-    _monitor_thread.start()
-
-
 def warm_for_startup() -> dict:
     """App/API launch: pin text only. Do not load vision.
 
@@ -415,8 +343,6 @@ def warm_for_startup() -> dict:
     Tries to load the text model even when free RAM is under the cold-load
     floor — refusing forever leaves summarizer/distil with no work path.
     """
-    with _lock:
-        _stop_monitor()
     before = _available()
     print(f"[residency] startup warm (text only)  free~{before / _GB:.1f}GB")
 
@@ -483,14 +409,12 @@ def warm_for_startup() -> dict:
 def on_capture_start() -> dict:
     """Keep capture model-free; accessibility and OCR handle screen text."""
     with _lock:
-        _stop_monitor()
         return _persist("idle", reason="capture_text_only", vision_warm_skipped=True)
 
 
 def on_capture_stop() -> dict:
     """Record the idle state; capture never loads a vision model."""
     with _lock:
-        _stop_monitor()
         return _persist("idle", reason="capture_stop")
 
 

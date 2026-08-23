@@ -20,12 +20,12 @@ try:
     from core.baseline import compute_deviation, update_baseline
     from core.events import Event, WindowMetadata, generate_summary, get_session_id
     from core.storage import purge_expired, store_event
-    from core.vision import on_activity_event, start_vision_daemon
+    from core.screenshot_scheduler import on_activity_event, start_screenshot_daemon
 except ImportError:
     from baseline import compute_deviation, update_baseline
     from events import Event, WindowMetadata, generate_summary, get_session_id
     from storage import purge_expired, store_event
-    from vision import on_activity_event, start_vision_daemon
+    from screenshot_scheduler import on_activity_event, start_screenshot_daemon
 import uuid
 from datetime import datetime
 
@@ -84,7 +84,7 @@ purge_expired()
 # Deferred Tier-2 catch-up, summarizer, screenshot OCR, and distil run in the
 # API process so backlog drains even when capture is paused.
 start_worker()
-start_vision_daemon()
+start_screenshot_daemon()
 
 
 # A burst ends after a short pause; grouping keystrokes keeps activity records

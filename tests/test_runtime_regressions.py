@@ -75,7 +75,7 @@ from core.storage import (
     store_summary,
 )
 from core.summarizer import _build_prompt
-from core.vision import _foreground_accessibility_text, get_screenshots_near
+from core.screenshot_scheduler import _foreground_accessibility_text, get_screenshots_near
 
 
 def make_event(event_id: str, event_type: str = "typing_burst", timestamp: float | None = None) -> Event:
@@ -119,28 +119,28 @@ class _FakeProcess:
 class RuntimeRegressionTests(unittest.TestCase):
     def test_private_foreground_window_never_exposes_accessibility_text(self):
         metadata = {"process_name": "Slack", "current_window_title": "Private channel"}
-        with patch("core.vision.get_window_metadata", return_value=metadata), patch(
-            "core.vision.should_redact_window", return_value=True
-        ), patch("core.vision.extract_accessibility_text") as extract_text:
+        with patch("core.screenshot_scheduler.get_window_metadata", return_value=metadata), patch(
+            "core.screenshot_scheduler.should_redact_window", return_value=True
+        ), patch("core.screenshot_scheduler.extract_accessibility_text") as extract_text:
             self.assertEqual(_foreground_accessibility_text(), "")
         extract_text.assert_not_called()
 
     def test_accessibility_text_is_discarded_if_foreground_window_changes(self):
         before = {"process_name": "Code", "current_window_title": "Editor", "active_url": None}
         after = {"process_name": "Slack", "current_window_title": "Private", "active_url": None}
-        with patch("core.vision.get_window_metadata", side_effect=[before, after]), patch(
-            "core.vision.should_redact_window", return_value=False
-        ), patch("core.vision.is_clippy_window", return_value=False), patch(
-            "core.vision.extract_accessibility_text", return_value="editor text"
+        with patch("core.screenshot_scheduler.get_window_metadata", side_effect=[before, after]), patch(
+            "core.screenshot_scheduler.should_redact_window", return_value=False
+        ), patch("core.screenshot_scheduler.is_clippy_window", return_value=False), patch(
+            "core.screenshot_scheduler.extract_accessibility_text", return_value="editor text"
         ):
             self.assertEqual(_foreground_accessibility_text(), "")
 
     def test_accessibility_text_is_kept_for_stable_safe_window(self):
         metadata = {"process_name": "Code", "current_window_title": "Editor", "active_url": None}
-        with patch("core.vision.get_window_metadata", side_effect=[metadata, metadata]), patch(
-            "core.vision.should_redact_window", return_value=False
-        ), patch("core.vision.is_clippy_window", return_value=False), patch(
-            "core.vision.extract_accessibility_text", return_value="editor text"
+        with patch("core.screenshot_scheduler.get_window_metadata", side_effect=[metadata, metadata]), patch(
+            "core.screenshot_scheduler.should_redact_window", return_value=False
+        ), patch("core.screenshot_scheduler.is_clippy_window", return_value=False), patch(
+            "core.screenshot_scheduler.extract_accessibility_text", return_value="editor text"
         ):
             self.assertEqual(_foreground_accessibility_text(), "editor text")
 

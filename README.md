@@ -63,14 +63,14 @@ Use Clippy when you need your own work history back. Use Claude or ChatGPT when 
 
 ## Download
 
-Click your platform to download **v1.2.0** directly:
+Click your platform to download **v1.2.1** directly:
 
 <p align="center">
-  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.0/ClippyVision-Windows-Setup-1.2.0.exe"><img src="https://img.shields.io/badge/Download-Windows%20v1.2.0-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows v1.2.0" /></a>
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.1/ClippyVision-Windows-Setup-1.2.1.exe"><img src="https://img.shields.io/badge/Download-Windows%20v1.2.1-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows v1.2.1" /></a>
   &nbsp;
-  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.0/ClippyVision-macOS-arm64-1.2.0.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Apple%20Silicon%20v1.2.0-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Apple Silicon v1.2.0" /></a>
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.1/ClippyVision-macOS-arm64-1.2.1.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Apple%20Silicon%20v1.2.1-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Apple Silicon v1.2.1" /></a>
   &nbsp;
-  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.0/ClippyVision-macOS-x64-1.2.0.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Intel%20v1.2.0-555555?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Intel v1.2.0" /></a>
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.1/ClippyVision-macOS-x64-1.2.1.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Intel%20v1.2.1-555555?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Intel v1.2.1" /></a>
 </p>
 
 <p align="center">
@@ -174,7 +174,7 @@ No dates attached to any of it. [PROJECT_VISION.md](PROJECT_VISION.md) has the c
 - Clipboard contents (copy and paste events)
 - Context switches (window focus changes)
 - Keystroke dynamics with per-app adaptive baseline
-- Screenshots (taken proactively on activity bursts)
+- Screenshots (taken proactively on activity bursts by `core/screenshot_scheduler.py`)
 
 Every captured event passes through a three-tier classification pipeline before being stored:
 

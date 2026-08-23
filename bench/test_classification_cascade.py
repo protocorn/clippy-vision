@@ -20,7 +20,7 @@ from classifier.tier_zero_classifier import tier_zero_classifier
 from core.storage import conn
 
 
-def test_cascade_efficiency(limit=1000):
+def test_classification_cascade(limit=1000):
     """
     Run historical events through the cascade and measure filtering at each tier.
     """
@@ -101,4 +101,4 @@ def test_cascade_efficiency(limit=1000):
 
 
 if __name__ == "__main__":
-    test_cascade_efficiency(limit=1000)
+    test_classification_cascade(limit=1000)

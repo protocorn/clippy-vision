@@ -1,6 +1,6 @@
 """
-Benchmark: Vision Deduplication Efficiency
-Measures how much pHash clustering reduces vision inference calls.
+Benchmark: Screenshot pHash Dedup
+Measures how much perceptual-hash clustering reduces frames to enrich.
 """
 
 import sys
@@ -21,7 +21,7 @@ PHASH_THRESHOLD = 2  # same as production
 SCREENSHOT_DIR = Path(__file__).parent.parent / "core" / "data" / "screenshots"
 
 
-def test_vision_dedup():
+def test_screenshot_dedup():
     """
     Compute pHash for all screenshots and group by similarity.
     Measures compression ratio achieved by deduplication.
@@ -92,14 +92,14 @@ def test_vision_dedup():
     print(f"  Duplicate screenshots:    {total - unique_groups}")
     print(f"  Largest group size:       {group_sizes[0] if group_sizes else 0}")
     print(f"\n{'='*60}")
-    print(f"  ** Vision Reduction:      {reduction_pct:.1f}%")
+    print(f"  ** Frame Reduction:       {reduction_pct:.1f}%")
     print(f"{'='*60}\n")
     
     print(f"Resume Bullet:")
-    print(f'   "Reduced vision processing by {reduction_pct:.0f}% through perceptual')
+    print(f'   "Reduced screenshot processing by {reduction_pct:.0f}% through perceptual')
     print(f'    hashing and Union-Find clustering of duplicate screenshots"')
     print()
 
 
 if __name__ == "__main__":
-    test_vision_dedup()
+    test_screenshot_dedup()

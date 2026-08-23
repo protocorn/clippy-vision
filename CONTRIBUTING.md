@@ -122,7 +122,7 @@ Before submitting a PR:
   - [ ] Linux support
 - [ ] Wire Settings → Access control UI to the existing privacy API (see open `good first issue`s)
 - [ ] Automated tests for classification pipeline
-- [ ] Performance optimization for vision processing
+- [ ] Performance optimization for screenshot capture and OCR
 - [ ] Better error handling and logging (e.g. surface API `detail` in the UI)
 
 ### Medium Priority

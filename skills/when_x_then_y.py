@@ -5,8 +5,9 @@ Y = keywords/phrases (literal) and/or intent (LLM on page diff)
 Z = alert callback (+ optional user-defined LLM action on match)
 
 Background: Clippy HTTP-fetches the URL on a timer.
-Foreground: Clippy reads the focused tab when its URL matches the rule.
-  Optional F5 is allowed only when the user is Away, idle, and opted in.
+Foreground: Clippy reads the focused tab when its URL matches the rule
+  and there has been no mouse/keyboard for a few seconds (not mid-typing).
+  Optional F5 waits much longer: HID idle cannot tell "reading" from "gone".
 
 Change detection uses a rolling baseline per rule+channel:
   - first observation seeds baseline (no alert)
@@ -45,14 +46,15 @@ USER_AGENT = "ClippyVision-XYZ/0.1 (local; +https://github.com/protocorn/clippy-
 STATE_FILE = get_data_dir() / "xyz_skill_state.json"
 RULES_FILE = get_data_dir() / "xyz_skill_rules.json"
 CONFIG_FILE = get_data_dir() / "xyz_skill_config.json"
-AWAY_FILE = get_data_dir() / "xyz_away.json"
 MODEL = "qwen3:8b"
 LLM_CONTEXT_MAX_CHARS = 8000
 LLM_SMALL_PAGE_CHARS = 4000
-REFRESH_IDLE_SECONDS = 20.0
+# Snapshot: skip while the user is typing/clicking. Reading still looks idle.
+FOREGROUND_IDLE_SECONDS = 8.0
+# F5 destroys scroll/forms. Require a long HID gap; 20s is a normal read pause.
+REFRESH_IDLE_SECONDS = 10 * 60.0
 REFRESH_WAIT_SECONDS = 8.0
 REFRESH_RELOAD_TIMEOUT = 14.0
-FOREGROUND_IDLE_SECONDS = 8.0
 
 INTENT_SCHEMA = {
     "type": "object",
@@ -85,7 +87,6 @@ class Rule:
     generator_prompt: str = ""  # optional; user text from UI, run as-is when a match fires
     allow_refresh: bool = False
     refresh_seconds: int = 120
-    refresh_only_when_away: bool = True
 
 
 @dataclass
@@ -163,18 +164,6 @@ def save_config(values: dict) -> dict:
 
 def is_xyz_enabled() -> bool:
     return load_config()["enabled"]
-
-
-def get_away() -> bool:
-    raw = _load_json(AWAY_FILE, {})
-    return bool(raw.get("away", False))
-
-
-def set_away(away: bool) -> dict:
-    payload = {"away": bool(away), "updated_at": time.time()}
-    _save_json(AWAY_FILE, payload)
-    print(f"[XYZ] away={'on' if payload['away'] else 'off'}")
-    return payload
 
 
 def rule_is_valid(rule: Rule) -> bool:
@@ -357,8 +346,12 @@ def url_matches(rule_url: str, active_url: str | None) -> bool:
     return active_path == rule_path or active_path.startswith(rule_path.rstrip("/") + "/")
 
 
-def idle_seconds() -> float:
-    """Seconds since last keyboard/mouse input. Huge value if unknown."""
+def idle_seconds() -> float | None:
+    """Seconds since last mouse/keyboard HID event, or None if unknown.
+
+    This is not 'user stepped away'. Reading, watching a video, or staring at
+    a chart produces the same signal as leaving the desk.
+    """
     try:
         from core.platform_support import IS_WINDOWS
     except ImportError:
@@ -374,7 +367,15 @@ def idle_seconds() -> float:
         if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
             millis = ctypes.windll.kernel32.GetTickCount() - info.dwTime
             return max(0.0, millis / 1000.0)
-    return 10**9
+        return None
+    return None
+
+
+def _input_quiet_for(minimum_seconds: float, *, if_unknown: bool) -> bool:
+    idle = idle_seconds()
+    if idle is None:
+        return if_unknown
+    return idle >= minimum_seconds
 
 
 def send_refresh() -> bool:
@@ -761,13 +762,11 @@ def check_rule(rule: Rule, state: dict, alert: AlertFn = default_alert) -> None:
 
 
 def _maybe_refresh(rule: Rule, state: dict, active_url: str | None) -> bool:
-    """Reload the focused tab if the user opted in and is away + idle."""
+    """Reload the focused tab if the user opted in and is idle."""
     if not rule.allow_refresh:
         return False
-    if rule.refresh_only_when_away and not get_away():
-        return False
-    if idle_seconds() < REFRESH_IDLE_SECONDS:
-        print(f"[XYZ] skip refresh for {rule.id}: user not idle")
+    if not _input_quiet_for(REFRESH_IDLE_SECONDS, if_unknown=False):
+        print(f"[XYZ] skip refresh for {rule.id}: need {int(REFRESH_IDLE_SECONDS)}s with no mouse/keyboard")
         return False
     if not url_matches(rule.source_url, active_url):
         return False
@@ -810,13 +809,10 @@ def check_foreground_rule(rule: Rule, state: dict, alert: AlertFn = default_aler
 
     title, text, active_url = fetch_foreground_page()
     if not url_matches(rule.source_url, active_url):
-        if get_away():
-            print(f"[XYZ] skip foreground {rule.id}: focused URL is {active_url or '(none)'}")
         return
 
-    away = get_away()
-    if not away and idle_seconds() < FOREGROUND_IDLE_SECONDS:
-        print(f"[XYZ] skip foreground {rule.id}: user is active")
+    if not _input_quiet_for(FOREGROUND_IDLE_SECONDS, if_unknown=True):
+        print(f"[XYZ] skip foreground {rule.id}: mouse/keyboard just used")
         return
 
     pre_id = content_id(active_url or "", text)
