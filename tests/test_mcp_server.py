@@ -36,8 +36,18 @@ class McpServerSmokeTests(unittest.IsolatedAsyncioTestCase):
                     await session.initialize()
                     listed = await session.list_tools()
                     tool_names = {tool.name for tool in listed.tools}
-                    self.assertIn("search_sessions_tool", tool_names)
-                    self.assertIn("recall_memory_tool", tool_names)
+                    self.assertEqual(
+                        {
+                            "search_sessions_tool",
+                            "search_events_tool",
+                            "recall_memory_tool",
+                            "fetch_cluster_tool",
+                            "save_identity_tool",
+                            "save_note_tool",
+                            "delete_note_tool",
+                        },
+                        tool_names,
+                    )
 
                     search = await session.call_tool(
                         "search_sessions_tool",
