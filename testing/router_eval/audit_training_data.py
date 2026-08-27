@@ -7,8 +7,8 @@ examples are heavily templated, eval accuracy overstates real performance.
 import json
 import re
 from collections import Counter
-from pathlib import Path
 from difflib import SequenceMatcher
+from pathlib import Path
 
 ROOT = Path(__file__).parent.parent.parent
 FILES = [ROOT / "core" / "data" / "router_seed.jsonl",

@@ -5,7 +5,8 @@ so judging cost never contaminates a strategy's own cost score.
 import json
 
 import _paths  # noqa: F401
-from core.llm_gateway import gateway, Priority
+
+from core.llm_gateway import Priority, gateway
 
 _JUDGE_MODEL = "qwen3:8b"
 _JUDGE_SYS = (

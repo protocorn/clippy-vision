@@ -30,7 +30,7 @@ IS_MACOS = PLATFORM == "darwin"
 _MAC_CACHE_TTL_SECONDS = 0.75
 _mac_cache_lock = threading.Lock()
 _mac_cache_at = 0.0
-_mac_cache: tuple[Optional[WindowMetadata], Optional[tuple[int, int, int, int]]] = (None, None)
+_mac_cache: tuple[WindowMetadata | None, tuple[int, int, int, int] | None] = (None, None)
 
 
 def platform_label() -> str:
@@ -58,7 +58,7 @@ def _run_command(args: list[str], timeout: float = 1.5) -> str:
     return (result.stdout or "").strip()
 
 
-def _windows_metadata() -> Optional[WindowMetadata]:
+def _windows_metadata() -> WindowMetadata | None:
     try:
         import psutil
         import uiautomation as auto
@@ -84,7 +84,7 @@ def _windows_metadata() -> Optional[WindowMetadata]:
     except Exception:
         return None
 
-def _windows_browser_url(window: Any, class_name: str) -> Optional[str]:
+def _windows_browser_url(window: Any, class_name: str) -> str | None:
     """Read the address bar without making UI Automation a hard dependency elsewhere."""
     try:
         address = None
@@ -138,7 +138,7 @@ _MAC_BROWSER_SCRIPTS = {
 }
 
 
-def _mac_metadata() -> tuple[Optional[WindowMetadata], Optional[tuple[int, int, int, int]]]:
+def _mac_metadata() -> tuple[WindowMetadata | None, tuple[int, int, int, int] | None]:
     raw = _run_command(["osascript", "-e", _MAC_FRONTMOST_SCRIPT], timeout=2.0)
     if not raw:
         return None, None
@@ -146,7 +146,7 @@ def _mac_metadata() -> tuple[Optional[WindowMetadata], Optional[tuple[int, int, 
     lines = raw.splitlines()
     process_name = (lines[0] if lines else "unknown").strip() or "unknown"
     title = (lines[1] if len(lines) > 1 else "").strip()
-    bounds: Optional[tuple[int, int, int, int]] = None
+    bounds: tuple[int, int, int, int] | None = None
     if len(lines) > 2 and lines[2].strip():
         try:
             values = [int(float(x.strip())) for x in lines[2].split(",")]
@@ -171,7 +171,7 @@ def _mac_metadata() -> tuple[Optional[WindowMetadata], Optional[tuple[int, int, 
     )
 
 
-def get_window_metadata() -> Optional[WindowMetadata]:
+def get_window_metadata() -> WindowMetadata | None:
     """Return the frontmost app/window, with a short cache to avoid shell churn on macOS."""
     # Keep the capture pipeline platform-neutral; only this adapter knows how
     # to ask each operating system for its frontmost application.
@@ -205,7 +205,7 @@ def get_window_metadata() -> Optional[WindowMetadata]:
     )
 
 
-def get_foreground_window_bounds() -> Optional[tuple[int, int, int, int]]:
+def get_foreground_window_bounds() -> tuple[int, int, int, int] | None:
     """Return macOS front-window bounds in logical screen coordinates."""
     # The redaction layer calls this after metadata so both values come from
     # the same cached AppleScript observation.
@@ -216,7 +216,7 @@ def get_foreground_window_bounds() -> Optional[tuple[int, int, int, int]]:
         return _mac_cache[1]
 
 
-def window_key(metadata: Optional[WindowMetadata]) -> str:
+def window_key(metadata: WindowMetadata | None) -> str:
     if not metadata:
         return "unknown"
     return "\x1f".join(
@@ -225,7 +225,7 @@ def window_key(metadata: Optional[WindowMetadata]) -> str:
     )
 
 
-def get_clipboard_text() -> Optional[str]:
+def get_clipboard_text() -> str | None:
     """Read the native clipboard, returning a bounded text payload."""
     try:
         if IS_WINDOWS:

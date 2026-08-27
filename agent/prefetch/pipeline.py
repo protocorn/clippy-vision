@@ -23,6 +23,7 @@ EMBED_MODEL = "nomic-embed-text"
 
 # Routes that have real prefetch implementations
 PREFETCHABLE = {"time_anchored", "topic_search", "specific_recall", "memory_query"}
+MAX_PREFETCH_CONTEXT_CHARS = 8000
 
 
 def _fetch_single_route(
@@ -34,7 +35,7 @@ def _fetch_single_route(
 ) -> str:
     """Execute one prefetch route and return its string result."""
     if route == "memory_query":
-        return memory_query(q_vec=q_vec)
+        return memory_query(query=query, q_vec=q_vec)
 
     if route == "topic_search":
         return topic_search(combined, q_vec=q_vec, temporal_range=temporal_range)
@@ -80,10 +81,12 @@ def run_prefetch(decision, query: str, combined: str, q_vec: list) -> str:
 
     # ── Single route — no thread overhead ────────────────────────────────────
     if len(routes_to_run) == 1:
-        return _fetch_single_route(routes_to_run[0], temporal_range, query, combined, q_vec)
+        return _limit_prefetch_context(
+            _fetch_single_route(routes_to_run[0], temporal_range, query, combined, q_vec)
+        )
 
+    results: dict[str, str] = {}
     # ── Multiple routes — run in parallel ────────────────────────────────────
-    parts: list[str] = []
     with ThreadPoolExecutor(max_workers=len(routes_to_run)) as ex:
         future_to_route = {
             ex.submit(_fetch_single_route, r, temporal_range, query, combined, q_vec): r
@@ -93,10 +96,23 @@ def run_prefetch(decision, query: str, combined: str, q_vec: list) -> str:
             route  = future_to_route[future]
             result = future.result()
             print(f"[prefetch]   {route} → {len(result)} chars")
-            if result:
-                parts.append(result)
+            results[route] = result
 
-    return "\n\n---\n\n".join(parts)
+    combined_context = "\n\n---\n\n".join(
+        results[route] for route in routes_to_run if results.get(route)
+    )
+    return _limit_prefetch_context(combined_context)
+
+
+def _limit_prefetch_context(context: str) -> str:
+    """Bound retrieval context so one broad query cannot crowd out reasoning."""
+    context = (context or "").strip()
+    if len(context) <= MAX_PREFETCH_CONTEXT_CHARS:
+        return context
+    return (
+        context[:MAX_PREFETCH_CONTEXT_CHARS].rstrip()
+        + "\n\n[Retrieved context truncated for space. Use the search tools for missing detail.]"
+    )
 
 
 def build_combined_query(question: str, prior_turns: Iterable[str] | None = None) -> str:

@@ -37,6 +37,7 @@ ID2LABEL = {i: c for c, i in LABEL2ID.items()}
 # ── Model (same architecture as train_router.py) ─────────────
 from torch import nn
 
+
 class RouterClassifier(nn.Module):
     def __init__(self, base_model_name: str, num_labels: int):
         super().__init__()

@@ -78,28 +78,6 @@ if %errorlevel% neq 0 (
     echo   OK Model already exists: qwen3:8b
 )
 
-echo.
-echo   Checking qwen3-vl:4b (~2.9 GB) - Vision classification
-ollama list | findstr "qwen3-vl:4b" >nul 2>&1
-if %errorlevel% neq 0 (
-    echo   Downloading qwen3-vl:4b... (this may take a while)
-    ollama pull qwen3-vl:4b
-    echo   OK Downloaded qwen3-vl:4b
-) else (
-    echo   OK Model already exists: qwen3-vl:4b
-)
-
-echo.
-echo   Checking nomic-embed-text (~274 MB) - Text embeddings
-ollama list | findstr "nomic-embed-text" >nul 2>&1
-if %errorlevel% neq 0 (
-    echo   Downloading nomic-embed-text...
-    ollama pull nomic-embed-text
-    echo   OK Downloaded nomic-embed-text
-) else (
-    echo   OK Model already exists: nomic-embed-text
-)
-
 REM Create directories
 echo.
 echo [5/6] Setting up project directories...
@@ -111,10 +89,9 @@ echo   OK Directories created
 REM Connectivity test
 echo.
 echo [6/6] Running connectivity test...
-python -c "from core.llm_gateway import gateway; gateway.embed('test', embed_model='nomic-embed-text', timeout=30); print('  OK Ollama connection successful')" 2>nul
+python -c "from core.local_embeddings import embed_text; assert embed_text('test'); print('  OK local embeddings available')" 2>nul
 if %errorlevel% neq 0 (
-    echo   ! Connection test failed - Ollama may need to be restarted
-    echo     Try running: ollama serve
+    echo   ! Local embedding test failed - check Python dependencies
 )
 
 REM Final summary

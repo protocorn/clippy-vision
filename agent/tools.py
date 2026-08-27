@@ -1,6 +1,5 @@
-from agent.retrieval import search_sessions, search_events
-from agent.memory import save_identity, save_note, delete_note
-
+from agent.memory import delete_note, save_identity, save_note
+from agent.retrieval import search_events, search_sessions
 
 TOOLS = {
     "search_sessions": search_sessions,
@@ -9,6 +8,8 @@ TOOLS = {
     "save_note":       save_note,
     "delete_note":     delete_note,
 }
+
+
 
 # Used when prefetch already supplied retrieval context — model only gets
 # write/delete tools so it physically cannot trigger a redundant search.
@@ -123,6 +124,7 @@ TOOL_SCHEMAS = [
         },
     },
 ]
+
 
 # Schemas for write-only mode (used when prefetch context is present)
 WRITE_TOOL_SCHEMAS = [s for s in TOOL_SCHEMAS if s["function"]["name"] in WRITE_TOOLS]

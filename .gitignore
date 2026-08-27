@@ -21,6 +21,10 @@ core/data/
 *.bin
 *.safetensors
 models/router_classifier/
+!models/embeddings/
+!models/embeddings/all-MiniLM-L6-v2/
+!models/embeddings/all-MiniLM-L6-v2/**
+models/embeddings/**/.cache/
 
 # ============================================================
 # BUILD / PACKAGING ARTIFACTS
@@ -41,6 +45,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.ruff_cache
 
 # ============================================================
 # VIRTUAL ENVIRONMENTS
@@ -116,3 +121,4 @@ data/
 electron-ui/node_modules/
 electron-ui/dist/
 electron-ui/build/
+electron-ui/.dev-electron/

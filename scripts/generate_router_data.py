@@ -25,8 +25,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "agent"))
 sys.path.insert(0, str(ROOT / "core"))
 
-from core.llm_gateway import gateway, Priority
-from agent.router import classify_query, OLLAMA_MODEL
+from agent.router import OLLAMA_MODEL, classify_query
+from core.llm_gateway import Priority, gateway
 
 # --- Paths ---
 SEED_FILE      = ROOT / "core" / "data" / "router_seed.jsonl"

@@ -1,6 +1,6 @@
 ﻿# Clippy Vision
 
-> **A fully local AI assistant that watches your work to eliminate the context problem. 100% private - no cloud, no data leakage.**
+> **A fully local AI assistant that watches your work to build context automatically without needing to explain much to an LLM. 100% private - no cloud, no data leakage.**
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -63,14 +63,14 @@ Use Clippy when you need your own work history back. Use Claude or ChatGPT when 
 
 ## Download
 
-Click your platform to download **v1.2.0** directly:
+Click your platform to download **v1.2.2** directly:
 
 <p align="center">
-  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.0/ClippyVision-Windows-Setup-1.2.0.exe"><img src="https://img.shields.io/badge/Download-Windows%20v1.2.0-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows v1.2.0" /></a>
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.2/ClippyVision-Windows-Setup-1.2.2.exe"><img src="https://img.shields.io/badge/Download-Windows%20v1.2.2-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows v1.2.2" /></a>
   &nbsp;
-  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.0/ClippyVision-macOS-arm64-1.2.0.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Apple%20Silicon%20v1.2.0-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Apple Silicon v1.2.0" /></a>
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.2/ClippyVision-macOS-arm64-1.2.2.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Apple%20Silicon%20v1.2.2-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Apple Silicon v1.2.2" /></a>
   &nbsp;
-  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.0/ClippyVision-macOS-x64-1.2.0.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Intel%20v1.2.0-555555?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Intel v1.2.0" /></a>
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.2/ClippyVision-macOS-x64-1.2.2.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Intel%20v1.2.2-555555?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Intel v1.2.2" /></a>
 </p>
 
 <p align="center">
@@ -87,18 +87,19 @@ Clippy Vision is under active development. Three releases shipped in the first t
 
 ### System requirements
 
-Clippy Vision runs local AI models (text + vision) on your PC. Capture shares the GPU/RAM with Chrome, your IDE, and Windows - underpowered machines will feel lag when switching apps.
+Clippy Vision runs a local text model for chat and uses accessibility APIs plus OCR for screen capture (no vision model in the capture path).
 
 | | Minimum | Recommended |
 |--|---------|-------------|
 | OS | Windows 10 / 11 (64-bit) | Windows 11 |
-| System RAM | 16 GB | 32 GB |
-| GPU VRAM | 6 GB dedicated | 8 GB+ dedicated |
-| Free disk | 12 GB | 15 GB+ |
+| System RAM | 8 GB | 16 GB |
+| GPU VRAM | Not required (integrated OK) | 4 GB+ dedicated |
+| Free disk | 8 GB | 10 GB+ |
 
-- **First run** also needs internet once (model downloads, ~8 GB).
-- The setup wizard **checks your PC** against these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that capture may lag.
-- Integrated / shared GPU (0 GB dedicated VRAM) is treated as below minimum for full capture.
+- **First run** needs internet once for the text model (`qwen3:8b`, ~4.7 GB).
+- The setup wizard **checks your PC** against these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that chat may feel slower.
+- Integrated / shared GPUs are allowed at minimum; a dedicated GPU still helps chat speed.
+- **Lower-spec / contributor machines:** capture uses accessibility + OCR (no vision model in setup). Only the chat model downloads by default; pick a smaller chat model in setup if needed. Details in [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
 
 ---
 
@@ -129,7 +130,7 @@ The app will open the setup wizard on first launch and walk you through dependen
 - **Passive screen awareness** - captures foreground windows, clipboard, typing bursts, and screenshots in the background
 - **Privacy-first redaction** - Clippy Vision's own window is blacked out in every screenshot before the AI ever sees it
 - **Three-tier event classification** - rule-based → feature-based → LLM fallback, so only meaningful events are stored
-- **Vision classification** - OCR and activity inference on screenshots using `qwen3-vl:4b`
+- **Low-cost screen text** - accessibility/UI text first with RapidOCR fallback; no vision model in capture
 - **Hierarchical memory** - events → session summaries → distilled long-term facts; memory never resets
 - **Smart query router** - a fine-tuned MiniLM classifier routes every question to the right retrieval strategy before the LLM is even called
 - **ReAct agent** - structured reasoning with tools: SQL generation, memory recall, fact saving
@@ -142,7 +143,7 @@ The app will open the setup wizard on first launch and walk you through dependen
 
 ## Where this is going
 
-Clippy is reactive today: you ask, it answers. The next bet is making it proactive, so it can act on what it sees instead of waiting to be asked. Two other priorities sit alongside that: getting the hardware requirements down by reading window text through accessibility APIs before falling back to the vision model, and a timeline view so you can see and delete exactly what was captured.
+Clippy is reactive today: you ask, it answers. The next bet is making it proactive, so it can act on what it sees instead of waiting to be asked. Capture now reads window text through accessibility APIs and falls back to local OCR without loading a vision model. A timeline view remains another priority so you can see and delete exactly what was captured.
 
 No dates attached to any of it. [PROJECT_VISION.md](PROJECT_VISION.md) has the current thinking, the priority order, and an honest list of what does not work yet. If you want to shape any of it, the [open issues](https://github.com/protocorn/clippy-vision/issues) are the place to start.
 
@@ -156,8 +157,8 @@ No dates attached to any of it. [PROJECT_VISION.md](PROJECT_VISION.md) has the c
 | Backend | Python / FastAPI / Uvicorn |
 | Local LLM runtime | [Ollama](https://ollama.com) |
 | Main reasoning model | `qwen3:8b` |
-| Vision / OCR model | `qwen3-vl:4b` |
-| Embedding model | `nomic-embed-text` |
+| Screenshot text | Accessibility APIs + RapidOCR fallback |
+| Embedding model | Bundled `all-MiniLM-L6-v2` (event RAG is opt-in) |
 | Query classifier | Fine-tuned MiniLM-L3 |
 | Database | SQLite (WAL mode) |
 | Screen capture | `mss`, `pywin32`, `pynput` |
@@ -174,7 +175,7 @@ No dates attached to any of it. [PROJECT_VISION.md](PROJECT_VISION.md) has the c
 - Clipboard contents (copy and paste events)
 - Context switches (window focus changes)
 - Keystroke dynamics with per-app adaptive baseline
-- Screenshots (taken proactively on activity bursts)
+- Screenshots (taken proactively on activity bursts by `core/screenshot_scheduler.py`)
 
 Every captured event passes through a three-tier classification pipeline before being stored:
 
@@ -185,10 +186,10 @@ Fast rules that immediately flag obvious signals: too few keystrokes → not int
 Scoring starts at 5. Multiple features add or subtract: typing deviation, context novelty (how many times this app was seen in 7 days), typing intensity z-score, clipboard content length. Events below 4 are dropped; above 7 are kept; 4-7 go to Tier 2.
 
 **Tier 2 - LLM fallback**
-The last 3 events + current event are sent to `qwen3:8b` for context-aware classification. Output: `INTERESTING`, `NOT_INTERESTING`, or `NEEDS_VISION`.
+The last 3 events + current event are sent to `qwen3:8b` for context-aware classification. Output is `INTERESTING` or `NOT_INTERESTING`; classification never queues a vision model.
 
-**Tier 2.5 - Vision classification**
-Screenshots are pre-captured (3 exposures, exponentially delayed) on every activity burst. A background processor (`core/screenshot_processor.py`) groups visually identical screenshots using perceptual hashing (Union-Find, pHash bit distance ≤ 2), runs `qwen3-vl:4b` once per group, and propagates the verdict. Each screenshot is matched to the nearest database event (±10 s); if none exists, a `screenshot_analysis` event is created automatically.
+**Screen text enrichment**
+Each captured frame records bounded text from the foreground accessibility/UI API. RapidOCR runs only when that text is empty or too sparse. A background processor (`core/screenshot_processor.py`) groups visually identical screenshots using perceptual hashing and stores the resulting text with the nearest event (±10 s); if none exists, it creates a `screenshot_analysis` event. Image embeddings and event-level RAG are disabled by default.
 
 ---
 
@@ -196,8 +197,8 @@ Screenshots are pre-captured (3 exposures, exponentially delayed) on every activ
 
 A background summarizer runs every 5 minutes and groups recent interesting events into session summaries using `qwen3:8b`. It runs in two passes per tick:
 
-- **Pass 1:** Summarizes pending events immediately without waiting for vision
-- **Pass 2:** Re-summarizes sessions where vision has since completed, overwriting with richer data
+- **Pass 1:** Summarizes pending events immediately
+- **Pass 2:** Refreshes sessions when delayed screenshot text becomes available
 
 ---
 
@@ -316,9 +317,15 @@ Every feature in Clippy Vision has a person behind it. This wall is how we say t
 
 | | Contributor | What they built | Commits | Lines |
 | :---: | :--- | :--- | ---: | :---: |
-| <a href="https://github.com/protocorn"><img src="https://avatars.githubusercontent.com/u/53559317?v=4" width="64" height="64" alt="protocorn"/></a> | <a href="https://github.com/protocorn"><b>@protocorn</b></a><br/><sub>💻 📖 🎨 🤔 🚧</sub> | Designed the core app: agent, vision pipeline, memory system, and the Electron desktop shell. | 68 | +86,923&nbsp;/&nbsp;−1,755 |
-| <a href="https://github.com/rusetiq"><img src="https://avatars.githubusercontent.com/u/234747645?v=4" width="64" height="64" alt="rusetiq"/></a> | <a href="https://github.com/rusetiq"><b>@rusetiq</b></a><br/><sub>💻 📦</sub> | Brought Clippy Vision to macOS: native screen capture, permissions, and Apple Silicon + Intel packaging. | 3 | +1,907&nbsp;/&nbsp;−1,817 |
+| <a href="https://github.com/protocorn"><img src="https://avatars.githubusercontent.com/u/53559317?v=4" width="64" height="64" alt="protocorn"/></a> | <a href="https://github.com/protocorn"><b>@protocorn</b></a><br/><sub>💻 📖 🎨 🤔 🚧</sub> | Designed the core app: agent, vision pipeline, memory system, and the Electron desktop shell. | 87 | +93,345&nbsp;/&nbsp;−3,107 |
+| <a href="https://github.com/rusetiq"><img src="https://avatars.githubusercontent.com/u/234747645?v=4" width="64" height="64" alt="rusetiq"/></a> | <a href="https://github.com/rusetiq"><b>@rusetiq</b></a><br/><sub>💻 📦</sub> | Brought Clippy Vision to macOS: native screen capture, permissions, and Apple Silicon + Intel packaging. | 8 | +39,032&nbsp;/&nbsp;−3,226 |
+| <a href="https://github.com/ABarpanda"><img src="https://avatars.githubusercontent.com/u/145291762?v=4" width="64" height="64" alt="ABarpanda"/></a> | <a href="https://github.com/ABarpanda"><b>@ABarpanda</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=ABarpanda">See their commits →</a> | 4 | +278&nbsp;/&nbsp;−217 |
+| <a href="https://github.com/vaishn4vi"><img src="https://avatars.githubusercontent.com/u/150888364?v=4" width="64" height="64" alt="vaishn4vi"/></a> | <a href="https://github.com/vaishn4vi"><b>@vaishn4vi</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=vaishn4vi">See their commits →</a> | 2 | +120&nbsp;/&nbsp;−41 |
+| <a href="https://github.com/adity982"><img src="https://github.com/adity982.png" width="64" height="64" alt="adity982"/></a> | <a href="https://github.com/adity982"><b>@adity982</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=adity982">See their commits →</a> | 2 | +98&nbsp;/&nbsp;−18 |
+| <a href="https://github.com/Draoui-Haroun"><img src="https://avatars.githubusercontent.com/u/266044395?v=4" width="64" height="64" alt="Draoui-Haroun"/></a> | <a href="https://github.com/Draoui-Haroun"><b>@Draoui-Haroun</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=Draoui-Haroun">See their commits →</a> | 2 | +68&nbsp;/&nbsp;−7 |
+| <a href="https://github.com/shaurya703"><img src="https://avatars.githubusercontent.com/u/153742516?v=4" width="64" height="64" alt="shaurya703"/></a> | <a href="https://github.com/shaurya703"><b>@shaurya703</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=shaurya703">See their commits →</a> | 1 | +49&nbsp;/&nbsp;−0 |
 | <a href="https://github.com/cyforkk"><img src="https://avatars.githubusercontent.com/u/165913369?v=4" width="64" height="64" alt="cyforkk"/></a> | <a href="https://github.com/cyforkk"><b>@cyforkk</b></a><br/><sub>💻</sub> | Made errors readable: replaced bare HTTP status codes with real API error messages in chat. | 1 | +32&nbsp;/&nbsp;−11 |
+| <a href="https://github.com/icn5381"><img src="https://avatars.githubusercontent.com/u/255778606?v=4" width="64" height="64" alt="icn5381"/></a> | <a href="https://github.com/icn5381"><b>@icn5381</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=icn5381">See their commits →</a> | 1 | +15&nbsp;/&nbsp;−4 |
 
 <sub>Numbers come straight from git history and refresh automatically on every push to <code>main</code>.</sub>
 <!-- CONTRIBUTORS-STATS:END -->

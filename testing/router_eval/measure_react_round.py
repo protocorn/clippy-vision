@@ -13,7 +13,7 @@ ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from agent.tools import TOOL_SCHEMAS
-from core.llm_gateway import gateway, Priority
+from core.llm_gateway import Priority, gateway
 
 SYSTEM = (
     "You are Clippy, a local personal AI assistant. Answer from evidence using "

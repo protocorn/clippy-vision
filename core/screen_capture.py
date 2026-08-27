@@ -3,35 +3,29 @@ from __future__ import annotations
 import atexit
 import os
 import sys
-from typing import TypedDict, Optional, List
 from pathlib import Path
+from typing import TypedDict
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # The capture process starts the event workers once, then keeps the keyboard,
 # clipboard, and foreground-window loop alive for the lifetime of the app.
+import threading
+import time
+
 from pynput import keyboard
 
-import time
-import threading
-
 try:
-    from core.baseline import update_baseline, compute_deviation
-    from core.events import Event, WindowMetadata, get_session_id, generate_summary
-    from core.storage import store_event, purge_expired
-    from core.vision import start_vision_daemon, on_activity_event
-    from core.summarizer import start_summarizer
-    from core.distil import should_distil, distil
-    from core.screenshot_processor import start_screenshot_processor
+    from core.baseline import compute_deviation, update_baseline
+    from core.events import Event, WindowMetadata, generate_summary, get_session_id
+    from core.storage import purge_expired, store_event
+    from core.screenshot_scheduler import on_activity_event, start_screenshot_daemon
 except ImportError:
-    from baseline import update_baseline, compute_deviation
-    from events import Event, WindowMetadata, get_session_id, generate_summary
-    from storage import store_event, purge_expired
-    from vision import start_vision_daemon, on_activity_event
-    from summarizer import start_summarizer
-    from distil import should_distil, distil
-    from screenshot_processor import start_screenshot_processor
+    from baseline import compute_deviation, update_baseline
+    from events import Event, WindowMetadata, generate_summary, get_session_id
+    from storage import purge_expired, store_event
+    from screenshot_scheduler import on_activity_event, start_screenshot_daemon
 import uuid
 from datetime import datetime
 
@@ -40,22 +34,27 @@ from classifier.worker import start_worker
 try:
     from core.platform_support import (
         get_clipboard_text as read_clipboard_text,
+    )
+    from core.platform_support import (
         get_window_metadata as read_window_metadata,
+    )
+    from core.platform_support import (
         window_key,
     )
 except ImportError:
     from platform_support import (
         get_clipboard_text as read_clipboard_text,
+    )
+    from platform_support import (
         get_window_metadata as read_window_metadata,
+    )
+    from platform_support import (
         window_key,
     )
-def get_capture_settings() -> dict:
-    return {"capture_clipboard": True}
-
 try:
-    from core.model_residency import on_capture_start, on_capture_stop
+    from core.app_settings import get_capture_settings
 except ImportError:
-    from model_residency import on_capture_start, on_capture_stop
+    from app_settings import get_capture_settings
 try:
     from core.capture_state import set_capture_status
 except ImportError:
@@ -69,7 +68,6 @@ except ImportError:
 
 def _capture_shutdown() -> None:
     set_capture_status(False, None)
-    on_capture_stop()
 
 
 def _capture_heartbeat() -> None:
@@ -78,20 +76,15 @@ def _capture_heartbeat() -> None:
         time.sleep(60)
 
 
-on_capture_start()
 set_capture_status(True, os.getpid())
 atexit.register(_capture_shutdown)
 threading.Thread(target=_capture_heartbeat, daemon=True, name="capture-heartbeat").start()
 purge_expired()
-# Startup is intentionally centralized here so the desktop process can spawn a
-# single capture worker and avoid duplicate listeners or duplicate daemons.
+# Capture only intakes live activity and runs cheap Tier-0/1 classification.
+# Deferred Tier-2 catch-up, summarizer, screenshot OCR, and distil run in the
+# API process so backlog drains even when capture is paused.
 start_worker()
-start_vision_daemon()
-start_summarizer()
-start_screenshot_processor()
-if should_distil():
-    print("[startup] Distillation threshold reached — running distil...")
-    distil()
+start_screenshot_daemon()
 
 
 # A burst ends after a short pause; grouping keystrokes keeps activity records
@@ -103,7 +96,7 @@ WINDOW_POLL_INTERVAL_SECONDS = 2.0
 class TypingEvent(TypedDict):
     timestamp: float
     event_type: str
-    key: Optional[str]
+    key: str | None
 
 class TypingBurstMetrics(TypedDict):
     # Temporal metrics describe the rhythm of the burst rather than its text.
@@ -150,12 +143,12 @@ class PasteEvent(TypedDict):
 # switching windows, so a burst never straddles two foreground applications.
 class BurstDetection:
     def __init__(self, on_burst_completed, on_paste_event):
-        self._events: List[TypingEvent] = []
+        self._events: list[TypingEvent] = []
         self._lock = threading.Lock()
-        self._timer: Optional[threading.Timer] = None
+        self._timer: threading.Timer | None = None
         self._on_burst_completed = on_burst_completed
         self._on_paste_event = on_paste_event
-        self.window_metadata: Optional[WindowMetadata] = None
+        self.window_metadata: WindowMetadata | None = None
         self._modifiers: set[str] = set()
 
     @staticmethod
@@ -163,7 +156,7 @@ class BurstDetection:
         return key.char if hasattr(key, "char") and key.char else str(key)
 
     @staticmethod
-    def _modifier_name(key_str: str) -> Optional[str]:
+    def _modifier_name(key_str: str) -> str | None:
         if key_str in ("Key.cmd", "Key.cmd_l", "Key.cmd_r"):
             return "cmd"
         if key_str in ("Key.ctrl", "Key.ctrl_l", "Key.ctrl_r"):
@@ -242,7 +235,7 @@ class BurstDetection:
 
 
 
-def get_window_metadata() -> Optional[WindowMetadata]:
+def get_window_metadata() -> WindowMetadata | None:
     # Keep platform-specific foreground-window discovery behind one adapter.
     return read_window_metadata()
 
@@ -252,7 +245,7 @@ def get_window_metadata() -> Optional[WindowMetadata]:
 
 _last_paste_time = 0.0
 
-def _safe_window_metadata(candidate: Optional[WindowMetadata] = None) -> WindowMetadata:
+def _safe_window_metadata(candidate: WindowMetadata | None = None) -> WindowMetadata:
     if candidate:
         return candidate
     return get_window_metadata() or WindowMetadata(
@@ -294,7 +287,7 @@ def on_paste_event(paste_event: PasteEvent):
     on_activity_event()
 
 
-def get_clipboard_text() -> Optional[str]:
+def get_clipboard_text() -> str | None:
     return read_clipboard_text()
 
 def clipboard_monitor():
@@ -348,7 +341,7 @@ def clipboard_monitor():
 # -------------------------
 # These derived values support baseline/deviation scoring without sending the
 # raw event stream to another process.
-def compute_burst_metrics(events: List[TypingEvent], window_metadata: WindowMetadata) -> TypingBurstMetrics:
+def compute_burst_metrics(events: list[TypingEvent], window_metadata: WindowMetadata) -> TypingBurstMetrics:
     press_events = [event for event in events if event['event_type'] == 'key_press']
     release_events = [event for event in events if event['event_type'] == 'key_release']
 
@@ -535,8 +528,8 @@ t.start()
 # Polling detects app/window changes that do not generate keyboard events and
 # flushes the current burst before attaching the next context.
 last_window_key = None
-metadata: Optional[WindowMetadata] = None
-last_window_context: Optional[WindowMetadata] = None
+metadata: WindowMetadata | None = None
+last_window_context: WindowMetadata | None = None
 last_context_change_time: float = time.time()
 
 while True:

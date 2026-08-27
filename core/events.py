@@ -1,5 +1,5 @@
 import uuid
-from typing import TypedDict, Optional
+from typing import Optional, TypedDict
 
 SESSION_ID = str(uuid.uuid4())
 
@@ -7,8 +7,9 @@ SESSION_ID = str(uuid.uuid4())
 class WindowMetadata(TypedDict):
     timestamp: float
     current_window_title: str
+
     #is_browser_window: bool
-    active_url: Optional[str]
+    active_url: str | None
     process_name: str
 
 class Event(TypedDict):
@@ -16,19 +17,23 @@ class Event(TypedDict):
     session_id: str
     timestamp: float
 
-    event_type: str # "typing_burst", "paste", "context_change, "deviation", "mouse_burst", ...
+    event_type: str  # "typing_burst", "paste", "context_change, "deviation", "mouse_burst", ...
 
     window_context: WindowMetadata
-    previous_window_context: Optional[WindowMetadata]
+    previous_window_context: WindowMetadata | None
 
     payload: dict
 
+
     # Ingestion fields (filled after capture, and not at record time)
-    summary: Optional[str]
-    vector_embedding: Optional[list]
-    interest_score: Optional[float]
-    interest_reason: Optional[str]
-    interesting: Optional[bool]
+    summary: str | None
+    vector_embedding: list | None
+    image_embedding: list | None
+    image_embedding_model: str | None
+    screenshot_filename: str | None
+    interest_score: float | None
+    interest_reason: str | None
+    interesting: bool | None
 
 def generate_summary(event: Event) -> str:
 

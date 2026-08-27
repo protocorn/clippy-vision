@@ -9,12 +9,12 @@ The installer's built-in setup wizard will:
 - Check for Ollama (install via winget if missing)
 - Start the Ollama service
 - Install all Python packages from `requirements.txt`
-- Download the required AI models (`qwen3:8b`, `qwen3-vl:4b`, `nomic-embed-text`)
-- Warm the models into memory
+- Download the required text model (`qwen3:8b`)
+- Warm the text model into memory
 
 After setup completes, click **Launch**. Clippy Vision will start automatically on future reboots via the system tray.
 
-**Requirements:** Windows 10/11 (64-bit) or macOS 12+; **16 GB RAM / 6 GB VRAM or unified memory / 12 GB free disk** minimum. Internet is needed on first run for model downloads.
+**Requirements:** Windows 10/11 (64-bit) or macOS 12+. Internet is needed on first run for the text model; screen capture uses accessibility APIs and local OCR without loading a vision model.
 
 On macOS, grant Clippy Vision Screen Recording and Accessibility permission in System Settings → Privacy & Security.
 
@@ -38,8 +38,7 @@ The setup wizard runs automatically on first launch.
 | Model | Size | Purpose |
 |-------|------|---------|
 | `qwen3:8b` | ~4.7 GB | Reasoning, summarization, SQL, QA |
-| `qwen3-vl:4b` | ~2.9 GB | Vision OCR and screen activity |
-| `nomic-embed-text` | ~274 MB | Vector embeddings |
+| Bundled `all-MiniLM-L6-v2` | ~90 MB | Optional local semantic retrieval |
 
 ---
 

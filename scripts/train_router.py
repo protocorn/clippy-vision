@@ -27,17 +27,17 @@ import argparse
 import json
 import random
 import sys
-from pathlib import Path
 from collections import Counter
+from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-import torch
 import numpy as np
-from torch import nn
-from torch.utils.data import Dataset, DataLoader
+import torch
 from sklearn.metrics import classification_report
+from torch import nn
+from torch.utils.data import DataLoader, Dataset
 
 # ─────────────────────────────────────────────────────────────
 # Config
@@ -180,7 +180,6 @@ def decode_prediction(logits: torch.Tensor, threshold: float = SECONDARY_THRESHO
 # ─────────────────────────────────────────────────────────────
 
 def compute_class_weights(examples: list[dict]) -> torch.Tensor:
-    from collections import Counter
     counts  = Counter(ex["primary"] for ex in examples)
     total   = sum(counts.values())
     weights = torch.zeros(len(CATEGORIES))
@@ -303,8 +302,7 @@ def evaluate(model, loader, device, threshold: float = SECONDARY_THRESHOLD):
                         sec_fired += 1
                 sec_possible += 1
 
-    from sklearn.metrics import classification_report
-    acc    = sum(p == l for p, l in zip(all_preds, all_labels)) / len(all_labels)
+    acc    = sum(pred == label for pred, label in zip(all_preds, all_labels)) / len(all_labels)
     report = classification_report(
         all_labels, all_preds,
         target_names=CATEGORIES,

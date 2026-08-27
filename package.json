@@ -1,7 +1,7 @@
 {
   "name": "clippy-vision",
   "productName": "Clippy Vision",
-  "version": "1.2.0",
+  "version": "1.2.2",
   "description": "Local AI desktop companion with screen awareness",
   "author": "Clippy Vision",
   "license": "MIT",

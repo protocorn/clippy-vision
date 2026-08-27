@@ -169,6 +169,8 @@ contextBridge.exposeInMainWorld('clippy', {
 
     setUpdateCheckEnabled: (enabled) => ipcRenderer.invoke('set-update-check', Boolean(enabled)),
 
+    getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
     getMcpStatus: () => ipcRenderer.invoke('get-mcp-status'),
 
     connectMcpClient: (id) => ipcRenderer.invoke('connect-mcp-client', id),
@@ -183,6 +185,22 @@ contextBridge.exposeInMainWorld('clippy', {
 
     getCaptureStatus: () => ipcRenderer.invoke('get-capture-status'),
 
+    getXyzSkill: async () => {
+        const response = await fetch(await apiUrl('/skills/xyz'))
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    saveXyzSkill: async (payload) => {
+        const response = await fetch(await apiUrl('/skills/xyz'), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload || {}),
+        })
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
     onCaptureStatusChanged: (callback) => {
         ipcRenderer.on('capture-status-changed', (_event, active) => callback(active))
     },
@@ -194,6 +212,10 @@ contextBridge.exposeInMainWorld('clippy', {
     onLoadingStatus: (callback) => {
         ipcRenderer.on('loading-status', (_event, data) => callback(data))
     },
+
+    checkRuntimeHealth: (rawError) => ipcRenderer.invoke('check-runtime-health', rawError || ''),
+
+    fixRuntimeIssue: (issue) => ipcRenderer.invoke('fix-runtime-issue', issue || {}),
 
     onReleaseAvailable: (callback) => {
         ipcRenderer.on('release-available', (_event, data) => callback(data))

@@ -90,10 +90,34 @@
       padding: 22px 26px 18px;
       gap: 12px;
       min-height: 0;
-      overflow-y: auto;
+      overflow: hidden;
     }
 
     .screen.active { display: flex; }
+
+    .screen-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: scroll;
+      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .screen-scroll > * {
+      flex-shrink: 0;
+    }
+
+    #hw-content {
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    #hw-content.is-visible {
+      display: flex;
+    }
 
     .tagline {
       font-size: 14px;
@@ -147,7 +171,6 @@
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 12px;
-      overflow: hidden;
     }
 
     .card-head {
@@ -173,7 +196,37 @@
     .system-details > summary::after { content: '+'; font-size: 16px; font-weight: 400; }
     .system-details[open] > summary::after { content: '−'; }
     .system-details .summary-status { color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; }
-    .system-details-body { overflow-x: auto; }
+    .system-details-body { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    @media (max-width: 560px) {
+      .screen { padding: 16px 16px 14px; }
+      table.req thead { display: none; }
+      table.req tbody, table.req tr, table.req th, table.req td { display: block; width: 100%; }
+      table.req tr {
+        padding: 10px 0 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      table.req tr:last-child { border-bottom: none; }
+      table.req th {
+        width: auto;
+        padding: 0 0 6px;
+        color: var(--text);
+        font-weight: 650;
+      }
+      table.req td {
+        padding: 4px 0;
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      table.req td::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 500;
+      }
+      table.req td:empty { display: none; }
+    }
 
     table.req {
       width: 100%;
@@ -521,15 +574,16 @@
 
   <header>
     <span class="header-title">Clippy Vision setup</span>
-    <span class="header-version">One-time setup</span>
+    <span class="header-version" id="header-version">One-time setup</span>
   </header>
 
   <div class="screen active" id="screen-hardware">
+    <div class="screen-scroll">
     <p class="tagline">Choose where Clippy should run AI. You can change this later in Settings.</p>
 
     <div id="hw-loading" class="hw-loading">Checking your system…</div>
 
-    <div id="hw-content" style="display:none; flex-direction:column; gap:12px; flex:1; min-height:0;">
+    <div id="hw-content">
       <div id="verdict" class="verdict ready" role="status">
         <div class="verdict-icon" id="verdict-icon">✓</div>
         <div>
@@ -538,26 +592,7 @@
         </div>
       </div>
 
-      <div class="card provider-card">
-        <div class="card-head">AI connection</div>
-        <div class="provider-card-body">
-          <label>Provider<select id="llm-provider"><option value="ollama">Ollama · local chat and vision</option></select></label>
-          <div class="provider-details" id="provider-details">
-            <label id="llm-base-url-field">Base URL<input id="llm-base-url" placeholder="http://127.0.0.1:1234/v1" /></label>
-            <div class="provider-fields">
-              <label>Chat model<input id="llm-chat-model" placeholder="local-chat" /></label>
-              <label>Vision model<input id="llm-vision-model" placeholder="local-vision" /></label>
-            </div>
-            <label id="llm-cli-command-field" hidden>CLI command/path<input id="llm-cli-command" placeholder="Detected from PATH" /></label>
-            <div class="provider-help">Embeddings use nomic-embed-text through local Ollama.</div>
-            <label id="llm-api-key-field">API key <span style="font-weight:400;text-transform:none;letter-spacing:normal">optional</span><input id="llm-api-key" type="password" placeholder="Leave blank if your local server needs no key" autocomplete="off" /></label>
-            <button type="button" class="secondary" id="llm-connect-btn" hidden>Connect account in Terminal</button>
-          </div>
-          <div class="provider-help" id="provider-help">Ollama will download and manage the chat, vision, and embedding models during setup.</div>
-        </div>
-      </div>
-
-      <details class="card system-details" id="system-details">
+      <details class="card system-details" id="system-details" open>
         <summary class="card-head"><span>System check</span><span class="summary-status" id="hardware-summary">Checking…</span></summary>
         <div class="system-details-body">
           <table class="req">
@@ -573,44 +608,63 @@
           <tbody>
             <tr>
               <th>System RAM</th>
-              <td id="min-ram">—</td>
-              <td id="rec-ram">—</td>
-              <td class="col-yours" id="you-ram">—</td>
-              <td><span class="pill ok" id="pill-ram"><span class="dot"></span><span>OK</span></span></td>
+              <td data-label="Minimum" id="min-ram">—</td>
+              <td data-label="Recommended" id="rec-ram">—</td>
+              <td class="col-yours" data-label="Your PC" id="you-ram">—</td>
+              <td data-label="Status"><span class="pill ok" id="pill-ram"><span class="dot"></span><span>OK</span></span></td>
             </tr>
             <tr>
               <th id="memory-label">GPU VRAM</th>
-              <td id="min-vram">—</td>
-              <td id="rec-vram">—</td>
-              <td class="col-yours" id="you-vram">—</td>
-              <td><span class="pill ok" id="pill-vram"><span class="dot"></span><span>OK</span></span></td>
+              <td data-label="Minimum" id="min-vram">—</td>
+              <td data-label="Recommended" id="rec-vram">—</td>
+              <td class="col-yours" data-label="Your PC" id="you-vram">—</td>
+              <td data-label="Status"><span class="pill ok" id="pill-vram"><span class="dot"></span><span>OK</span></span></td>
             </tr>
             <tr>
               <th>Free disk</th>
-              <td id="min-disk">—</td>
-              <td id="rec-disk">—</td>
-              <td class="col-yours" id="you-disk">—</td>
-              <td><span class="pill ok" id="pill-disk"><span class="dot"></span><span>OK</span></span></td>
+              <td data-label="Minimum" id="min-disk">—</td>
+              <td data-label="Recommended" id="rec-disk">—</td>
+              <td class="col-yours" data-label="Your PC" id="you-disk">—</td>
+              <td data-label="Status"><span class="pill ok" id="pill-disk"><span class="dot"></span><span>OK</span></span></td>
             </tr>
             <tr>
               <th>OS</th>
-              <td colspan="2" id="os-requirement">Windows 10/11 or macOS</td>
-              <td class="col-yours" id="you-os">—</td>
-              <td><span class="pill ok" id="pill-os"><span class="dot"></span><span>OK</span></span></td>
+              <td colspan="2" data-label="Requirement" id="os-requirement">Windows 10/11 or macOS</td>
+              <td class="col-yours" data-label="Your PC" id="you-os">—</td>
+              <td data-label="Status"><span class="pill ok" id="pill-os"><span class="dot"></span><span>OK</span></span></td>
             </tr>
           </tbody>
           </table>
         </div>
       </details>
 
+      <div class="card provider-card">
+        <div class="card-head">AI connection</div>
+        <div class="provider-card-body">
+          <label>Provider<select id="llm-provider"><option value="ollama">Ollama-compatible local API</option></select></label>
+          <div class="provider-details" id="provider-details">
+            <label id="llm-base-url-field">Base URL<input id="llm-base-url" placeholder="http://127.0.0.1:1234/v1" /></label>
+            <div class="provider-fields">
+              <label>Chat model<input id="llm-chat-model" placeholder="local-chat" /></label>
+            </div>
+            <label id="llm-cli-command-field" hidden>CLI command/path<input id="llm-cli-command" placeholder="Detected from PATH" /></label>
+            <div class="provider-help">MiniLM embeddings are bundled and event RAG is opt-in.</div>
+            <label id="llm-api-key-field">API key <span style="font-weight:400;text-transform:none;letter-spacing:normal">optional</span><input id="llm-api-key" type="password" placeholder="Leave blank if your local server needs no key" autocomplete="off" /></label>
+            <button type="button" class="secondary" id="llm-connect-btn" hidden>Connect account in Terminal</button>
+          </div>
+          <div class="provider-help" id="provider-help">Ollama manages the chat model; capture uses accessibility text and local OCR.</div>
+        </div>
+      </div>
+
       <p class="note" id="hardware-note">
-        Ollama downloads the chat, vision, and embedding models locally.
+        Use the managed Ollama default, or point Clippy at an existing local API to skip the chat-model download.
       </p>
 
       <label class="override" id="override-row">
         <input type="checkbox" id="override-check" />
         <span>I understand capture may lag or freeze other apps on this machine, and still want to continue.</span>
       </label>
+    </div>
     </div>
 
     <div class="hw-actions">
@@ -619,7 +673,15 @@
   </div>
 
   <div class="screen" id="screen-install">
-    <p class="tagline">Preparing Clippy. This only happens once.</p>
+    <div class="screen-scroll">
+    <p class="tagline" id="install-tagline">Preparing Clippy. This only happens once.</p>
+    <div class="verdict warn" id="recovery-banner" role="status" style="display:none; margin-bottom:12px;">
+      <div class="verdict-icon">!</div>
+      <div>
+        <div class="verdict-title" id="recovery-title">Something Clippy needs is missing</div>
+        <div class="verdict-body" id="recovery-detail">Fix the failed step below, then launch again.</div>
+      </div>
+    </div>
 
     <div class="steps" id="steps-list">
       <div class="step pending" id="step-python" data-key="python">
@@ -662,7 +724,7 @@
         <div class="step-icon">○</div>
         <div class="step-body">
           <div class="step-label">AI Models</div>
-          <div class="step-sub">Downloading nomic-embed-text, qwen3:8b, and qwen3-vl:4b</div>
+          <div class="step-sub">Downloading qwen3:8b (~4.7 GB)</div>
           <div class="step-bar-wrap"><div class="step-bar" id="bar-models"></div></div>
         </div>
       </div>
@@ -681,6 +743,7 @@
       <summary>Install log</summary>
       <div class="log-wrap"><div id="log"></div></div>
     </details>
+    </div>
 
     <div class="bottom">
       <div id="bottom-left">
@@ -721,7 +784,7 @@
     function renderHardware(check) {
       hwCheck = check
       $('hw-loading').style.display = 'none'
-      $('hw-content').style.display = 'flex'
+      $('hw-content').classList.add('is-visible')
       configureSetupMode(check.mode)
 
       $('min-ram').textContent = gb(check.min.ramGb)
@@ -746,10 +809,11 @@
         ? 'macOS 12+'
         : 'Windows 10/11'
 
-      // The onboarding gate describes the local Ollama runtime. Hosted and
-      // subscription modes remain a comment-only future extension.
+      // Hosted and subscription modes remain a comment-only future extension.
       $('hardware-summary').textContent = check.level === 'ready' ? 'Ready' : check.level === 'warn' ? 'Review' : 'Blocked'
-      $('hardware-note').textContent = 'Models use roughly 8 GB on disk. During capture, leave headroom for your browser, IDE, and the desktop compositor.'
+      $('hardware-note').textContent = check.mode === 'external'
+        ? 'The configured local API supplies chat. MiniLM, accessibility capture, and OCR stay on this Mac.'
+        : 'The default text model uses roughly 5 GB on disk. Screen capture uses accessibility + OCR and does not download a vision model.'
 
       const verdict = $('verdict')
       const continueBtn = $('btn-continue')
@@ -770,7 +834,7 @@
         $('verdict-icon').textContent = '!'
         $('verdict-title').textContent = 'May run, but expect lag'
         $('verdict-body').textContent =
-          'Your machine is above the minimum but below recommended. Capture can work with fewer apps open, but you may see freezes when switching windows or playing video.'
+          'Your machine is above the minimum but below recommended. Capture should be fine; chat may feel slower if you also run heavy apps alongside the text model.'
         overrideRow.classList.add('visible')
         continueBtn.disabled = !override.checked
         continueBtn.textContent = 'Continue anyway'
@@ -778,7 +842,7 @@
         $('verdict-icon').textContent = '✕'
         $('verdict-title').textContent = 'Not enough resources'
         $('verdict-body').textContent =
-          'This machine is below Clippy Vision’s minimum for local AI capture. Setup is blocked so we don’t leave you with a desktop that freezes under load. Free disk space or add memory, then try again.'
+          'This machine is below Clippy Vision’s minimum for the local text model and capture stack. Free disk space or add memory, then try again.'
         overrideRow.classList.remove('visible')
         override.checked = false
         continueBtn.disabled = true
@@ -807,22 +871,24 @@
     }
 
     function renderLLMConfig(config) {
-      // Keep the model fields ready for local model selection, while leaving
-      // hosted-provider controls out of onboarding until that work is approved.
+      // Keep onboarding limited to the two values needed by a local endpoint.
       const provider = 'ollama'
       $('llm-provider').value = provider
-      $('provider-details').hidden = true
-      $('llm-base-url-field').hidden = true
+      $('provider-details').hidden = false
+      $('llm-base-url-field').hidden = false
       $('llm-api-key-field').hidden = true
       $('llm-cli-command-field').hidden = true
       $('llm-connect-btn').hidden = true
       $('llm-base-url').value = config.base_url || 'http://127.0.0.1:11434'
       $('llm-chat-model').value = config.chat_model || 'qwen3:8b'
-      $('llm-vision-model').value = config.vision_model || $('llm-chat-model').value
       $('llm-cli-command').value = config.cli_command || ''
       $('llm-api-key').value = ''
       $('llm-api-key').placeholder = config.api_key_set ? 'Saved key is set · leave blank to keep it' : 'Leave blank if your local server needs no key'
-      $('provider-help').textContent = 'Ollama will download and manage the chat, vision, and embedding models during setup.'
+      const baseURL = $('llm-base-url').value.replace(/\/+$/, '').toLowerCase()
+      const managed = baseURL === 'http://127.0.0.1:11434' || baseURL === 'http://localhost:11434'
+      $('provider-help').textContent = managed
+        ? 'Clippy can install and manage Ollama locally.'
+        : 'Clippy will use this existing local API and skip Ollama and model downloads.'
     }
 
     function selectedLLMConfig() {
@@ -831,7 +897,6 @@
         base_url: $('llm-base-url').value.trim(),
         cli_command: $('llm-cli-command').value.trim(),
         chat_model: $('llm-chat-model').value.trim(),
-        vision_model: $('llm-vision-model').value.trim(),
       }
       const apiKey = $('llm-api-key').value.trim()
       if (apiKey) values.api_key = apiKey
@@ -850,8 +915,7 @@
       $('llm-provider').value = 'ollama'
       $('llm-base-url').value = 'http://127.0.0.1:11434'
       $('llm-chat-model').value = 'qwen3:8b'
-      $('llm-vision-model').value = 'qwen3-vl:4b'
-      $('provider-help').textContent = 'Ollama will download and manage the chat, vision, and embedding models during setup.'
+      $('provider-help').textContent = 'Ollama manages the chat model; capture uses accessibility text and local OCR.'
       try {
         await saveSelectedLLMConfig()
         await loadHardware()
@@ -891,6 +955,7 @@
           else btn.disabled = false
           return
         }
+        if (res.check) configureSetupMode(res.check.mode)
         showInstallScreen()
       } catch (e) {
         btn.disabled = false
@@ -994,6 +1059,23 @@
       overallText.style.color = '#A8906C'
     }
 
+    async function startRecovery(ctx) {
+      $('header-version').textContent = 'Repair'
+      $('install-tagline').textContent = 'Fix the missing piece, then continue.'
+      const banner = $('recovery-banner')
+      banner.style.display = 'flex'
+      $('recovery-title').textContent = ctx.title || 'Something Clippy needs is missing'
+      $('recovery-detail').textContent = ctx.detail || 'The failed step is highlighted below.'
+      showInstallScreen()
+      const startIdx = Math.max(0, STEPS.indexOf(ctx.fromStep || 'python'))
+      for (let i = 0; i < startIdx; i++) {
+        setStepState(STEPS[i], 'done', 'Already OK')
+      }
+      if (window.setup && window.setup.startRecoverySetup) {
+        await window.setup.startRecoverySetup()
+      }
+    }
+
     if (window.setup) {
       window.setup.onStepUpdate(({ key, state, sub }) => {
         setStepState(key, state, sub)
@@ -1030,7 +1112,14 @@
         showLaunchButton()
       })
 
-      loadHardware()
+      if (window.setup.getSetupContext) {
+        window.setup.getSetupContext().then((ctx) => {
+          if (ctx && ctx.recover) return startRecovery(ctx)
+          loadHardware()
+        }).catch(() => loadHardware())
+      } else {
+        loadHardware()
+      }
     } else {
       $('hw-loading').textContent = 'window.setup not available. Is setup-preload.js loaded?'
     }

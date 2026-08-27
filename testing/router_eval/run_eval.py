@@ -102,7 +102,8 @@ def make_baseline_router():
 def make_llm_router():
     """qwen3:8b router using the system prompt archived in agent/router.py."""
     import re as _re
-    from core.llm_gateway import gateway, Priority
+
+    from core.llm_gateway import Priority, gateway
 
     src = (ROOT / "agent" / "router.py").read_text(encoding="utf-8")
     m = _re.search(r'SYSTEM_PROMPT = ```\n(.*?)```', src, _re.DOTALL)

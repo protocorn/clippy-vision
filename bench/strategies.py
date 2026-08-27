@@ -13,7 +13,8 @@ import math
 import time
 
 import _paths  # noqa: F401  (sets up sys.path)
-from core.llm_gateway import gateway, Priority
+
+from core.llm_gateway import Priority, gateway
 
 MODEL = "qwen3:8b"
 
