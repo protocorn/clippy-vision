@@ -309,6 +309,17 @@ def _extract_where_fragment(sql: str) -> str | None:
 def search_sessions(question: str) -> str:
     """Search session summaries. Best for: broad time windows, daily/weekly
     overviews, project topics, what-did-I-work-on questions."""
+    available = conn.execute(
+        "SELECT 1 FROM sessions WHERE summary IS NOT NULL AND summary != '' LIMIT 1"
+    ).fetchone()
+    if available is None:
+        return (
+            "search_sessions: no matching session summaries found.\n"
+            "Sessions store broad topic summaries — if you need specific "
+            "message text, OCR content, URLs, or app-level detail, "
+            "call search_events."
+        )
+
     now_ts  = int(time.time())
     now_str = time.strftime("%A %B %d, %Y at %H:%M (local time)")
     user_content = f"Current timestamp: {now_ts} ({now_str})\n\nQuestion: {question}"
