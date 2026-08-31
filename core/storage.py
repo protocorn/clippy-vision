@@ -417,6 +417,51 @@ def store_summary(summary: dict, vision_enriched: bool = False, embedding: list 
     )
     conn.commit()
 
+
+def list_timeline_sessions(
+    since: float | None = None,
+    until: float | None = None,
+    limit: int = 40,
+    offset: int = 0,
+) -> list[dict]:
+    """Return a page of captured sessions that overlaps the requested window."""
+    if since is not None and until is not None and since >= until:
+        return []
+
+    filters = []
+    parameters = []
+    if since is not None:
+        filters.append("window_end >= ?")
+        parameters.append(since)
+    if until is not None:
+        filters.append("window_start < ?")
+        parameters.append(until)
+
+    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+    rows = conn.execute(
+        f"""SELECT session_id, summary_id, created_at, window_start, window_end,
+                   summary, active_task, event_count
+            FROM sessions
+            {where_clause}
+            ORDER BY window_end DESC, created_at DESC, summary_id DESC
+            LIMIT ? OFFSET ?""",
+        (*parameters, limit, offset),
+    ).fetchall()
+    return [
+        {
+            "session_id": row[0],
+            "summary_id": row[1],
+            "created_at": row[2],
+            "window_start": row[3],
+            "window_end": row[4],
+            "summary": row[5],
+            "active_task": row[6],
+            "event_count": row[7],
+        }
+        for row in rows
+    ]
+
+
 def get_summaries(since: float) -> list[dict]:
     rows = conn.execute(
         """SELECT session_id, summary_id, created_at,
