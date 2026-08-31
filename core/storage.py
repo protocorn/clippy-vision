@@ -423,13 +423,16 @@ def list_timeline_sessions(
     until: float | None = None,
     limit: int = 40,
     offset: int = 0,
-) -> list[dict]:
-    """Return a page of captured sessions that overlaps the requested window."""
-    if since is not None and until is not None and since >= until:
-        return []
+) -> dict:
+    """Return a page of captured sessions that overlap the requested window."""
+    limit = min(max(limit, 1), 100)
+    offset = max(offset, 0)
 
-    filters = []
-    parameters = []
+    if since is not None and until is not None and since >= until:
+        return {"sessions": [], "total": 0, "limit": limit, "offset": offset}
+
+    filters = ["summary IS NOT NULL", "summary != ''"]
+    parameters: list = []
     if since is not None:
         filters.append("window_end >= ?")
         parameters.append(since)
@@ -437,18 +440,30 @@ def list_timeline_sessions(
         filters.append("window_start < ?")
         parameters.append(until)
 
-    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+    conditions = " AND ".join(filters)
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM sessions WHERE {conditions}",
+        parameters,
+    ).fetchone()[0]
+
     rows = conn.execute(
         f"""SELECT session_id, summary_id, created_at, window_start, window_end,
-                   summary, active_task, event_count
+                   summary, active_task, entities, event_count
             FROM sessions
-            {where_clause}
+            WHERE {conditions}
             ORDER BY window_end DESC, created_at DESC, summary_id DESC
             LIMIT ? OFFSET ?""",
         (*parameters, limit, offset),
     ).fetchall()
-    return [
-        {
+
+    sessions = []
+    for row in rows:
+        entities = row[7]
+        try:
+            entities = json.loads(entities) if entities else []
+        except (TypeError, ValueError, json.JSONDecodeError):
+            entities = []
+        sessions.append({
             "session_id": row[0],
             "summary_id": row[1],
             "created_at": row[2],
@@ -456,10 +471,11 @@ def list_timeline_sessions(
             "window_end": row[4],
             "summary": row[5],
             "active_task": row[6],
-            "event_count": row[7],
-        }
-        for row in rows
-    ]
+            "entities": entities,
+            "event_count": row[8] or 0,
+        })
+
+    return {"sessions": sessions, "total": total, "limit": limit, "offset": offset}
 
 
 def get_summaries(since: float) -> list[dict]:
@@ -578,7 +594,58 @@ def get_last_summary_time(session_id: str) -> float:
     return row[0] if row and row[0] else time.time() - 3600
 
 
+def list_session_events(summary_id: str) -> dict | None:
+    row = conn.execute(
+        """
+        SELECT summary_id, session_id, window_start, window_end,
+               summary, active_task, event_count
+        FROM sessions
+        WHERE summary_id = ?
+        """,
+        (summary_id,),
+    ).fetchone()
+    if row is None:
+        return None
 
+    events = conn.execute(
+        """
+        SELECT event_id, timestamp, event_type, process_name,
+               current_window_title, active_url, summary,
+               vision_ocr_text, vision_activity, screenshot_filename,
+               interesting, interest_score
+        FROM events
+        WHERE timestamp >= ? AND timestamp <= ?
+        ORDER BY timestamp ASC
+        """,
+        (row[2], row[3]),
+    ).fetchall()
+
+    return {
+        "summary_id": row[0],
+        "session_id": row[1],
+        "window_start": row[2],
+        "window_end": row[3],
+        "summary": row[4],
+        "active_task": row[5],
+        "event_count": row[6] or 0,
+        "events": [
+            {
+                "event_id": e[0],
+                "timestamp": e[1],
+                "event_type": e[2],
+                "process_name": e[3],
+                "window_title": e[4],
+                "active_url": e[5],
+                "summary": e[6],
+                "vision_ocr_text": (e[7] or "")[:1200],
+                "vision_activity": e[8],
+                "screenshot_filename": e[9],
+                "interesting": bool(e[10]),
+                "interest_score": e[11],
+            }
+            for e in events
+        ],
+    }
 
 
 ###########################################

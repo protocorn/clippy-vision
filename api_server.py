@@ -39,6 +39,7 @@ from core.storage import (
     export_data,
     get_data_stats,
     get_user_name,
+    list_session_events,
     list_timeline_sessions,
     set_user_name,
 )
@@ -352,22 +353,27 @@ def screenshot_file(filename: str):
 
 
 @app.get("/timeline/sessions")
+@app.get("/sessions")
 def timeline_sessions(
     since: float | None = None,
     until: float | None = None,
     limit: int = Query(40, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    return {
-        "sessions": list_timeline_sessions(
-            since=since,
-            until=until,
-            limit=limit,
-            offset=offset,
-        ),
-        "limit": limit,
-        "offset": offset,
-    }
+    return list_timeline_sessions(
+        since=since,
+        until=until,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/sessions/{summary_id}")
+def session_detail(summary_id: str):
+    data = list_session_events(summary_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return data
 
 
 @app.get("/conversations")

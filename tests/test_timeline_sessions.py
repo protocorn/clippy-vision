@@ -74,6 +74,7 @@ class TimelineSessionsTests(unittest.TestCase):
         second_page = second_response.json()
         self.assertEqual(first_page["limit"], 2)
         self.assertEqual(first_page["offset"], 0)
+        self.assertEqual(first_page["total"], 3)
         self.assertEqual(
             [session["summary_id"] for session in first_page["sessions"]],
             [newest_id, middle_id],
@@ -114,7 +115,7 @@ class TimelineSessionsTests(unittest.TestCase):
         self.assertEqual(http_response.status_code, 200)
         self.assertEqual(
             http_response.json(),
-            {"sessions": [], "limit": 40, "offset": 0},
+            {"sessions": [], "total": 0, "limit": 40, "offset": 0},
         )
 
     def test_endpoint_rejects_invalid_pagination(self):
