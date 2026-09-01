@@ -85,6 +85,8 @@ The installer includes a setup wizard that handles Python, Ollama, and all requi
 
 Clippy Vision is under active development. Three releases shipped in the first two weeks, including full macOS support, and bug reports usually get a reply the same day.
 
+**Trying Clippy?** [Share feedback (5 min)](https://forms.gle/qxqmNBXzJsWGAAe29) to help shape what we build next.
+
 ### System requirements
 
 Clippy Vision runs a local text model for chat and uses accessibility APIs plus OCR for screen capture (no vision model in the capture path).
