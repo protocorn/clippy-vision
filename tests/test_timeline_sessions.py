@@ -122,3 +122,37 @@ class TimelineSessionsTests(unittest.TestCase):
         response = self.client.get("/timeline/sessions", params={"limit": 0})
 
         self.assertEqual(response.status_code, 422)
+
+    def test_endpoint_deduplicates_identical_time_windows(self):
+        window_start = 1000.0
+        window_end = 2000.0
+        older_id = f"{self.summary_id_prefix}-dup-old"
+        newer_id = f"{self.summary_id_prefix}-dup-new"
+        for summary_id, created_at, vision_enriched in (
+            (older_id, 100.0, 0),
+            (newer_id, 200.0, 1),
+        ):
+            store_summary(
+                {
+                    "session_id": f"session-{summary_id}",
+                    "summary_id": summary_id,
+                    "created_at": created_at,
+                    "window_start": window_start,
+                    "window_end": window_end,
+                    "summary": f"Summary for {summary_id}",
+                    "active_task": "duplicate task",
+                    "event_count": 13,
+                },
+                vision_enriched=bool(vision_enriched),
+            )
+
+        response = self.client.get("/timeline/sessions", params={"limit": 40, "offset": 0})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        matching = [
+            session for session in payload["sessions"]
+            if session["summary_id"] in {older_id, newer_id}
+        ]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]["summary_id"], newer_id)

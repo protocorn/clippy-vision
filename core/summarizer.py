@@ -6,7 +6,6 @@ import uuid
 
 try:
     from core.distil import distil, should_distil
-    from core.events import get_session_id
     from core.storage import (
         get_events_for_window,
         get_sessions_needing_refresh,
@@ -16,7 +15,6 @@ try:
     )
 except ImportError:
     from distil import distil, should_distil
-    from events import get_session_id
     from storage import (
         get_events_for_window,
         get_sessions_needing_refresh,
@@ -36,6 +34,7 @@ RAW_LOOKBACK_SECONDS = 7 * 24 * 60 * 60
 MAX_SESSION_GROUPS_PER_TICK = 3
 MAX_VISION_REFRESHES_PER_TICK = 1
 MAX_EVENTS_PER_WINDOW = 25
+SESSION_GAP_SECS = 600  # merge events across process UUIDs within 10 min gaps
 MAX_PROMPT_CHARS = 7000
 PER_EVENT_SCREEN_CHARS = 500
 # Vision-refresh hot-loop guard: timeouts must not re-queue the same session every tick.
@@ -230,8 +229,25 @@ def summarize_window(events: list[dict], session_id: str) -> dict | None:
     }
     return summary
 
+def _group_events_by_time_window(
+    events: list[dict],
+    gap_seconds: float = SESSION_GAP_SECS,
+) -> list[list[dict]]:
+    """Merge unsummarized events across capture/API session_ids into activity windows."""
+    if not events:
+        return []
+    groups: list[list[dict]] = []
+    current = [events[0]]
+    for event in events[1:]:
+        if event["timestamp"] - current[-1]["timestamp"] <= gap_seconds:
+            current.append(event)
+        else:
+            groups.append(current)
+            current = [event]
+    groups.append(current)
+    return groups
 
-def _refresh_vision_enriched_sessions(session_id: str):
+def _refresh_vision_enriched_sessions():
     stale = get_sessions_needing_refresh()
     if not stale:
         return
@@ -239,6 +255,7 @@ def _refresh_vision_enriched_sessions(session_id: str):
     refreshed = 0
     for s in stale:
         summary_id = s["summary_id"]
+        source_session_id = s["session_id"]
         if _refresh_in_backoff(summary_id):
             continue
 
@@ -267,7 +284,7 @@ def _refresh_vision_enriched_sessions(session_id: str):
             f"with vision data ({len(selected)}/{len(events)} events)"
         )
         try:
-            summary = summarize_window(events, session_id)
+            summary = summarize_window(events, source_session_id)
         except Exception as e:
             if _note_refresh_failure(summary_id, e):
                 mark_session_vision_enriched(summary_id)
@@ -293,36 +310,31 @@ def _refresh_vision_enriched_sessions(session_id: str):
 
 def summarizer_loop():
     print("[summarizer] Summarizer started")
-    session_id = get_session_id()
 
     while True:
         tick_start = time.time()
         failed = False
         try:
             if not can_load_text():
-                # Don't soft-skip forever: try loading the model. A hard free-RAM
-                # floor was stranding summarizer while chat (INTERACTIVE) could load.
                 if ensure_text_model():
                     print("  [SUMMARIZER] text model warmed — continuing")
                 else:
                     print("  [SUMMARIZER] deferring — text model unavailable (warm failed or commit pressure)")
                     time.sleep(INTERVAL_SEC)
                     continue
-            events = get_unsummarized_events(time.time() - RAW_LOOKBACK_SECONDS)
-            grouped: dict[str, list[dict]] = {}
-            for event in events:
-                grouped.setdefault(event["session_id"], []).append(event)
 
-            ready = [items for items in grouped.values() if len(items) >= MIN_EVENTS]
+            events = get_unsummarized_events(time.time() - RAW_LOOKBACK_SECONDS)
+            ready = [
+                group for group in _group_events_by_time_window(events)
+                if len(group) >= MIN_EVENTS
+            ]
             ready.sort(key=lambda items: items[0]["timestamp"])
 
-            # Pass 1: work through pending session groups in bounded batches so
-            # restarts or long gaps catch up without monopolizing a single tick.
             for session_events in ready[:MAX_SESSION_GROUPS_PER_TICK]:
                 source_session_id = session_events[0]["session_id"]
                 print(
                     f"  [SUMMARIZER] Summarizing {min(len(session_events), MAX_EVENTS_PER_WINDOW)}"
-                    f"/{len(session_events)} events from session {source_session_id[:8]}"
+                    f"/{len(session_events)} events (window from {source_session_id[:8]})"
                 )
                 summary = summarize_window(session_events, source_session_id)
                 if summary:
@@ -330,29 +342,28 @@ def summarizer_loop():
                     print(f"  [SUMMARIZER] Done — {summary['active_task']}")
                     print(f"               {summary['summary'][:120]}...")
 
-            pending = sum(len(items) for items in grouped.values() if len(items) < MIN_EVENTS)
+            pending = sum(
+                len(group)
+                for group in _group_events_by_time_window(events)
+                if len(group) < MIN_EVENTS
+            )
             if pending:
                 print(
                     f"  [SUMMARIZER] {pending} event(s) remain in short sessions "
                     f"below the {MIN_EVENTS}-event threshold"
                 )
 
-            # Pass 2: at most one vision refresh per tick so chat can interleave
-            _refresh_vision_enriched_sessions(session_id)
+            _refresh_vision_enriched_sessions()
 
         except Exception as e:
             print(f"  [SUMMARIZER] Error: {e}")
             failed = True
 
-        # Sleep only for the time remaining in the interval so the tick cadence
-        # stays fixed regardless of how long the work took. Failed ticks wait a
-        # full interval so a dead Ollama is not retried with zero backoff.
         elapsed = time.time() - tick_start
         sleep_for = INTERVAL_SEC if failed else max(0.0, INTERVAL_SEC - elapsed)
         if elapsed > 1:
             print(f"  [SUMMARIZER] Work took {elapsed:.0f}s, sleeping {sleep_for:.0f}s until next tick")
         time.sleep(sleep_for)
-
 
 def start_summarizer() -> threading.Thread:
     t = threading.Thread(target=summarizer_loop, daemon=True, name="summarizer")

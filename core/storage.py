@@ -392,7 +392,18 @@ def store_event(event: Event):
 ###########################################
 ####### HELPERS FOR STORING SUMMARY #######
 ###########################################
+
 def store_summary(summary: dict, vision_enriched: bool = False, embedding: list | None = None):
+    if not vision_enriched:
+        existing = conn.execute(
+            """SELECT summary_id FROM sessions
+               WHERE window_start = ? AND window_end = ? AND event_count = ?
+               LIMIT 1""",
+            (summary["window_start"], summary["window_end"], summary["event_count"]),
+        ).fetchone()
+        if existing:
+            return
+
     conn.execute(
         """INSERT OR REPLACE INTO sessions (
             session_id, summary_id, created_at,
@@ -417,7 +428,6 @@ def store_summary(summary: dict, vision_enriched: bool = False, embedding: list 
     )
     conn.commit()
 
-
 def list_timeline_sessions(
     since: float | None = None,
     until: float | None = None,
@@ -441,16 +451,29 @@ def list_timeline_sessions(
         parameters.append(until)
 
     conditions = " AND ".join(filters)
+    deduped_from = f"""
+        FROM (
+            SELECT session_id, summary_id, created_at, window_start, window_end,
+                   summary, active_task, entities, event_count,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY window_start, window_end, event_count
+                       ORDER BY vision_enriched DESC, created_at DESC, summary_id DESC
+                   ) AS rn
+            FROM sessions
+            WHERE {conditions}
+        ) deduped
+        WHERE deduped.rn = 1
+    """
+
     total = conn.execute(
-        f"SELECT COUNT(*) FROM sessions WHERE {conditions}",
+        f"SELECT COUNT(*) {deduped_from}",
         parameters,
     ).fetchone()[0]
 
     rows = conn.execute(
         f"""SELECT session_id, summary_id, created_at, window_start, window_end,
                    summary, active_task, entities, event_count
-            FROM sessions
-            WHERE {conditions}
+            {deduped_from}
             ORDER BY window_end DESC, created_at DESC, summary_id DESC
             LIMIT ? OFFSET ?""",
         (*parameters, limit, offset),
@@ -477,7 +500,6 @@ def list_timeline_sessions(
 
     return {"sessions": sessions, "total": total, "limit": limit, "offset": offset}
 
-
 def get_summaries(since: float) -> list[dict]:
     rows = conn.execute(
         """SELECT session_id, summary_id, created_at,
@@ -503,8 +525,7 @@ def get_unsummarized_events(since: float) -> list[dict]:
            AND summary IS NOT NULL AND summary != ''
            AND NOT EXISTS (
                SELECT 1 FROM sessions s
-               WHERE s.session_id = events.session_id
-                 AND events.timestamp >= s.window_start
+               WHERE events.timestamp >= s.window_start
                  AND events.timestamp <= s.window_end
            )
            ORDER BY timestamp ASC""",
@@ -556,10 +577,9 @@ def get_events_for_window(window_start: float, window_end: float) -> list[dict]:
 
 
 def get_sessions_needing_refresh() -> list[dict]:
-    """Sessions summarized before vision finished that now have vision data available.
-    Searches across all sessions (not just current) so restarts don't orphan stale sessions."""
+    """Sessions summarized before vision finished that now have vision data available."""
     rows = conn.execute(
-        """SELECT s.summary_id, s.window_start, s.window_end
+        """SELECT s.summary_id, s.session_id, s.window_start, s.window_end
            FROM sessions s
            WHERE s.vision_enriched = 0
            AND EXISTS (
@@ -569,8 +589,15 @@ def get_sessions_needing_refresh() -> list[dict]:
                AND e.vision_ocr_text IS NOT NULL
            )""",
     ).fetchall()
-    return [{"summary_id": r[0], "window_start": r[1], "window_end": r[2]} for r in rows]
-
+    return [
+        {
+            "summary_id": r[0],
+            "session_id": r[1],
+            "window_start": r[2],
+            "window_end": r[3],
+        }
+        for r in rows
+    ]
 
 def mark_session_vision_enriched(summary_id: str):
     conn.execute("UPDATE sessions SET vision_enriched = 1 WHERE summary_id = ?", (summary_id,))
