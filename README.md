@@ -196,9 +196,9 @@ Each captured frame records bounded text from the foreground accessibility/UI AP
 
 ### Segment 2 - Summarization
 
-A background summarizer runs every 5 minutes and groups recent interesting events into session summaries using `qwen3:8b`. It runs in two passes per tick:
+A background summarizer wakes about every **60 seconds** and turns pending activity events into session summaries with `qwen3:8b`. That interval is the check cadence, not the session length: each tick looks for unsummarized events, merges them into activity windows (events within a 10-minute gap, capped at 30 minutes), and summarizes groups with at least 3 events (up to 25 per summary). It runs in two passes per tick:
 
-- **Pass 1:** Summarizes pending events immediately
+- **Pass 1:** Summarizes pending event windows
 - **Pass 2:** Refreshes sessions when delayed screenshot text becomes available
 
 ---

@@ -1573,6 +1573,363 @@
       cursor: default;
     }
 
+    /* ------- TIMELINE VIEW ------- */
+
+    #timeline-view {
+      min-height: 0;
+    }
+
+    #timeline-view>header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    #timeline-body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      overflow: hidden;
+    }
+
+    #timeline-list-wrap {
+      width: 100%;
+      max-width: 100%;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      border-right: 1px solid transparent;
+    }
+
+    #timeline-list-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px 12px;
+    }
+
+    #timeline-list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .timeline-intro {
+      font-size: 13px;
+      opacity: 0.65;
+      margin-bottom: 14px;
+      line-height: 1.45;
+      color: var(--muted);
+      padding: 0 4px;
+    }
+
+    .timeline-section {
+      margin-bottom: 8px;
+    }
+
+    .timeline-section-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 8px 6px 6px;
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .timeline-section.collapsed .timeline-section-items {
+      display: none;
+    }
+
+    .timeline-section-chevron {
+      display: inline-block;
+      transition: transform 0.15s ease;
+      font-size: 10px;
+    }
+
+    .timeline-section:not(.collapsed) .timeline-section-chevron {
+      transform: rotate(90deg);
+    }
+
+    .timeline-section-count {
+      margin-left: auto;
+      font-size: 10px;
+      opacity: 0.7;
+    }
+
+    .timeline-session {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      width: 100%;
+      text-align: left;
+      padding: 10px 12px;
+      margin-bottom: 2px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.12s ease, border-color 0.12s ease;
+    }
+
+    .timeline-session:hover {
+      background: var(--panel);
+    }
+
+    .timeline-session.active {
+      background: rgba(168, 144, 108, 0.12);
+      border-color: rgba(168, 144, 108, 0.35);
+    }
+
+    .timeline-session-title {
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.35;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .timeline-session-meta {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.3;
+    }
+
+    .timeline-session-badge {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-muted);
+      padding: 2px 7px;
+      border-radius: 999px;
+    }
+
+    .timeline-load-more-wrap {
+      padding: 8px 20px 20px;
+      flex-shrink: 0;
+    }
+
+    #timeline-load-more {
+      width: 100%;
+    }
+
+    #timeline-load-more[hidden] {
+      display: none;
+    }
+
+    .timeline-empty,
+    .timeline-error {
+      font-size: 13px;
+      color: var(--muted);
+      padding: 24px 8px;
+      text-align: center;
+      line-height: 1.5;
+    }
+
+    .timeline-error {
+      color: var(--danger);
+    }
+
+    #timeline-detail-wrap {
+      display: none;
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      background: var(--surface);
+    }
+
+    #timeline-detail-wrap.is-open {
+      display: flex;
+    }
+
+    #timeline-detail-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 24px 32px;
+    }
+
+    .timeline-detail-head {
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .timeline-detail-head h2 {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.4;
+      margin-bottom: 8px;
+    }
+
+    .timeline-detail-task {
+      font-size: 13px;
+      color: var(--accent);
+      margin-bottom: 6px;
+      line-height: 1.4;
+    }
+
+    .timeline-detail-time {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .timeline-detail-summary {
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--user-text);
+      margin-top: 12px;
+      white-space: pre-wrap;
+    }
+
+    .timeline-events-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .timeline-event {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--inset);
+      padding: 12px 14px;
+      margin-bottom: 10px;
+    }
+
+    .timeline-event-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .timeline-event-type {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-muted);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .timeline-event-time {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .timeline-event-window {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      line-height: 1.35;
+      margin-bottom: 4px;
+      word-break: break-word;
+    }
+
+    .timeline-event-process {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .timeline-event-text {
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--user-text);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .timeline-event-url {
+      font-size: 11px;
+      color: var(--accent);
+      word-break: break-all;
+      margin-top: 4px;
+    }
+
+    .timeline-event-ocr-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-top: 8px;
+      margin-bottom: 4px;
+    }
+
+    .timeline-event-ocr {
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    #timeline-detail-back {
+      display: none;
+      margin-bottom: 12px;
+    }
+
+    @media (min-width: 900px) {
+      #timeline-list-wrap {
+        width: 320px;
+        max-width: 38%;
+        flex-shrink: 0;
+        border-right-color: var(--border);
+      }
+
+      #timeline-detail-wrap {
+        display: flex;
+      }
+
+      #timeline-detail-wrap:not(.is-open) #timeline-detail-scroll {
+        display: none;
+      }
+
+      #timeline-detail-back {
+        display: none !important;
+      }
+    }
+
+    @media (max-width: 899px) {
+      #timeline-body.is-detail-only #timeline-list-wrap {
+        display: none;
+      }
+
+      #timeline-body.is-detail-only #timeline-detail-wrap {
+        display: flex;
+        width: 100%;
+      }
+
+      #timeline-body.is-detail-only #timeline-detail-back {
+        display: inline-flex;
+      }
+
+      #timeline-detail-wrap:not(.is-open) {
+        display: none !important;
+      }
+    }
+
     /* ------- SKILLS VIEW ------- */
 
     #skills-view {
@@ -1770,6 +2127,7 @@
       </div>
       <div class="header-actions">
         <button id="new-chat-btn" class="header-btn">New Chat</button>
+        <button id="timeline-btn" class="header-btn" title="Timeline">Timeline</button>
         <button id="skills-btn" class="header-btn" title="Skills">Skills</button>
         <button id="settings-btn" class="header-btn" title="Settings">Settings</button>
         <button id="capture-btn" title="Toggle screen capture">
@@ -1924,6 +2282,35 @@
     </div>
   </div>
 
+  <!-- Timeline view -->
+  <div id="timeline-view" class="view">
+    <header>
+      <div class="header-actions">
+        <button id="timeline-back" class="header-btn" title="Back to chat">← Back</button>
+        <span>Timeline</span>
+      </div>
+    </header>
+
+    <div id="timeline-body">
+      <div id="timeline-list-wrap">
+        <div id="timeline-list-scroll">
+          <p class="timeline-intro">Browse captured work sessions. Select one to see what happened during that stretch.</p>
+          <div id="timeline-list"></div>
+        </div>
+        <div class="timeline-load-more-wrap">
+          <button type="button" id="timeline-load-more" class="header-btn" hidden>Load more</button>
+        </div>
+      </div>
+
+      <div id="timeline-detail-wrap">
+        <div id="timeline-detail-scroll" hidden>
+          <button type="button" id="timeline-detail-back" class="header-btn">← All sessions</button>
+          <div id="timeline-detail-content"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Skills view -->
   <div id="skills-view" class="view">
     <header>
@@ -2014,6 +2401,7 @@
     const chatView = document.getElementById('chat-view')
     const skillsView = document.getElementById('skills-view')
     const settingsView = document.getElementById('settings-view')
+    const timelineView = document.getElementById('timeline-view')
     const nameInput = document.getElementById('name-input')
     const nameSubmit = document.getElementById('name-submit')
     const nameError = document.getElementById('name-error')
@@ -2045,6 +2433,15 @@
 
     const skillsBtn = document.getElementById('skills-btn')
     const skillsBack = document.getElementById('skills-back')
+    const timelineBtn = document.getElementById('timeline-btn')
+    const timelineBack = document.getElementById('timeline-back')
+    const timelineBody = document.getElementById('timeline-body')
+    const timelineList = document.getElementById('timeline-list')
+    const timelineLoadMore = document.getElementById('timeline-load-more')
+    const timelineDetailWrap = document.getElementById('timeline-detail-wrap')
+    const timelineDetailScroll = document.getElementById('timeline-detail-scroll')
+    const timelineDetailContent = document.getElementById('timeline-detail-content')
+    const timelineDetailBack = document.getElementById('timeline-detail-back')
     const skillSeeXToggle = document.getElementById('skill-see-x-toggle')
     const skillSeeXCard = document.getElementById('skill-see-x')
     const skillRulesEl = document.getElementById('skill-rules')
@@ -2338,6 +2735,343 @@
       else inputBox.focus()
     }
 
+    const EVENT_TYPE_LABELS = {
+      context_change: 'App switch',
+      screenshot_analysis: 'Screen capture',
+      paste: 'Paste',
+      clipboard_change: 'Clipboard',
+      typing_burst: 'Typing',
+    }
+
+    let timelineSessions = []
+    let timelineTotal = 0
+    let timelineOffset = 0
+    let timelineLoading = false
+    let timelineSelectedId = null
+    const TIMELINE_PAGE_SIZE = 40
+
+    function formatSessionTimeRange(windowStart, windowEnd) {
+      if (!windowStart && !windowEnd) return ''
+      const start = new Date((windowStart || windowEnd) * 1000)
+      const end = new Date((windowEnd || windowStart) * 1000)
+      const sameDay = startOfDay(start).getTime() === startOfDay(end).getTime()
+      const dateOpts = { month: 'short', day: 'numeric' }
+      const timeOpts = { hour: 'numeric', minute: '2-digit' }
+      if (start.getFullYear() !== new Date().getFullYear()) dateOpts.year = 'numeric'
+      if (sameDay) {
+        const datePart = start.toLocaleDateString('en-US', dateOpts)
+        const startTime = start.toLocaleTimeString('en-US', timeOpts)
+        const endTime = end.toLocaleTimeString('en-US', timeOpts)
+        return `${datePart} · ${startTime} – ${endTime}`
+      }
+      return `${start.toLocaleString('en-US', { ...dateOpts, ...timeOpts })} – ${end.toLocaleString('en-US', { ...dateOpts, ...timeOpts })}`
+    }
+
+    function sessionCardTitle(session) {
+      const task = (session.active_task || '').trim()
+      if (task) return task
+      const summary = (session.summary || '').trim()
+      if (!summary) return 'Captured session'
+      const firstLine = summary.split('\n').find((line) => line.trim()) || summary
+      return firstLine.length > 120 ? `${firstLine.slice(0, 117)}…` : firstLine
+    }
+
+    function groupTimelineSessions(items) {
+      const groups = new Map()
+      for (const item of items) {
+        const bucket = getTimeBucket(item.window_end || item.created_at)
+        if (!groups.has(bucket.key)) {
+          groups.set(bucket.key, { ...bucket, items: [] })
+        }
+        groups.get(bucket.key).items.push(item)
+      }
+      return Array.from(groups.values()).sort((a, b) => a.order - b.order)
+    }
+
+    function highlightTimelineSession(summaryId) {
+      timelineList.querySelectorAll('.timeline-session').forEach((el) => {
+        el.classList.toggle('active', el.dataset.id === summaryId)
+      })
+    }
+
+    function setTimelineDetailMode(open) {
+      timelineDetailWrap.classList.toggle('is-open', open)
+      timelineDetailScroll.hidden = !open
+      timelineBody.classList.toggle('is-detail-only', open)
+    }
+
+    function closeTimelineDetail() {
+      timelineSelectedId = null
+      setTimelineDetailMode(false)
+      highlightTimelineSession(null)
+    }
+
+    async function renderTimelineDetail(summaryId) {
+      timelineSelectedId = summaryId
+      highlightTimelineSession(summaryId)
+      setTimelineDetailMode(true)
+      timelineDetailContent.innerHTML = '<div class="timeline-empty">Loading session…</div>'
+
+      try {
+        const data = await window.clippy.getSessionDetail(summaryId)
+        timelineDetailContent.innerHTML = ''
+
+        const head = document.createElement('div')
+        head.className = 'timeline-detail-head'
+
+        const title = document.createElement('h2')
+        title.textContent = sessionCardTitle(data)
+
+        const time = document.createElement('div')
+        time.className = 'timeline-detail-time'
+        time.textContent = formatSessionTimeRange(data.window_start, data.window_end)
+
+        head.appendChild(title)
+        if ((data.active_task || '').trim() && data.active_task !== sessionCardTitle(data)) {
+          const task = document.createElement('div')
+          task.className = 'timeline-detail-task'
+          task.textContent = data.active_task
+          head.appendChild(task)
+        }
+        head.appendChild(time)
+
+        if ((data.summary || '').trim()) {
+          const summary = document.createElement('div')
+          summary.className = 'timeline-detail-summary'
+          summary.textContent = data.summary
+          head.appendChild(summary)
+        }
+
+        timelineDetailContent.appendChild(head)
+
+        const eventsLabel = document.createElement('div')
+        eventsLabel.className = 'timeline-events-label'
+        // Prefer the stored summarizer count so the detail header matches the sidebar badge.
+        const storedCount = Number(data.event_count)
+        const eventCount = Number.isFinite(storedCount) && storedCount > 0
+          ? storedCount
+          : (data.events || []).length
+        eventsLabel.textContent = eventCount === 1 ? '1 event' : `${eventCount} events`
+        timelineDetailContent.appendChild(eventsLabel)
+
+        const listedEvents = data.events || []
+        if (!listedEvents.length) {
+          const empty = document.createElement('div')
+          empty.className = 'timeline-empty'
+          empty.textContent = 'No individual events stored for this session window.'
+          timelineDetailContent.appendChild(empty)
+          return
+        }
+
+        for (const event of listedEvents) {
+          timelineDetailContent.appendChild(createTimelineEventCard(event))
+        }
+      } catch (error) {
+        timelineDetailContent.innerHTML = `<div class="timeline-error">Could not load session: ${error.message}</div>`
+      }
+    }
+
+    function truncateEventText(text, maxLen = 800) {
+      const trimmed = (text || '').trim()
+      if (!trimmed) return ''
+      return trimmed.length > maxLen ? `${trimmed.slice(0, maxLen - 3)}…` : trimmed
+    }
+
+    function eventTextsOverlap(primary, secondary) {
+      const a = (primary || '').trim().replace(/\s+/g, ' ').toLowerCase()
+      const b = (secondary || '').trim().replace(/\s+/g, ' ').toLowerCase()
+      if (!a || !b) return false
+      if (a === b) return true
+      if (a.length >= 40 && b.includes(a.slice(0, 40))) return true
+      if (b.length >= 40 && a.includes(b.slice(0, 40))) return true
+      return false
+    }
+
+    function createTimelineEventCard(event) {
+      const card = document.createElement('article')
+      card.className = 'timeline-event'
+
+      const head = document.createElement('div')
+      head.className = 'timeline-event-head'
+
+      const type = document.createElement('span')
+      type.className = 'timeline-event-type'
+      type.textContent = EVENT_TYPE_LABELS[event.event_type] || event.event_type || 'Event'
+
+      const time = document.createElement('span')
+      time.className = 'timeline-event-time'
+      time.textContent = formatConversationTime(event.timestamp)
+
+      head.appendChild(type)
+      head.appendChild(time)
+      card.appendChild(head)
+
+      const windowTitle = (event.window_title || '').trim()
+      if (windowTitle) {
+        const win = document.createElement('div')
+        win.className = 'timeline-event-window'
+        win.textContent = windowTitle
+        card.appendChild(win)
+      }
+
+      const processName = (event.process_name || '').trim()
+      if (processName) {
+        const proc = document.createElement('div')
+        proc.className = 'timeline-event-process'
+        proc.textContent = processName
+        card.appendChild(proc)
+      }
+
+      const summary = truncateEventText(event.summary)
+      const activity = truncateEventText(event.vision_activity)
+      const primary = summary || activity
+      if (primary) {
+        const text = document.createElement('div')
+        text.className = 'timeline-event-text'
+        text.textContent = primary
+        card.appendChild(text)
+      }
+
+      const ocr = truncateEventText(event.vision_ocr_text)
+      if (ocr && !eventTextsOverlap(primary, ocr)) {
+        const label = document.createElement('div')
+        label.className = 'timeline-event-ocr-label'
+        label.textContent = 'Screen text'
+        card.appendChild(label)
+        const ocrEl = document.createElement('div')
+        ocrEl.className = 'timeline-event-ocr'
+        ocrEl.textContent = ocr
+        card.appendChild(ocrEl)
+      }
+
+      const url = (event.active_url || '').trim()
+      if (url) {
+        const urlEl = document.createElement('div')
+        urlEl.className = 'timeline-event-url'
+        urlEl.textContent = url
+        card.appendChild(urlEl)
+      }
+
+      return card
+    }
+
+    function createTimelineSessionButton(session) {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'timeline-session'
+      btn.dataset.id = session.summary_id
+      if (session.summary_id === timelineSelectedId) btn.classList.add('active')
+
+      const title = document.createElement('span')
+      title.className = 'timeline-session-title'
+      title.textContent = sessionCardTitle(session)
+
+      const meta = document.createElement('span')
+      meta.className = 'timeline-session-meta'
+      meta.textContent = formatSessionTimeRange(session.window_start, session.window_end)
+
+      const badge = document.createElement('span')
+      badge.className = 'timeline-session-badge'
+      const count = session.event_count || 0
+      badge.textContent = count === 1 ? '1 event' : `${count} events`
+
+      btn.appendChild(title)
+      btn.appendChild(meta)
+      btn.appendChild(badge)
+      btn.addEventListener('click', () => renderTimelineDetail(session.summary_id))
+      return btn
+    }
+
+    function renderTimelineList() {
+      if (!timelineSessions.length) {
+        timelineList.innerHTML = '<div class="timeline-empty">No captured sessions yet. Turn on capture and Clippy will summarize your work here.</div>'
+        timelineLoadMore.hidden = true
+        return
+      }
+
+      const groups = groupTimelineSessions(timelineSessions)
+      const openByDefault = new Set(['today', 'yesterday', '3days'])
+      timelineList.innerHTML = ''
+
+      for (const group of groups) {
+        const section = document.createElement('div')
+        section.className = 'timeline-section'
+        if (!openByDefault.has(group.key)) section.classList.add('collapsed')
+
+        const label = document.createElement('button')
+        label.type = 'button'
+        label.className = 'timeline-section-label'
+        label.innerHTML =
+          `<span class="timeline-section-chevron">▸</span>` +
+          `<span>${group.label}</span>` +
+          `<span class="timeline-section-count">${group.items.length}</span>`
+        label.addEventListener('click', () => section.classList.toggle('collapsed'))
+        section.appendChild(label)
+
+        const itemsWrap = document.createElement('div')
+        itemsWrap.className = 'timeline-section-items'
+        for (const session of group.items) {
+          itemsWrap.appendChild(createTimelineSessionButton(session))
+        }
+        section.appendChild(itemsWrap)
+        timelineList.appendChild(section)
+      }
+
+      timelineLoadMore.hidden = timelineSessions.length >= timelineTotal
+    }
+
+    async function loadTimelineSessions({ reset = false } = {}) {
+      if (timelineLoading) return
+      timelineLoading = true
+      if (reset) {
+        timelineSessions = []
+        timelineOffset = 0
+        timelineTotal = 0
+        timelineList.innerHTML = '<div class="timeline-empty">Loading sessions…</div>'
+        timelineLoadMore.hidden = true
+      } else {
+        timelineLoadMore.disabled = true
+        timelineLoadMore.textContent = 'Loading…'
+      }
+
+      try {
+        const data = await window.clippy.listTimelineSessions({
+          limit: TIMELINE_PAGE_SIZE,
+          offset: timelineOffset,
+        })
+        timelineTotal = data.total || 0
+        timelineSessions = reset
+          ? (data.sessions || [])
+          : timelineSessions.concat(data.sessions || [])
+        timelineOffset = timelineSessions.length
+        renderTimelineList()
+      } catch (error) {
+        if (reset) {
+          timelineList.innerHTML = `<div class="timeline-error">Failed to load sessions: ${error.message}</div>`
+        } else {
+          window.alert(`Could not load more sessions: ${error.message}`)
+        }
+      } finally {
+        timelineLoading = false
+        timelineLoadMore.disabled = false
+        timelineLoadMore.textContent = 'Load more'
+      }
+    }
+
+    async function openTimeline() {
+      closeDrawer()
+      closeTimelineDetail()
+      showView(timelineView)
+      await loadTimelineSessions({ reset: true })
+    }
+
+    function closeTimeline() {
+      closeTimelineDetail()
+      showView(chatView)
+      if (chatMain.classList.contains('is-welcome')) welcomeInput.focus()
+      else inputBox.focus()
+    }
+
 
     function parseAssistantContent(raw) {
       const text = raw || ''
@@ -2580,6 +3314,7 @@
       skillsView.classList.remove('active')
       loadingView.classList.remove('active')
       settingsView.classList.remove('active')
+      timelineView.classList.remove('active')
       view.classList.add('active')
     }
 
@@ -3515,6 +4250,10 @@
     })
     skillsBtn.addEventListener('click', openSkills)
     skillsBack.addEventListener('click', closeSkills)
+    timelineBtn.addEventListener('click', openTimeline)
+    timelineBack.addEventListener('click', closeTimeline)
+    timelineLoadMore.addEventListener('click', () => loadTimelineSessions({ reset: false }))
+    timelineDetailBack.addEventListener('click', closeTimelineDetail)
 
     init()
   </script>

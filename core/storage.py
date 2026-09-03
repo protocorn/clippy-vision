@@ -7,6 +7,13 @@ from core.events import Event
 from core.paths import get_db_path
 
 TTL_SUMMARY_DAYS = 90
+SUMMARIZER_EVENT_TYPES = (
+    "context_change",
+    "screenshot_analysis",
+    "paste",
+    "clipboard_change",
+    "typing_burst",
+)
 
 _DB_PATH = str(get_db_path())
 conn = sqlite3.connect(_DB_PATH, check_same_thread=False, timeout=30)
@@ -513,15 +520,15 @@ def get_summaries(since: float) -> list[dict]:
     return [{"session_id": r[0], "summary_id": r[1], "created_at": r[2], "window_start": r[3], "window_end": r[4], "summary": r[5], "active_task": r[6], "entities": r[7], "event_count": r[8], "expires_at": r[9], "vision_enriched": r[10]} for r in rows]
 
 def get_unsummarized_events(since: float) -> list[dict]:
+    placeholders = ",".join("?" for _ in SUMMARIZER_EVENT_TYPES)
     rows = conn.execute(
-        """SELECT event_id, session_id, timestamp, event_type,
+        f"""SELECT event_id, session_id, timestamp, event_type,
                   process_name, current_window_title,
                   summary, vision_activity, vision_ocr_text,
                   interest_reason
            FROM events
            WHERE timestamp > ?
-           AND event_type IN ('context_change', 'screenshot_analysis', 'paste',
-                              'clipboard_change', 'typing_burst')
+           AND event_type IN ({placeholders})
            AND summary IS NOT NULL AND summary != ''
            AND NOT EXISTS (
                SELECT 1 FROM sessions s
@@ -529,7 +536,7 @@ def get_unsummarized_events(since: float) -> list[dict]:
                  AND events.timestamp <= s.window_end
            )
            ORDER BY timestamp ASC""",
-        (since,)
+        (since, *SUMMARIZER_EVENT_TYPES),
     ).fetchall()
     return [
         {
@@ -634,17 +641,20 @@ def list_session_events(summary_id: str) -> dict | None:
     if row is None:
         return None
 
+    placeholders = ",".join("?" for _ in SUMMARIZER_EVENT_TYPES)
     events = conn.execute(
-        """
+        f"""
         SELECT event_id, timestamp, event_type, process_name,
                current_window_title, active_url, summary,
                vision_ocr_text, vision_activity, screenshot_filename,
                interesting, interest_score
         FROM events
         WHERE timestamp >= ? AND timestamp <= ?
+          AND event_type IN ({placeholders})
+          AND summary IS NOT NULL AND summary != ''
         ORDER BY timestamp ASC
         """,
-        (row[2], row[3]),
+        (row[2], row[3], *SUMMARIZER_EVENT_TYPES),
     ).fetchall()
 
     return {
@@ -673,6 +683,16 @@ def list_session_events(summary_id: str) -> dict | None:
             for e in events
         ],
     }
+
+
+def delete_oversized_sessions(max_duration_secs: float) -> int:
+    """Remove sessions whose time window exceeds the summarizer's hard duration cap."""
+    cur = conn.execute(
+        "DELETE FROM sessions WHERE (window_end - window_start) > ?",
+        (max_duration_secs,),
+    )
+    conn.commit()
+    return int(cur.rowcount or 0)
 
 
 ###########################################

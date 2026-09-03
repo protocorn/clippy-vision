@@ -100,6 +100,89 @@ class SummarizerDedupTests(unittest.TestCase):
         self.assertEqual(len(groups[0]), 3)
         self.assertEqual(len(groups[1]), 1)
 
+    def test_group_events_by_time_window_respects_max_duration(self):
+        base = 4_000_000.0
+        events = [
+            {"session_id": self.capture_sid, "timestamp": base + offset}
+            for offset in (0, 300, 600, 900, 1200, 1500, 1801)
+        ]
+        groups = _group_events_by_time_window(
+            events,
+            gap_seconds=600,
+            max_duration_secs=1800,
+        )
+        self.assertEqual(len(groups), 2)
+        self.assertEqual(len(groups[0]), 6)
+        self.assertEqual(len(groups[1]), 1)
+
+    def test_delete_oversized_sessions_removes_mega_windows(self):
+        from core.storage import delete_oversized_sessions
+
+        base = 5_000_000.0
+        store_summary(
+            {
+                "session_id": self.capture_sid,
+                "summary_id": f"{self.prefix}-mega",
+                "created_at": base,
+                "window_start": base,
+                "window_end": base + (34 * 3600),
+                "summary": "Mega",
+                "active_task": "debugging code",
+                "event_count": 11,
+            },
+            vision_enriched=True,
+        )
+        removed = delete_oversized_sessions(30 * 60)
+        self.assertEqual(removed, 1)
+        remaining = conn.execute(
+            "SELECT COUNT(*) FROM sessions WHERE summary_id = ?",
+            (f"{self.prefix}-mega",),
+        ).fetchone()[0]
+        self.assertEqual(remaining, 0)
+
+    def test_list_session_events_filters_to_summarizer_types(self):
+        from core.storage import list_session_events
+
+        base = 6_000_000.0
+        summary_id = f"{self.prefix}-detail"
+        store_summary(
+            {
+                "session_id": self.capture_sid,
+                "summary_id": summary_id,
+                "created_at": base,
+                "window_start": base,
+                "window_end": base + 60,
+                "summary": "Detail filter",
+                "active_task": "testing",
+                "event_count": 2,
+            },
+            vision_enriched=True,
+        )
+        for label, event_type, summary in (
+            ("keep", "context_change", "Switched apps"),
+            ("drop-type", "mouse_burst", "Mouse burst"),
+            ("drop-empty", "typing_burst", ""),
+        ):
+            conn.execute(
+                """INSERT INTO events (
+                    event_id, session_id, timestamp, event_type, summary, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    f"{self.prefix}-{label}",
+                    self.capture_sid,
+                    base + 10,
+                    event_type,
+                    summary,
+                    base + 86400,
+                ),
+            )
+        conn.commit()
+
+        detail = list_session_events(summary_id)
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail["event_count"], 2)
+        self.assertEqual([event["event_id"] for event in detail["events"]], [f"{self.prefix}-keep"])
+
 
 if __name__ == "__main__":
     unittest.main()

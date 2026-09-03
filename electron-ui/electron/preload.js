@@ -160,6 +160,26 @@ contextBridge.exposeInMainWorld('clippy', {
         return response.json()
     },
 
+    listTimelineSessions: async ({ since, until, limit = 40, offset = 0 } = {}) => {
+        const params = new URLSearchParams({
+            limit: String(limit),
+            offset: String(offset),
+        })
+        if (since != null) params.set('since', String(since))
+        if (until != null) params.set('until', String(until))
+        const response = await fetch(await apiUrl(`/timeline/sessions?${params}`))
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    getSessionDetail: async (summaryId) => {
+        const response = await fetch(
+            await apiUrl(`/sessions/${encodeURIComponent(summaryId)}`)
+        )
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
     checkHealth: async () => {
         const response = await fetch(await apiUrl('/health'))
         return response.ok

@@ -7,6 +7,7 @@ import uuid
 try:
     from core.distil import distil, should_distil
     from core.storage import (
+        delete_oversized_sessions,
         get_events_for_window,
         get_sessions_needing_refresh,
         get_unsummarized_events,
@@ -16,6 +17,7 @@ try:
 except ImportError:
     from distil import distil, should_distil
     from storage import (
+        delete_oversized_sessions,
         get_events_for_window,
         get_sessions_needing_refresh,
         get_unsummarized_events,
@@ -28,13 +30,14 @@ from core.local_embeddings import embed_text
 from core.model_residency import can_load_text, ensure_text_model
 
 MODEL = "qwen3:8b"
-INTERVAL_SEC = 60
+INTERVAL_SEC = 60  # wake cadence; session length is controlled below
 MIN_EVENTS = 3  # don't summarize if fewer than 3 interesting events
 RAW_LOOKBACK_SECONDS = 7 * 24 * 60 * 60
 MAX_SESSION_GROUPS_PER_TICK = 3
 MAX_VISION_REFRESHES_PER_TICK = 1
 MAX_EVENTS_PER_WINDOW = 25
 SESSION_GAP_SECS = 600  # merge events across process UUIDs within 10 min gaps
+MAX_SESSION_DURATION_SECS = 30 * 60  # hard cap so backlog cannot form multi-hour sessions
 MAX_PROMPT_CHARS = 7000
 PER_EVENT_SCREEN_CHARS = 500
 # Vision-refresh hot-loop guard: timeouts must not re-queue the same session every tick.
@@ -115,9 +118,12 @@ def _screen_text_fingerprint(text: str) -> str:
 
 def _select_events_for_prompt(events: list[dict]) -> list[dict]:
     """Keep an oldest-first slice so backlog drains instead of chasing the newest tip."""
-    if len(events) <= MAX_EVENTS_PER_WINDOW:
-        return list(events)
-    return list(events[:MAX_EVENTS_PER_WINDOW])
+    selected = list(events[:MAX_EVENTS_PER_WINDOW]) if len(events) > MAX_EVENTS_PER_WINDOW else list(events)
+    if len(selected) < 2:
+        return selected
+    start = selected[0]["timestamp"]
+    clipped = [event for event in selected if event["timestamp"] - start <= MAX_SESSION_DURATION_SECS]
+    return clipped if clipped else selected[:1]
 
 
 def _build_prompt(events: list[dict]) -> str:
@@ -232,6 +238,7 @@ def summarize_window(events: list[dict], session_id: str) -> dict | None:
 def _group_events_by_time_window(
     events: list[dict],
     gap_seconds: float = SESSION_GAP_SECS,
+    max_duration_secs: float = MAX_SESSION_DURATION_SECS,
 ) -> list[list[dict]]:
     """Merge unsummarized events across capture/API session_ids into activity windows."""
     if not events:
@@ -239,7 +246,9 @@ def _group_events_by_time_window(
     groups: list[list[dict]] = []
     current = [events[0]]
     for event in events[1:]:
-        if event["timestamp"] - current[-1]["timestamp"] <= gap_seconds:
+        gap_ok = event["timestamp"] - current[-1]["timestamp"] <= gap_seconds
+        duration_ok = event["timestamp"] - current[0]["timestamp"] <= max_duration_secs
+        if gap_ok and duration_ok:
             current.append(event)
         else:
             groups.append(current)
@@ -366,6 +375,12 @@ def summarizer_loop():
         time.sleep(sleep_for)
 
 def start_summarizer() -> threading.Thread:
+    try:
+        removed = delete_oversized_sessions(MAX_SESSION_DURATION_SECS)
+        if removed:
+            print(f"[summarizer] Removed {removed} oversized session(s) (>{MAX_SESSION_DURATION_SECS / 60:.0f} min)")
+    except Exception as exc:
+        print(f"[summarizer] Oversized-session cleanup skipped: {exc}")
     t = threading.Thread(target=summarizer_loop, daemon=True, name="summarizer")
     t.start()
     return t
