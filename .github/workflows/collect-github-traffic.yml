@@ -1,0 +1,57 @@
+name: Collect GitHub Traffic
+
+# Archives views/clones/referrers/paths/downloads beyond GitHub's 14-day UI window.
+# Requires repo secret TRAFFIC_TOKEN (default GITHUB_TOKEN cannot call traffic APIs).
+
+on:
+  schedule:
+    # 13:00 UTC daily (~9:00 AM Eastern during EDT)
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect-github-traffic
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require TRAFFIC_TOKEN
+        env:
+          TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+        run: |
+          if [ -z "${TRAFFIC_TOKEN}" ]; then
+            echo "::error::Set repo secret TRAFFIC_TOKEN to a PAT that can read traffic."
+            echo "Fine-grained PAT: Administration=Read on this repo (plus Contents=Read)."
+            echo "Classic PAT: repo scope."
+            echo "Create: https://github.com/settings/personal-access-tokens/new"
+            echo "Then: gh secret set TRAFFIC_TOKEN --repo ${{ github.repository }}"
+            exit 1
+          fi
+
+      - name: Collect traffic CSVs
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+        run: |
+          $owner, $repo = "${{ github.repository }}".Split("/")
+          ./scripts/collect_github_traffic.ps1 -Owner $owner -Repo $repo
+
+      - name: Commit CSV updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add stats/github-traffic/*.csv
+          if git diff --staged --quiet; then
+            echo "No traffic CSV changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: archive GitHub traffic snapshot"
+          git push
