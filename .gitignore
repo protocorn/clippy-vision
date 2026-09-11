@@ -15,16 +15,16 @@ core/data/
 !core/data/router_seed.jsonl
 
 # ============================================================
-# MODEL WEIGHTS  (large binaries — host on Hugging Face / GitHub Releases)
+# MODEL WEIGHTS  (downloaded from Hugging Face on first run)
+# Embeddings: sentence-transformers/all-MiniLM-L6-v2
+# Router:     sahil2412/clippy-vision-router
 # ============================================================
 *.pt
 *.bin
 *.safetensors
 models/router_classifier/
-!models/embeddings/
-!models/embeddings/all-MiniLM-L6-v2/
-!models/embeddings/all-MiniLM-L6-v2/**
-models/embeddings/**/.cache/
+models/embeddings/
+models/**/.cache/
 
 # ============================================================
 # BUILD / PACKAGING ARTIFACTS

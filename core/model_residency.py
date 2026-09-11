@@ -43,8 +43,22 @@ _LIGHT_FLOOR = 1.0 * _GB
 _TEXT_FLOOR = 1.5 * _GB
 # Windows reports commit charge beyond physical RAM as swap. Near-exhaustion is
 # what raises "paging file is too small" (os error 1455) and ONNX bad_alloc,
-# even while physical RAM still looks free.
+# even while physical RAM still looks free. This is the real signal for
+# genuine memory distress — unlike raw virtual_memory().percent, which is
+# mostly OS file-cache/standby-list pages that get reclaimed instantly and
+# don't mean anything is struggling. A machine can sit at 90%+ RAM "used" at
+# idle and be perfectly healthy, so a flat percent-used threshold was tried
+# here and dropped: it either false-triggers on a machine's normal idle
+# state, or has to be set so high it stops meaning anything. Swap% doesn't
+# have that ambiguity — it only rises when physical RAM genuinely ran out.
 _COMMIT_PRESSURE_PCT = 75.0
+# CPU, unlike RAM%, is an unambiguous signal: high means real contention for
+# cycles right now, not harmless caching. This is what actually explained the
+# 14-21s OCR calls in stress testing (see core/data/performance/capture-
+# baseline-20260909-*.json) — the API process itself was pegging a full core,
+# starving capture's own thread scheduling, while system-wide CPU% looked
+# moderate on this machine's many cores.
+_CPU_PRESSURE_PCT = 80.0
 _PS_CACHE_TTL_S = 5.0
 
 KEEP_ALIVE_PINNED = "1h"
@@ -81,6 +95,36 @@ def _commit_pressured() -> bool:
         return psutil.swap_memory().percent >= _COMMIT_PRESSURE_PCT
     except Exception:
         return False
+
+
+def _cpu_pressured() -> bool:
+    """True when the system is already CPU-busy enough that starting more
+    OCR/model work would mostly contend for cycles rather than run at a
+    reasonable speed. A short blocking sample (not the non-blocking
+    since-last-call variant) because these gates are called at most once per
+    OCR attempt or model-load attempt, never in a tight loop, so 0.2s here is
+    negligible next to the multi-second work it's deciding whether to start.
+    """
+    try:
+        return psutil.cpu_percent(interval=0.2) >= _CPU_PRESSURE_PCT
+    except Exception:
+        return False
+
+
+def _under_pressure() -> bool:
+    """Any reason to defer memory/CPU-heavy work right now, beyond the
+    per-caller absolute-byte floor each function below also checks.
+    """
+    return _commit_pressured() or _cpu_pressured()
+
+
+def pressure_reason() -> str | None:
+    """Which pressure signal (if any) is currently active — for logs/diagnostics."""
+    if _commit_pressured():
+        return f"windows commit charge >= {_COMMIT_PRESSURE_PCT:.0f}%"
+    if _cpu_pressured():
+        return f"system CPU usage >= {_CPU_PRESSURE_PCT:.0f}%"
+    return None
 
 
 def _ollama_loaded_models() -> set[str]:
@@ -155,10 +199,12 @@ def can_cold_load_text(available: int | None = None) -> bool:
     if not server_reachable():
         return False
     if gpu_can_host_text():
-        # VRAM hosts the weights; only runaway commit charge is a real blocker.
-        return not _commit_pressured()
+        # VRAM hosts the weights; system-wide pressure is still a real
+        # blocker (a hot CPU won't stop the load, but it means this is a bad
+        # moment to add a large inference job on top of everything else).
+        return not _under_pressure()
     free = _available() if available is None else available
-    return free >= _TEXT_FLOOR and not _commit_pressured()
+    return free >= _TEXT_FLOOR and not _under_pressure()
 
 
 def can_load_text(available: int | None = None) -> bool:
@@ -179,8 +225,9 @@ def text_unavailable_reason() -> str:
         return "text model is available"
     if not server_reachable():
         return f"ollama not reachable at {base_url()} — is the Ollama server running?"
-    if _commit_pressured():
-        return "windows commit charge is near exhaustion"
+    pressure = pressure_reason()
+    if pressure:
+        return f"system under pressure ({pressure}) — deferring cold load"
     if not gpu_can_host_text() and _available() < _TEXT_FLOOR:
         return (
             f"free RAM {_available() / _GB:.1f}GB is below the "
@@ -192,13 +239,18 @@ def text_unavailable_reason() -> str:
 def can_load_light(available: int | None = None) -> bool:
     """True if a small torch model (MiniLM router, CLIP) can load."""
     free = _available() if available is None else available
-    return free >= _LIGHT_FLOOR and not _commit_pressured()
+    return free >= _LIGHT_FLOOR and not _under_pressure()
 
 
 def can_run_ocr(available: int | None = None) -> bool:
-    """True unless memory is already in the allocation-failure range."""
+    """True unless memory is already in the allocation-failure range, or the
+    system is genuinely thrashing/CPU-saturated right now (commit/swap or
+    CPU pressure) — the common case in stress testing where OCR technically
+    "fits" in RAM but runs 15-20x slower than normal because it's contending
+    for cycles or the OS is paging.
+    """
     free = _available() if available is None else available
-    return free >= _OCR_FLOOR and not _commit_pressured()
+    return free >= _OCR_FLOOR and not _under_pressure()
 
 
 def load_residency() -> dict:

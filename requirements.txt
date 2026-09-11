@@ -11,6 +11,7 @@ rapidocr>=3.8.1,<4
 onnxruntime>=1.19.2
 safetensors>=0.4.0
 torch
+huggingface_hub>=0.34.0,<1.0
 scikit-learn
 fastapi
 uvicorn[standard]

@@ -10,8 +10,9 @@ import time
 from collections.abc import Iterable
 from pathlib import Path
 
-# The bundled model is the preferred path. The deterministic hash encoder keeps
-# keyword-like retrieval available when PyTorch or the model cannot be loaded.
+# The local MiniLM checkpoint is preferred (downloaded from Hugging Face on
+# first use). The deterministic hash encoder keeps keyword-like retrieval
+# available when PyTorch or the model cannot be loaded.
 MODEL_ID = "local:sentence-transformers/all-MiniLM-L6-v2"
 MODEL_DIMENSION = 384
 MAX_TOKENS = 256
@@ -45,9 +46,14 @@ def _load_bundle():
             import torch
             from transformers import AutoModel, AutoTokenizer
 
+            from core.model_download import ensure_embedding_model, embedding_ready
+
             path = model_dir()
-            if not (path / "config.json").is_file() or not (path / "model.safetensors").is_file():
-                raise FileNotFoundError(f"Bundled MiniLM model is missing from {path}")
+            if not embedding_ready(path):
+                ensure_embedding_model()
+                path = model_dir()
+            if not embedding_ready(path):
+                raise FileNotFoundError(f"MiniLM model is missing from {path}")
             tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
             model = AutoModel.from_pretrained(path, local_files_only=True)
             if int(model.config.hidden_size) != MODEL_DIMENSION:
@@ -232,14 +238,16 @@ def embed_text(text: str) -> list[float]:
 
 def embedding_status() -> dict:
     bundle = _bundle
-    bundled = (model_dir() / "model.safetensors").is_file()
-    active_model = MODEL_ID if bundled and _load_error is None else "local:hash-384-v1"
+    from core.model_download import embedding_ready
+
+    ready = embedding_ready(model_dir())
+    active_model = MODEL_ID if ready and _load_error is None else "local:hash-384-v1"
     return {
-        "provider": "bundled",
+        "provider": "local",
         "model": active_model,
         "dimension": MODEL_DIMENSION,
         "model_path": str(model_dir()),
-        "bundled": bundled,
+        "bundled": ready,
         "loaded": bundle is not None,
         "error": str(_load_error) if _load_error else None,
     }

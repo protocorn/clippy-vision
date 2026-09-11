@@ -6,7 +6,12 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import torch
+# torch is NOT imported at module level on purpose: this module is imported
+# by api_server.py and agent/react_agent.py regardless of whether the router
+# classifier ever loads (can_load_light() may say no, or the checkpoint may
+# be missing). Importing torch unconditionally cost real RSS in the API
+# process even when the classifier never actually loads. It's imported lazily
+# inside load_classifier() instead, only once we know we're really loading it.
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -100,30 +105,18 @@ def _deterministic_route(query: str) -> RouterDecision | None:
 
   return None
 
-class MiniLMClassifier(torch.nn.Module):
-  def __init__(self, base_model: str, num_labels: int, *, local_files_only: bool = False):
-    super().__init__()
-    from transformers import AutoModel
-
-    self.encoder = AutoModel.from_pretrained(base_model, local_files_only=local_files_only)
-    h = self.encoder.config.hidden_size
-    self.dropout = torch.nn.Dropout(0.1)
-    self.classifier = torch.nn.Linear(h, num_labels)
-
-  def mean_pool(self, token, mask):
-    m = mask.unsqueeze(-1).expand(token.size()).float()
-    return torch.sum(token * m, 1) / torch.clamp(m.sum(1), min=1e-9)
-
-  def forward(self, input_ids, attention_mask):
-    out = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-    return self.classifier(self.dropout(self.mean_pool(out.last_hidden_state, attention_mask)))
-
-
 def load_classifier():
   global _classification_model, _classification_tokenizer
   with _classifier_lock:
     if _classification_model is not None:
       return _classification_model, _classification_tokenizer
+
+    try:
+      from core.model_download import ensure_router_model, router_ready
+      if not router_ready(CLASSIFIER_PATH):
+        ensure_router_model()
+    except Exception as e:
+      print(f"[router] Could not download classifier: {e}")
 
     if not CLASSIFIER_PATH.exists() or not (CLASSIFIER_PATH / "model.pt").is_file():
       print(f"[router] Classifier checkpoint not found at {CLASSIFIER_PATH}; using tool-driven retrieval")
@@ -134,12 +127,33 @@ def load_classifier():
       return None, None
 
     try:
-      from transformers import AutoTokenizer
+      # Deferred until we're certain we're loading: see module-level note.
+      import torch
+      from transformers import AutoConfig, AutoModel, AutoTokenizer
+
+      class MiniLMClassifier(torch.nn.Module):
+        def __init__(self, base_model: str, num_labels: int, *, local_files_only: bool = False):
+          super().__init__()
+          # Architecture only — fine-tuned weights come from model.pt via load_state_dict.
+          config = AutoConfig.from_pretrained(base_model, local_files_only=local_files_only)
+          self.encoder = AutoModel.from_config(config)
+          h = self.encoder.config.hidden_size
+          self.dropout = torch.nn.Dropout(0.1)
+          self.classifier = torch.nn.Linear(h, num_labels)
+
+        def mean_pool(self, token, mask):
+          m = mask.unsqueeze(-1).expand(token.size()).float()
+          return torch.sum(token * m, 1) / torch.clamp(m.sum(1), min=1e-9)
+
+        def forward(self, input_ids, attention_mask):
+          out = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+          return self.classifier(self.dropout(self.mean_pool(out.last_hidden_state, attention_mask)))
+
       _classification_tokenizer = AutoTokenizer.from_pretrained(CLASSIFIER_PATH, local_files_only=True)
       _classification_model = MiniLMClassifier(
           MINILM_MODEL,
           num_labels=len(CATEGORIES),
-          local_files_only=True,
+          local_files_only=False,
       )
       _classification_model.load_state_dict(torch.load(CLASSIFIER_PATH / "model.pt", map_location="cpu"))
       _classification_model.eval()
@@ -158,6 +172,10 @@ def classify_query(query: str) -> tuple[RouterDecision|None, float|None]:
 
   if model is None:
     return None, 0.0
+
+  # By this point load_classifier() already imported torch to build/load the
+  # model, so this is just a sys.modules lookup, not a fresh import cost.
+  import torch
 
   enc = tokenizer(query,
   return_tensors="pt",
