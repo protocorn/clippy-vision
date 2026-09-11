@@ -39,12 +39,15 @@ No fixed timeline, ordered by priority rather than by date.
 **Version 1.2.2 (Shipped)**
 - [x] Setup window: resizable, sized to the work area, and scrollable so the hardware table and Continue/Launch stay usable on small screens (GitHub #44).
 
-**Version 1.3.0 (Current)**
+**Version 1.3.0 (Shipped)**
 - [x] MCP server ships with the packaged app: `mcp_server.py` and the `scripts/clippy-mcp` launchers are bundled, paths resolve when Claude Desktop / Cursor / VS Code spawn it with no Clippy environment, and Settings → Connect apps generates the per-client config.
 - [x] Capture efficiency: accessibility-tree walks moved off the capture hot path onto a background worker (`core/uia_worker.py`), backlog enrichment throttles under system load without starving old screenshots, and local performance metrics (`core/performance_metrics.py`) make the overhead measurable.
 - [x] Model weights are no longer bundled: MiniLM embeddings and the fine-tuned query router download from Hugging Face during setup or on first use (`core/model_download.py`), keeping the repo and installer small.
 - [x] Timeline view: browse captured sessions in the app and drill into what was recorded.
 - [x] Electron shell refactor: monolithic `main.js` and `index.html` split into focused main-process modules and ES modules.
+
+**Version 1.3.1 (Current)**
+- [x] Runtime LLM calls respect the chat model chosen in setup (`CLIPPY_CHAT_MODEL` / `llm_config.json`) instead of always requesting hardcoded `qwen3:8b`, which caused Ollama to auto-pull qwen3 even when another model was already configured.
 
 **Planned next, ordered by priority**
 
