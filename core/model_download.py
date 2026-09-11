@@ -66,7 +66,7 @@ def ensure_embedding_model(*, force: bool = False) -> Path:
     with _embedding_lock:
         if not force and embedding_ready(path):
             return path
-        print(f"[models] Downloading embeddings from {EMBEDDING_REPO} → {path}")
+        print(f"[models] Downloading embeddings from {EMBEDDING_REPO} -> {path}")
         _snapshot(EMBEDDING_REPO, path)
         if not embedding_ready(path):
             raise FileNotFoundError(
@@ -82,7 +82,7 @@ def ensure_router_model(*, force: bool = False) -> Path:
     with _router_lock:
         if not force and router_ready(path):
             return path
-        print(f"[models] Downloading router from {ROUTER_REPO} → {path}")
+        print(f"[models] Downloading router from {ROUTER_REPO} -> {path}")
         _snapshot(ROUTER_REPO, path)
         if not router_ready(path):
             raise FileNotFoundError(
