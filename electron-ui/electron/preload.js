@@ -11,8 +11,10 @@ const { contextBridge, ipcRenderer } = require('electron')
  */
 let apiBasePromise = null
 async function apiUrl(pathname) {
-    if (!apiBasePromise) apiBasePromise = ipcRenderer.invoke('get-api-base')
-    return `${await apiBasePromise}${pathname}`
+    // Always resolve through main — the API port is chosen at launch and must
+    // not be sticky-cached from a pre-listen default (e.g. :8000).
+    const base = await ipcRenderer.invoke('get-api-base')
+    return `${base}${pathname}`
 }
 
 async function getErrorMessage(response) {
@@ -185,11 +187,25 @@ contextBridge.exposeInMainWorld('clippy', {
         return response.ok
     },
 
+    waitForApiReady: () => ipcRenderer.invoke('wait-for-api-ready'),
+
     getUpdateCheckEnabled: () => ipcRenderer.invoke('get-update-check'),
 
     setUpdateCheckEnabled: (enabled) => ipcRenderer.invoke('set-update-check', Boolean(enabled)),
 
     getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
+    getAboutInfo: () => ipcRenderer.invoke('get-about-info'),
+
+    getAppIcons: (processNames) => ipcRenderer.invoke('get-app-icons', processNames || []),
+
+    mcp: {
+        getLaunchConfig: () => ipcRenderer.invoke('mcp-get-launch-config'),
+        copyConfig: () => ipcRenderer.invoke('mcp-copy-config'),
+        listClients: () => ipcRenderer.invoke('mcp-list-clients'),
+        connect: (clientId) => ipcRenderer.invoke('mcp-connect-client', clientId),
+        disconnect: (clientId) => ipcRenderer.invoke('mcp-disconnect-client', clientId),
+    },
 
     toggleCapture: () => ipcRenderer.invoke('toggle-capture'),
 
@@ -201,6 +217,10 @@ contextBridge.exposeInMainWorld('clippy', {
 
     onApiReady: (callback) => {
         ipcRenderer.on('api-ready', () => callback())
+        // Cover the race where main already finished warming before this listener attached.
+        ipcRenderer.invoke('is-api-ready').then((ready) => {
+            if (ready) callback()
+        }).catch(() => {})
     },
 
     onLoadingStatus: (callback) => {

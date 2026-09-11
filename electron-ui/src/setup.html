@@ -291,10 +291,149 @@
     .provider-card label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 650; }
     .provider-card input, .provider-card select { width: 100%; padding: 8px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--inset); color: var(--text); font: inherit; font-size: 12px; }
     .provider-card input:focus, .provider-card select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
-    .provider-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .provider-fields { display: grid; grid-template-columns: 1fr; gap: 10px; }
     .provider-help { color: var(--muted); font-size: 11px; line-height: 1.4; }
     .provider-details { display: flex; flex-direction: column; gap: 10px; }
     .provider-details[hidden] { display: none; }
+
+    .model-suggest-label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-weight: 650;
+    }
+
+    .model-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .model-chip {
+      border: 1px solid var(--border);
+      background: var(--inset);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 11px;
+      font-size: 12px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .model-chip:hover { border-color: var(--accent); color: var(--accent-hover); }
+    .model-chip.active {
+      border-color: var(--accent-fill);
+      background: rgba(168, 144, 108, 0.14);
+      color: var(--accent-hover);
+    }
+    .model-chip .chip-hint {
+      color: var(--muted);
+      font-size: 10px;
+      margin-left: 4px;
+    }
+
+    .consent-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .consent-item {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .consent-item-top {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .consent-item input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      margin-top: 2px;
+      flex-shrink: 0;
+      accent-color: var(--accent-fill);
+    }
+
+    .consent-title {
+      font-size: 14px;
+      font-weight: 650;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .consent-why {
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .consent-meta {
+      font-size: 11px;
+      color: var(--accent);
+      opacity: 0.85;
+      margin-top: 6px;
+    }
+
+    .consent-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+
+    .consent-actions button {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 650;
+      border-radius: 8px;
+      padding: 10px 18px;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+    }
+
+    .consent-actions button:hover:not(:disabled) {
+      border-color: var(--accent);
+      color: var(--accent-hover);
+    }
+
+    .consent-actions button.primary {
+      background: var(--accent-fill);
+      border-color: transparent;
+      color: var(--bg);
+    }
+
+    .consent-actions button.primary:hover:not(:disabled) {
+      background: var(--accent-fill-hover);
+      color: var(--bg);
+    }
+
+    .consent-actions button:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    .consent-actions .secondary {
+      color: var(--muted);
+    }
+
+    .consent-actions .secondary:hover:not(:disabled) {
+      color: var(--text);
+      border-color: var(--accent);
+    }
 
     .override {
       display: none;
@@ -639,25 +778,27 @@
       </details>
 
       <div class="card provider-card">
-        <div class="card-head">AI connection</div>
+        <div class="card-head">Local AI model</div>
         <div class="provider-card-body">
           <label>Provider<select id="llm-provider"><option value="ollama">Ollama-compatible local API</option></select></label>
           <div class="provider-details" id="provider-details">
-            <label id="llm-base-url-field">Base URL<input id="llm-base-url" placeholder="http://127.0.0.1:1234/v1" /></label>
+            <label id="llm-base-url-field">Base URL<input id="llm-base-url" placeholder="http://127.0.0.1:11434" /></label>
             <div class="provider-fields">
-              <label>Chat model<input id="llm-chat-model" placeholder="local-chat" /></label>
+              <label>Model<input id="llm-chat-model" placeholder="any-ollama-tag" autocomplete="off" /></label>
             </div>
+            <div class="model-suggest-label">Suggestions — click one, or type any Ollama model tag</div>
+            <div class="model-chips" id="model-chips" role="group" aria-label="Suggested local AI models"></div>
             <label id="llm-cli-command-field" hidden>CLI command/path<input id="llm-cli-command" placeholder="Detected from PATH" /></label>
-            <div class="provider-help">MiniLM embeddings are bundled and event RAG is opt-in.</div>
+            <div class="provider-help">This one local model powers Clippy’s chat <em>and</em> backend work (event classification, session summaries, memory distilling, agent reasoning). Pick any Ollama tag — Clippy does not force a specific model. Size and speed depend on what you choose.</div>
             <label id="llm-api-key-field">API key <span style="font-weight:400;text-transform:none;letter-spacing:normal">optional</span><input id="llm-api-key" type="password" placeholder="Leave blank if your local server needs no key" autocomplete="off" /></label>
             <button type="button" class="secondary" id="llm-connect-btn" hidden>Connect account in Terminal</button>
           </div>
-          <div class="provider-help" id="provider-help">Ollama manages the chat model; capture uses accessibility text and local OCR.</div>
+          <div class="provider-help" id="provider-help">Ollama runs the local AI model you choose; capture uses accessibility text and local OCR (no vision model).</div>
         </div>
       </div>
 
       <p class="note" id="hardware-note">
-        Use the managed Ollama default, or point Clippy at an existing local API to skip the chat-model download.
+        Choose any local AI model above. Next you will review each download and accept it before anything is installed.
       </p>
 
       <label class="override" id="override-row">
@@ -669,6 +810,23 @@
 
     <div class="hw-actions">
       <button type="button" class="primary" id="btn-continue" disabled>Continue setup</button>
+    </div>
+  </div>
+
+  <div class="screen" id="screen-consent">
+    <div class="screen-scroll">
+      <p class="tagline">Review what will be downloaded. Read why each piece is needed, accept it, then continue — nothing starts until you do.</p>
+
+      <div class="consent-list" id="consent-list"></div>
+
+      <p class="note" id="consent-note">
+        Unchecking an item blocks setup for that piece. Required items must be accepted to continue.
+      </p>
+    </div>
+
+    <div class="consent-actions">
+      <button type="button" class="secondary" id="btn-consent-back">← Back</button>
+      <button type="button" class="primary" id="btn-accept-downloads" disabled>Accept &amp; download</button>
     </div>
   </div>
 
@@ -724,7 +882,7 @@
         <div class="step-icon">○</div>
         <div class="step-body">
           <div class="step-label">AI Models</div>
-          <div class="step-sub">Downloading qwen3:8b (~4.7 GB)</div>
+          <div class="step-sub" id="step-models-sub">Downloading your chosen local AI model</div>
           <div class="step-bar-wrap"><div class="step-bar" id="bar-models"></div></div>
         </div>
       </div>
@@ -759,6 +917,13 @@
   <script>
     const STEPS = ['python', 'ollama', 'ollama-service', 'packages', 'models', 'warmup']
     const STEP_TOTAL = STEPS.length
+    const MODEL_SUGGESTIONS = [
+      { id: 'qwen3:8b', label: 'qwen3:8b', hint: 'balanced' },
+      { id: 'qwen3:4b', label: 'qwen3:4b', hint: 'lighter' },
+      { id: 'llama3.2:3b', label: 'llama3.2:3b', hint: 'small' },
+      { id: 'gemma3:4b', label: 'gemma3:4b', hint: 'small' },
+      { id: 'mistral:7b', label: 'mistral:7b', hint: 'classic' },
+    ]
 
     const $ = (id) => document.getElementById(id)
     const log = $('log')
@@ -779,6 +944,39 @@
     function gb(n) {
       if (n == null || Number.isNaN(n)) return '—'
       return (Math.round(n * 10) / 10) + ' GB'
+    }
+
+    function isManagedOllamaUrl(url) {
+      const base = String(url || '').replace(/\/+$/, '').toLowerCase()
+      return base === 'http://127.0.0.1:11434' ||
+        base === 'http://localhost:11434' ||
+        base === 'http://[::1]:11434'
+    }
+
+    function renderModelChips(selected) {
+      const wrap = $('model-chips')
+      if (!wrap) return
+      wrap.innerHTML = ''
+      for (const suggestion of MODEL_SUGGESTIONS) {
+        const btn = document.createElement('button')
+        btn.type = 'button'
+        btn.className = 'model-chip' + (suggestion.id === selected ? ' active' : '')
+        btn.dataset.model = suggestion.id
+        btn.innerHTML = `${suggestion.label}<span class="chip-hint">${suggestion.hint}</span>`
+        btn.addEventListener('click', () => {
+          $('llm-chat-model').value = suggestion.id
+          renderModelChips(suggestion.id)
+          updateModelsStepSub(suggestion.id)
+        })
+        wrap.appendChild(btn)
+      }
+    }
+
+    function updateModelsStepSub(model) {
+      const el = $('step-models-sub')
+      if (!el) return
+      const name = String(model || '').trim() || 'your chosen local AI model'
+      el.textContent = `Local ML models + ${name}`
     }
 
     function renderHardware(check) {
@@ -812,8 +1010,8 @@
       // Hosted and subscription modes remain a comment-only future extension.
       $('hardware-summary').textContent = check.level === 'ready' ? 'Ready' : check.level === 'warn' ? 'Review' : 'Blocked'
       $('hardware-note').textContent = check.mode === 'external'
-        ? 'The configured local API supplies chat. MiniLM, accessibility capture, and OCR stay on this Mac.'
-        : 'The default text model uses roughly 5 GB on disk. Screen capture uses accessibility + OCR and does not download a vision model.'
+        ? 'Your local API supplies the AI model. Next you will review the remaining downloads (packages and capture stack) before anything installs.'
+        : 'Disk use depends on the local AI model you choose. Capture uses accessibility + OCR and does not download a vision model. Next: review and accept each download.'
 
       const verdict = $('verdict')
       const continueBtn = $('btn-continue')
@@ -834,7 +1032,7 @@
         $('verdict-icon').textContent = '!'
         $('verdict-title').textContent = 'May run, but expect lag'
         $('verdict-body').textContent =
-          'Your machine is above the minimum but below recommended. Capture should be fine; chat may feel slower if you also run heavy apps alongside the text model.'
+          'Your machine is above the minimum but below recommended. Capture should be fine; answers and background jobs may feel slower if you also run heavy apps alongside the local AI model. A smaller model can help.'
         overrideRow.classList.add('visible')
         continueBtn.disabled = !override.checked
         continueBtn.textContent = 'Continue anyway'
@@ -842,7 +1040,7 @@
         $('verdict-icon').textContent = '✕'
         $('verdict-title').textContent = 'Not enough resources'
         $('verdict-body').textContent =
-          'This machine is below Clippy Vision’s minimum for the local text model and capture stack. Free disk space or add memory, then try again.'
+          'This machine is below Clippy Vision’s minimum for the local AI model and capture stack. Free disk space or add memory, then try again. A smaller model may still help once you clear the minimum.'
         overrideRow.classList.remove('visible')
         override.checked = false
         continueBtn.disabled = true
@@ -850,9 +1048,112 @@
       }
     }
 
+    function escapeHtml(text) {
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+    }
+
+    function consentItemsForMode(mode, chatModel) {
+      const model = String(chatModel || '').trim() || '(none selected)'
+      const safeModel = escapeHtml(model)
+      const items = [
+        {
+          id: 'packages',
+          title: 'Python packages',
+          why: 'Needed for the local API, screen capture, OCR, privacy helpers, and the in-app agent. Installed into your Python environment from requirements.txt.',
+          meta: 'One-time pip install · size varies by what is already present',
+          required: true,
+        },
+      ]
+      if (mode !== 'external') {
+        items.unshift({
+          id: 'ollama',
+          title: 'Ollama (local model runtime)',
+          why: 'Runs the local AI model you chose entirely on this machine. Clippy installs Ollama only if it is missing; if you already have it, this step just verifies it.',
+          meta: 'Installed only when missing · from ollama.com / winget',
+          required: true,
+        })
+        items.push({
+          id: 'local-ml',
+          title: 'Local ML weights (embeddings + query router)',
+          why: 'MiniLM embeddings power memory search. The small router model picks the right retrieval strategy before the main model runs. Downloaded from Hugging Face into Clippy’s models folder — not a vision model.',
+          meta: 'Roughly hundreds of MB · skipped if already present',
+          required: true,
+        })
+        items.push({
+          id: 'chat-model',
+          title: `Local AI model: ${safeModel}`,
+          why: `This is Clippy’s main local LLM — used for in-app chat and for backend work (classifying events, summarizing sessions, distilling memory, and agent reasoning). Clippy pulls only the model you selected. Size depends on the tag (for example qwen3:8b is around 4–5 GB).`,
+          meta: `ollama pull ${safeModel} · skipped if already on this machine`,
+          required: true,
+        })
+      } else {
+        items.push({
+          id: 'external-chat',
+          title: 'Your existing local AI API',
+          why: `Clippy will call ${safeModel} on the Base URL you set for chat and backend LLM jobs. No Ollama model download runs in this mode.`,
+          meta: 'No extra model download from Clippy',
+          required: true,
+        })
+      }
+      return items
+    }
+
+    function renderConsentList(mode, chatModel) {
+      const list = $('consent-list')
+      list.innerHTML = ''
+      const items = consentItemsForMode(mode, chatModel)
+      for (const item of items) {
+        const row = document.createElement('div')
+        row.className = 'consent-item'
+        row.innerHTML = `
+          <label class="consent-item-top">
+            <input type="checkbox" id="consent-${item.id}" data-consent-id="${item.id}" data-required="${item.required ? '1' : '0'}" />
+            <div>
+              <div class="consent-title">${item.title}</div>
+              <div class="consent-why">${item.why}</div>
+              <div class="consent-meta">${item.meta}</div>
+            </div>
+          </label>
+        `
+        list.appendChild(row)
+      }
+      list.querySelectorAll('input[type="checkbox"]').forEach((box) => {
+        box.addEventListener('change', syncConsentButton)
+      })
+      syncConsentButton()
+    }
+
+    function syncConsentButton() {
+      const boxes = [...document.querySelectorAll('#consent-list input[type="checkbox"]')]
+      const allRequired = boxes
+        .filter((box) => box.dataset.required === '1')
+        .every((box) => box.checked)
+      const btn = $('btn-accept-downloads')
+      btn.disabled = !allRequired
+      btn.textContent = allRequired ? 'Accept & download' : 'Accept each item to continue'
+    }
+
+    function showScreen(id) {
+      ;['screen-hardware', 'screen-consent', 'screen-install'].forEach((screenId) => {
+        const el = $(screenId)
+        if (el) el.classList.toggle('active', screenId === id)
+      })
+    }
+
     function showInstallScreen() {
-      $('screen-hardware').classList.remove('active')
-      $('screen-install').classList.add('active')
+      showScreen('screen-install')
+    }
+
+    function showConsentScreen() {
+      const chatModel = $('llm-chat-model').value.trim()
+      const mode = hwCheck && hwCheck.mode ? hwCheck.mode : 'ollama'
+      updateModelsStepSub(chatModel)
+      renderConsentList(mode, chatModel)
+      showScreen('screen-consent')
     }
 
     async function loadHardware() {
@@ -880,15 +1181,17 @@
       $('llm-cli-command-field').hidden = true
       $('llm-connect-btn').hidden = true
       $('llm-base-url').value = config.base_url || 'http://127.0.0.1:11434'
-      $('llm-chat-model').value = config.chat_model || 'qwen3:8b'
+      const chatModel = (config.chat_model || '').trim() || 'qwen3:8b'
+      $('llm-chat-model').value = chatModel
+      renderModelChips(chatModel)
+      updateModelsStepSub(chatModel)
       $('llm-cli-command').value = config.cli_command || ''
       $('llm-api-key').value = ''
       $('llm-api-key').placeholder = config.api_key_set ? 'Saved key is set · leave blank to keep it' : 'Leave blank if your local server needs no key'
-      const baseURL = $('llm-base-url').value.replace(/\/+$/, '').toLowerCase()
-      const managed = baseURL === 'http://127.0.0.1:11434' || baseURL === 'http://localhost:11434'
+      const managed = isManagedOllamaUrl($('llm-base-url').value)
       $('provider-help').textContent = managed
-        ? 'Clippy can install and manage Ollama locally.'
-        : 'Clippy will use this existing local API and skip Ollama and model downloads.'
+        ? 'Clippy can install and manage Ollama locally. Type any model tag or pick a suggestion — this model runs chat and backend jobs. Nothing is forced.'
+        : 'Clippy will use this existing local API for chat and backend LLM jobs, and skip managed Ollama installs and model pulls.'
     }
 
     function selectedLLMConfig() {
@@ -914,14 +1217,21 @@
       // another local runtime later has one clear configuration entry point.
       $('llm-provider').value = 'ollama'
       $('llm-base-url').value = 'http://127.0.0.1:11434'
-      $('llm-chat-model').value = 'qwen3:8b'
-      $('provider-help').textContent = 'Ollama manages the chat model; capture uses accessibility text and local OCR.'
+      if (!$('llm-chat-model').value.trim()) $('llm-chat-model').value = 'qwen3:8b'
+      renderModelChips($('llm-chat-model').value.trim())
+      $('provider-help').textContent = 'Ollama runs the local AI model you choose; capture uses accessibility text and local OCR.'
       try {
         await saveSelectedLLMConfig()
         await loadHardware()
       } catch (error) {
         $('provider-help').textContent = `Could not save provider settings: ${error.message || error}`
       }
+    })
+
+    $('llm-chat-model').addEventListener('input', () => {
+      const value = $('llm-chat-model').value.trim()
+      renderModelChips(value)
+      updateModelsStepSub(value)
     })
 
     $('llm-connect-btn').addEventListener('click', async () => {
@@ -944,6 +1254,45 @@
     $('btn-continue').addEventListener('click', async () => {
       const btn = $('btn-continue')
       if (btn.disabled) return
+      const chatModel = $('llm-chat-model').value.trim()
+      if (!chatModel) {
+        alert('Choose or type a local AI model before continuing.')
+        return
+      }
+      btn.disabled = true
+      btn.textContent = 'Saving…'
+      try {
+        await saveSelectedLLMConfig()
+        // Hardware gate only — downloads wait for the consent screen.
+        if (hwCheck && hwCheck.level === 'block') {
+          btn.disabled = true
+          btn.textContent = 'Cannot continue'
+          return
+        }
+        if (hwCheck && hwCheck.level === 'warn' && !$('override-check').checked) {
+          btn.disabled = false
+          btn.textContent = 'Continue anyway'
+          return
+        }
+        showConsentScreen()
+      } catch (e) {
+        alert('Could not save settings: ' + (e.message || e))
+      } finally {
+        if ($('screen-hardware').classList.contains('active')) {
+          btn.disabled = hwCheck && hwCheck.level === 'block'
+          btn.textContent = hwCheck && hwCheck.level === 'warn' ? 'Continue anyway' : 'Continue setup'
+        }
+      }
+    })
+
+    $('btn-consent-back').addEventListener('click', () => {
+      showScreen('screen-hardware')
+      if (hwCheck) renderHardware(hwCheck)
+    })
+
+    $('btn-accept-downloads').addEventListener('click', async () => {
+      const btn = $('btn-accept-downloads')
+      if (btn.disabled) return
       btn.disabled = true
       btn.textContent = 'Starting…'
       const override = $('override-check').checked
@@ -951,15 +1300,20 @@
         await saveSelectedLLMConfig()
         const res = await window.setup.confirmHardwareAndStart({ override })
         if (!res || !res.ok) {
-          if (res && res.check) renderHardware(res.check)
-          else btn.disabled = false
+          if (res && res.check) {
+            renderHardware(res.check)
+            showScreen('screen-hardware')
+          }
+          btn.disabled = false
+          btn.textContent = 'Accept & download'
           return
         }
         if (res.check) configureSetupMode(res.check.mode)
+        updateModelsStepSub($('llm-chat-model').value.trim())
         showInstallScreen()
       } catch (e) {
         btn.disabled = false
-        btn.textContent = 'Continue setup'
+        btn.textContent = 'Accept & download'
         alert('Could not start setup: ' + (e.message || e))
       }
     })
