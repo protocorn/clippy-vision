@@ -11,7 +11,7 @@ This doc exists so contributors know what we're optimizing for, where we stand t
 
 # Current Limitations
 - Sensitive info like passwords or card numbers can still be captured today. Manual pause/resume of capture is the current workaround while automatic redaction for this is being built.
-- Per-app redaction is not usable yet. The backend rules exist in `core/privacy_settings.py`, but reliable window matching only works for Clippy Vision's own window; other apps match inconsistently. That is why Settings shows "Access control" as coming soon. Stopping capture is the dependable privacy switch until this is fixed.
+- Per-app redaction is best-effort. The rules live in `core/privacy_settings.py` and are exposed in Settings → Privacy & access, but matching is title-based and brittle outside Clippy Vision's own window (e.g. an Incognito window stops matching once you navigate, see GitHub #41). Stopping capture is the dependable privacy switch until this is fixed.
 - Capture no longer needs a vision model or a dedicated GPU. The remaining hardware cost is the chat model (`qwen3:8b` by default): minimum is 8 GB RAM, recommended 16 GB. A smaller chat model can be picked in setup. Do not put a vision-language model back on the default capture path.
 
 # Roadmap
@@ -36,20 +36,29 @@ No fixed timeline, ordered by priority rather than by date.
 **Version 1.2.1 (Shipped)**
 - [x] Capture cascade: accessibility APIs first (UI Automation on Windows, AXUIElement on macOS), RapidOCR when that text is empty or too thin. Shared entry points live in `core/accessibility_text.py` and `core/screenshot_enrichment.py`. Classification of the frame uses the extracted text (`build_capture_text_verdict`); it does not call a vision model.
 
-**Version 1.2.2 (Current)**
+**Version 1.2.2 (Shipped)**
 - [x] Setup window: resizable, sized to the work area, and scrollable so the hardware table and Continue/Launch stay usable on small screens (GitHub #44).
-- [ ] Prove the cascade stays cheap: skip OCR when accessibility text already clears `is_useful_accessibility_text`, and add a `bench/` run that reports a11y-enough / OCR-used / empty-text rates. `bench/test_classification_cascade.py` today measures classification tiers (rules → features → LLM), not this text-source split. Without that number, OCR can quietly run on every frame and the efficiency win erodes.
 
-**Version 1.3.0 (Next in pipeline)**
-- Skills layer, making the agent proactive instead of purely reactive
-- Planned skill 1: A reading/watching mode that quizzes you on material afterward, and a timed study mode that builds a quiz/test plus analytics once a session ends
-- Planned skill 2: "when you see XYZ, do ABC". `skills/when_x_then_y.py` already watches a URL in the background (HTTP) and/or the focused tab (accessibility text), with literal gates and an optional intent LLM. What is left is shipping it as a first-class skill in the app: settings, alerts in the UI, and a stable worker lifecycle — not rewriting the matcher.
-- MCP server integration. `mcp_server.py` already exposes the retrieval and memory tools over stdio, so what is left is shipping it with the packaged app (it is currently missing from the electron-builder `extraResources` filter), making paths resolve when a client like Claude Desktop or Cursor spawns it with no Clippy environment, and writing per-client setup docs. This lets any MCP client query Clippy's memory directly instead of the user copy-pasting context out of the chat.
+**Version 1.3.0 (Current)**
+- [x] MCP server ships with the packaged app: `mcp_server.py` and the `scripts/clippy-mcp` launchers are bundled, paths resolve when Claude Desktop / Cursor / VS Code spawn it with no Clippy environment, and Settings → Connect apps generates the per-client config.
+- [x] Capture efficiency: accessibility-tree walks moved off the capture hot path onto a background worker (`core/uia_worker.py`), backlog enrichment throttles under system load without starving old screenshots, and local performance metrics (`core/performance_metrics.py`) make the overhead measurable.
+- [x] Model weights are no longer bundled: MiniLM embeddings and the fine-tuned query router download from Hugging Face during setup or on first use (`core/model_download.py`), keeping the repo and installer small.
+- [x] Timeline view: browse captured sessions in the app and drill into what was recorded.
+- [x] Electron shell refactor: monolithic `main.js` and `index.html` split into focused main-process modules and ES modules.
 
 **Planned next, ordered by priority**
 
-*Timeline and capture audit view*
-A browsable view of what Clippy actually captured, session by session, with the matching screenshots, plus the ability to delete individual entries from memory. This serves recall (scroll back to find something) and trust equally: a user should be able to see exactly what is stored about them and remove it. Needs listing endpoints on the API first, since `api_server.py` has no events or sessions listing today.
+*Per-app privacy redaction that actually holds*
+Reliable incognito/private-window detection (GitHub #41): title matching breaks after navigation, so the next attempt is inspecting the UIA layout tree of the foreground window for the Incognito/InPrivate badge instead of trusting the title.
+
+*Skills layer, making the agent proactive instead of purely reactive*
+Development happens on the `feat/skills-ui` branch, off main until it is solid. Planned skill 1: a reading/watching mode that quizzes you on material afterward. Planned skill 2: "when you see XYZ, do ABC" — the watcher and matcher already work on the branch; what is left is a stable worker lifecycle and polished settings/alerts UI.
+
+*Opt-in cloud model providers*
+For users who prefer API speed over full locality: Claude, GPT, Gemini, OpenRouter as an explicit opt-in with clear warnings about what leaves the machine (groundwork in PR #32). Capture and memory stay local regardless.
+
+*Capture audit deletion*
+The timeline shows what was captured; the missing half is deleting individual entries from memory directly in that view, so users can see and remove exactly what is stored about them.
 
 *Audio capture and speaker attribution for meetings*
 Local transcription with faster-whisper or whisper.cpp, pinned to CPU so it does not compete with the reasoning model for RAM or VRAM. First version attributes speech by audio source rather than by voice: microphone is the user, system output loopback is everyone else, which needs no enrollment and no extra model. Voiceprint matching (a one-time voice sample, then embedding similarity per segment) is a later addition for in-person conversations where every voice arrives through the mic. No meeting-platform APIs or bots, loopback capture works the same across Zoom, Meet and Teams. macOS system audio is the hard part and will need ScreenCaptureKit audio or a virtual device.

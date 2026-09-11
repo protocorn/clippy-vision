@@ -76,14 +76,14 @@ Your work is not stored in one place. It is spread across the browser, your IDE,
 
 ## Download
 
-Click your platform to download **v1.2.2** directly:
+Click your platform to download **v1.3.0** directly:
 
 <p align="center">
-  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.2/ClippyVision-Windows-Setup-1.2.2.exe"><img src="https://img.shields.io/badge/Download-Windows%20v1.2.2-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows v1.2.2" /></a>
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.3.0/ClippyVision-Windows-Setup-1.3.0.exe"><img src="https://img.shields.io/badge/Download-Windows%20v1.3.0-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows v1.3.0" /></a>
   &nbsp;
-  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.2/ClippyVision-macOS-arm64-1.2.2.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Apple%20Silicon%20v1.2.2-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Apple Silicon v1.2.2" /></a>
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.3.0/ClippyVision-macOS-arm64-1.3.0.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Apple%20Silicon%20v1.3.0-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Apple Silicon v1.3.0" /></a>
   &nbsp;
-  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.2.2/ClippyVision-macOS-x64-1.2.2.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Intel%20v1.2.2-555555?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Intel v1.2.2" /></a>
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.3.0/ClippyVision-macOS-x64-1.3.0.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Intel%20v1.3.0-555555?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Intel v1.3.0" /></a>
 </p>
 
 <p align="center">
@@ -152,6 +152,7 @@ The app will open the setup wizard on first launch and walk you through dependen
 - **Smart query router** - a fine-tuned MiniLM classifier routes every question to the right retrieval strategy before the LLM is even called
 - **ReAct agent** - structured reasoning with tools: SQL generation, memory recall, fact saving
 - **Conversation memory** - rolling summaries + semantic search over past conversations
+- **Timeline view** - browse captured sessions in the app and drill into exactly what was recorded
 - **Toggle capture** - start/stop data capture from the tray icon or the in-app button, with a desktop notification on change
 - **Per-app redaction (in progress)** - backend rules exist for WhatsApp, Telegram, incognito windows, and similar targets; reliable matching outside Clippy's own window is still being improved, so capture on/off is the dependable privacy switch today
 
@@ -159,7 +160,7 @@ The app will open the setup wizard on first launch and walk you through dependen
 
 ## Where this is going
 
-Clippy's bet is to be a **local memory layer** you can query two ways: built-in local LLM chat, and optional MCP for external agents. Next priorities: ship the MCP server cleanly with the packaged app (paths and docs for Cursor / Claude Desktop / VS Code), a timeline/audit view so you can see and delete exactly what was captured, and stronger per-app privacy controls. Proactive skills come after trust and access are solid.
+Clippy's bet is to be a **local memory layer** you can query two ways: built-in local LLM chat, and optional MCP for external agents. The MCP server now ships with the packaged app (one-click config for Cursor / Claude Desktop / VS Code) and a timeline view lets you audit what was captured. Next priorities: stronger per-app privacy controls (reliable incognito/private-window redaction) and optional cloud model providers for users who prefer API speed over full locality. Proactive skills come after trust and access are solid.
 
 No dates attached to any of it. [PROJECT_VISION.md](PROJECT_VISION.md) has the current thinking, the priority order, and an honest list of what does not work yet. If you want to shape any of it, the [open issues](https://github.com/protocorn/clippy-vision/issues) are the place to start.
 
@@ -174,8 +175,8 @@ No dates attached to any of it. [PROJECT_VISION.md](PROJECT_VISION.md) has the c
 | Local LLM runtime | [Ollama](https://ollama.com) |
 | Main reasoning model | User-chosen Ollama model (suggested default `qwen3:8b`) |
 | Screenshot text | Accessibility APIs + RapidOCR fallback |
-| Embedding model | Bundled `all-MiniLM-L6-v2` (event RAG is opt-in) |
-| Query classifier | Fine-tuned MiniLM-L3 |
+| Embedding model | `all-MiniLM-L6-v2`, downloaded from Hugging Face on first run (event RAG is opt-in) |
+| Query classifier | Fine-tuned MiniLM, downloaded from Hugging Face on first run |
 | Database | SQLite (WAL mode) |
 | Screen capture | `mss`, `pywin32`, `pynput` |
 
@@ -205,7 +206,7 @@ Scoring starts at 5. Multiple features add or subtract: typing deviation, contex
 The last 3 events + current event are sent to `qwen3:8b` for context-aware classification. Output is `INTERESTING` or `NOT_INTERESTING`; classification never queues a vision model.
 
 **Screen text enrichment**
-Each captured frame records bounded text from the foreground accessibility/UI API. RapidOCR runs only when that text is empty or too sparse. A background processor (`core/screenshot_processor.py`) groups visually identical screenshots using perceptual hashing and stores the resulting text with the nearest event (±10 s); if none exists, it creates a `screenshot_analysis` event. Image embeddings and event-level RAG are disabled by default.
+Each captured frame records bounded text from the foreground accessibility/UI API. Accessibility-tree walks run on a dedicated background worker (`core/uia_worker.py`), so a slow app can never delay the next capture. RapidOCR runs only when that text is empty or too sparse. A background processor (`core/screenshot_processor.py`) groups visually identical screenshots using perceptual hashing and stores the resulting text with the nearest event (±10 s); if none exists, it creates a `screenshot_analysis` event. Backlog enrichment is throttled under system load and guarantees older screenshots always make progress. Image embeddings and event-level RAG are disabled by default.
 
 ---
 
