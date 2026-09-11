@@ -1,8 +1,9 @@
 import json
 
+from core.chat_model import get_chat_model
 from core.llm_gateway import Priority, gateway
 
-MODEL      = "qwen3:8b"
+MODEL      = get_chat_model()
 
 
 # Identical every call — Ollama reuses KV cache for this prefix (5x speedup)

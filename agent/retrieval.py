@@ -4,6 +4,7 @@ import re
 import time
 
 from agent.helpers.time_resolver import resolve_temporal_range
+from core.chat_model import get_chat_model
 from core.llm_gateway import Priority, gateway
 from core.local_embeddings import embed_text, embed_texts
 from core.rag import search_event_rag
@@ -13,7 +14,7 @@ MAX_RESULT_ROWS = 20
 MAX_RESULT_CHARS = 4000
 _HEAVY_COLS = {"payload", "vector_embedding", "summary_embedding"}
 
-MODEL = "qwen3:8b"
+MODEL = get_chat_model()
 
 OUTPUT_SCHEMA = {
     "type": "object",

@@ -4,6 +4,7 @@ import time
 import uuid
 from typing import Optional
 
+from core.chat_model import get_chat_model
 from core.llm_gateway import Priority, gateway
 from core.local_embeddings import embed_text, embed_texts
 from core.memory_store import save_identity_field
@@ -14,7 +15,7 @@ DISTIL_EVERY_N_SESSIONS = 5  # change to 5 for production
 SESSION_GAP_SECONDS    = 30 * 60  # change to 30 * 60 for production
 SESSION_MAX_SUMMARIES  = 20  # change to 20 for production
 
-MODEL                  = "qwen3:8b"
+MODEL                  = get_chat_model()
 
 
 def count_sessions_since_last_distil() -> int:

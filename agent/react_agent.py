@@ -20,13 +20,14 @@ from agent.prefetch.time_anchor import time_anchor_fetch
 from agent.prefetch.topic_search import topic_search
 from agent.router import classify_query, should_prefetch
 from agent.tools import TOOL_SCHEMAS, TOOLS, WRITE_TOOL_SCHEMAS, WRITE_TOOLS
+from core.chat_model import get_chat_model
 from core.distil import ingest_conversation
 from core.llm_gateway import Priority, gateway
 from core.local_embeddings import embed_text
 from core.memory_store import get_unresolved_conflicts
 from core.storage import get_user_name
 
-MODEL     = "qwen3:8b"
+MODEL     = get_chat_model()
 MAX_STEPS = 10
 
 

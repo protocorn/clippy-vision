@@ -10,6 +10,7 @@ import json
 import threading
 import time
 
+from core.chat_model import get_chat_model
 from core.llm_gateway import Priority, gateway
 from core.memory_store import (
     count_facts_since,
@@ -21,7 +22,7 @@ from core.memory_store import (
     set_introduction,
 )
 
-MODEL = "qwen3:8b"
+MODEL = get_chat_model()
 
 REBUILD_INTERVAL_SECONDS = 7 * 24 * 60 * 60
 MIN_FACT_DELTA = 8

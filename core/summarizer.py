@@ -25,11 +25,12 @@ except ImportError:
         store_summary,
     )
 from core.accessibility_text import is_useful_accessibility_text, strip_ui_chrome
+from core.chat_model import get_chat_model
 from core.llm_gateway import Priority, gateway
 from core.local_embeddings import embed_text
 from core.model_residency import can_load_text, ensure_text_model
 
-MODEL = "qwen3:8b"
+MODEL = get_chat_model()
 INTERVAL_SEC = 60  # wake cadence; session length is controlled below
 MIN_EVENTS = 1  # contentful events only (typing bursts never count)
 RAW_LOOKBACK_SECONDS = 7 * 24 * 60 * 60

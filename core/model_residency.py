@@ -31,7 +31,12 @@ try:
 except ImportError:
     from paths import get_data_dir
 
-TEXT_MODEL = "qwen3:8b"
+try:
+    from core.chat_model import get_chat_model
+except ImportError:
+    from chat_model import get_chat_model
+
+TEXT_MODEL = get_chat_model()
 # Ollama's model runner across versions and platforms.
 _RUNNER_PROCESS_NAMES = ("llama-server", "ollama_llama_server")
 

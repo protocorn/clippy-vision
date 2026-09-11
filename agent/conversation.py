@@ -4,9 +4,12 @@ import threading
 import time
 import uuid
 
+from core.chat_model import get_chat_model
 from core.llm_gateway import Priority, gateway
 from core.local_embeddings import embed_text
 from core.storage import conn
+
+MODEL = get_chat_model()
 
 SUMMARY_MIN_TURNS  = 5  # build first summary after this many turns
 SUMMARY_EVERY_N    = 5  # build a new summary every N turns thereafter
@@ -347,7 +350,7 @@ def _build_summary_text(chats: list[tuple]) -> str:
             {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
             {"role": "user",   "content": transcript},
         ],
-        model="qwen3:8b",
+        model=MODEL,
         think=False,
         options={"temperature": 0},
         priority=Priority.BACKGROUND,
