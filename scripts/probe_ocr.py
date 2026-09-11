@@ -8,8 +8,7 @@ Every 5 seconds:
   - runs RapidOCR when a11y is not useful
   - shows choose_screen_text() final winner (a11y vs OCR)
 
-Usage (PowerShell):
-  cd c:\\Users\\proto\\Clippy_Vision
+Usage (PowerShell, from repo root):
   $env:PYTHONPATH = (Get-Location).Path
   python .\\scripts\\probe_ocr.py
 """

@@ -7,6 +7,7 @@ import sys
 from core.app_settings import get_capture_settings
 from core.capture_state import get_capture_status
 from core.local_embeddings import embedding_status
+from core.performance_metrics import get_performance_snapshot
 from core.platform_support import IS_MACOS, get_window_metadata, platform_label
 from core.storage import get_data_stats
 
@@ -18,8 +19,8 @@ _REQUIRED_IMPORTS = {
     "imagehash": "screenshot deduplication",
     "rapidocr": "local OCR",
     "onnxruntime": "OCR inference",
-    "transformers": "bundled MiniLM embeddings",
-    "torch": "bundled MiniLM embeddings",
+    "transformers": "local MiniLM embeddings",
+    "torch": "local MiniLM embeddings",
     "sklearn": "router classifier",
 }
 
@@ -57,4 +58,5 @@ def get_diagnostics() -> dict:
         "capture_settings": get_capture_settings(),
         "storage": get_data_stats(),
         "embeddings": embedding_status(),
+        "performance": get_performance_snapshot(),
     }

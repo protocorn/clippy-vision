@@ -28,6 +28,9 @@ _DEFAULTS: dict[str, Any] = {
     "raw_retention_days": 7,
     "screenshot_retention_days": 1,
     "launch_at_login": False,
+    # Hard ceiling for a single UIA bounds/text query on the async worker.
+    # UIA COM calls can hang against certain apps; this bounds the damage.
+    "uia_timeout_seconds": 1.5,
 }
 
 
@@ -70,6 +73,7 @@ def normalize_capture_settings(values: dict[str, Any] | None = None) -> dict[str
         "raw_retention_days": _as_int(source.get("raw_retention_days"), 7, 1, 90),
         "screenshot_retention_days": _as_int(source.get("screenshot_retention_days"), 1, 1, 30),
         "launch_at_login": _as_bool(source.get("launch_at_login"), False),
+        "uia_timeout_seconds": _as_float(source.get("uia_timeout_seconds"), 1.5, 0.5, 5.0),
     }
 
 

@@ -79,6 +79,11 @@ def save_crop_metadata(
     Store a crop alongside the screenshot. Geometry is captured while the
     original foreground UIA tree still exists; OCR may run later in another
     process after focus has changed.
+    Written atomically (temp file + os.replace) because this can now be
+    called twice per screenshot from two different threads/processes: once
+    synchronously at capture time with a heuristic box, and again later by
+    the UIA worker once real bounds are available. A plain write_text() could
+    let a reader observe a half-written file in that window.
     """
     box = normalize_a11y_bounds(
         a11y_bounds,
@@ -99,8 +104,11 @@ def save_crop_metadata(
         "box": list(box),
         "image_size": [image_width, image_height],
     }
+    target = crop_metadata_path(screenshot_path)
+    temporary = target.with_suffix(".tmp")
     try:
-        crop_metadata_path(screenshot_path).write_text(json.dumps(payload), encoding="utf-8")
+        temporary.write_text(json.dumps(payload), encoding="utf-8")
+        temporary.replace(target)
     except OSError:
         return {}
     return payload

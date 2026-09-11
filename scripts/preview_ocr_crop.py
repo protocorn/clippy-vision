@@ -9,8 +9,7 @@ Modes:
 Stored screenshots keep their crop in <name>.ocr-crop.json. Frames captured
 before that metadata existed fall back to the heuristic crop.
 
-Usage (PowerShell):
-  cd c:\\Users\\proto\\Clippy_Vision
+Usage (PowerShell, from repo root):
   $env:PYTHONPATH = (Get-Location).Path
   python .\\scripts\\preview_ocr_crop.py live
   python .\\scripts\\preview_ocr_crop.py --latest 3

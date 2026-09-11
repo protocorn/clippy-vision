@@ -4,8 +4,7 @@ Queue / backlog snapshot for Clippy Vision.
 Shows what is waiting for classification, Tier-2 catch-up, screenshot OCR,
 summarization, and distillation — plus whether catch-up is currently allowed.
 
-Usage (PowerShell):
-  cd c:\\Users\\proto\\Clippy_Vision
+Usage (PowerShell, from repo root):
   $env:PYTHONPATH = (Get-Location).Path
   python .\\scripts\\probe_queues.py
   python .\\scripts\\probe_queues.py --watch

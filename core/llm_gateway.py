@@ -326,7 +326,7 @@ class LLMGateway:
             raise job.error
 
     def embed(self, text, *, embed_model=None, priority=Priority.FOREGROUND, timeout=60, keep_alive=None):
-        """Embed text with the bundled MiniLM model, independent of Ollama."""
+        """Embed text with the local MiniLM model, independent of Ollama."""
         if isinstance(text, str):
             return embed_text(text)
         return embed_texts(text)

@@ -39,6 +39,7 @@ try:
         get_window_metadata as read_window_metadata,
     )
     from core.platform_support import (
+        lower_process_priority,
         window_key,
     )
 except ImportError:
@@ -49,6 +50,7 @@ except ImportError:
         get_window_metadata as read_window_metadata,
     )
     from platform_support import (
+        lower_process_priority,
         window_key,
     )
 try:
@@ -59,11 +61,8 @@ try:
     from core.capture_state import set_capture_status
 except ImportError:
     from capture_state import set_capture_status
-
-
-
-
-
+from core.performance_metrics import start_performance_monitor
+from core.uia_worker import start_uia_worker
 
 
 def _capture_shutdown() -> None:
@@ -77,13 +76,19 @@ def _capture_heartbeat() -> None:
 
 
 set_capture_status(True, os.getpid())
+# Capture still needs to feel responsive (keyboard/clipboard/window polling),
+# so only a mild step down — not idle-class, which the API process uses for
+# its purely-background OCR/LLM work.
+lower_process_priority(background=False)
 atexit.register(_capture_shutdown)
 threading.Thread(target=_capture_heartbeat, daemon=True, name="capture-heartbeat").start()
+start_performance_monitor("capture")
 purge_expired()
 # Capture only intakes live activity and runs cheap Tier-0/1 classification.
 # Deferred Tier-2 catch-up, summarizer, screenshot OCR, and distil run in the
 # API process so backlog drains even when capture is paused.
 start_worker()
+start_uia_worker()
 start_screenshot_daemon()
 
 

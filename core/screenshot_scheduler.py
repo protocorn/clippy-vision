@@ -7,6 +7,7 @@ from typing import Optional
 import imagehash
 import mss
 from PIL import Image, ImageDraw
+from core.performance_metrics import increment, timed
 
 # Screenshot scheduling and privacy redaction. Text extraction is
 # performed by screenshot_processor after a frame has been written.
@@ -21,6 +22,7 @@ try:
         IS_WINDOWS,
         get_foreground_window_bounds,
         get_window_metadata,
+        window_key,
     )
 except ImportError:
     from platform_support import (
@@ -28,6 +30,7 @@ except ImportError:
         IS_WINDOWS,
         get_foreground_window_bounds,
         get_window_metadata,
+        window_key,
     )
 
 _SCREENSHORT_DIR = get_screenshots_dir()
@@ -49,15 +52,15 @@ except ImportError:
     # Redaction rules (Clippy window + user privacy toggles) live in privacy_settings.
     from privacy_settings import is_clippy_window, should_redact_window
 try:
-    from core.accessibility_text import extract_accessibility_text, foreground_content_bounds
+    from core.accessibility_text import extract_accessibility_text
     from core.app_settings import get_capture_settings
     from core.ocr_crop import save_crop_metadata
-    from core.screenshot_enrichment import remember_accessibility_text
+    from core.uia_worker import submit_uia_job
 except ImportError:
-    from accessibility_text import extract_accessibility_text, foreground_content_bounds
+    from accessibility_text import extract_accessibility_text
     from app_settings import get_capture_settings
     from ocr_crop import save_crop_metadata
-    from screenshot_enrichment import remember_accessibility_text
+    from uia_worker import submit_uia_job
 
 _lock = threading.Lock()
 _last_capture_ms = 0
@@ -172,48 +175,91 @@ def _redact_clippy_windows(img: Image.Image, monitor: dict) -> None:
             draw.rectangle([x0, y0, x1, y1], fill=(0, 0, 0))
 
 
+def _foreground_hwnd() -> int | None:
+    """Cheap window handle for the UIA worker to target later — no UIA involved.
+
+    Windows-only concept: macOS has no handle to hand off, so the worker
+    there always re-derives "what's frontmost" itself via get_window_metadata().
+    """
+    if not IS_WINDOWS:
+        return None
+    try:
+        import win32gui
+
+        return win32gui.GetForegroundWindow() or None
+    except Exception:
+        return None
+
+
 def capture_screenshot(timestamp_ms: int) -> Path | None:
     settings = get_capture_settings()
     if not settings["capture_screenshots"]:
         return None
     try:
-        # monitor 0 is the virtual desktop; monitor 1 is the primary display.
-        # The setting keeps the default capture cost low for multi-monitor Macs.
-        with mss.mss() as sct:
-            settings = get_capture_settings()
-            monitor = sct.monitors[0] if settings["capture_all_monitors"] else (sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0])
-            screenshot = sct.grab(monitor)
-            img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
+        with timed("screenshot.total"):
+            # monitor 0 is the virtual desktop; monitor 1 is the primary display.
+            # The setting keeps the default capture cost low for multi-monitor Macs.
+            with timed("screenshot.grab"):
+                with mss.mss() as sct:
+                    settings = get_capture_settings()
+                    monitor = sct.monitors[0] if settings["capture_all_monitors"] else (sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0])
+                    screenshot = sct.grab(monitor)
+                    img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
 
-        _redact_clippy_windows(img, monitor)
+            with timed("screenshot.redaction"):
+                _redact_clippy_windows(img, monitor)
 
-        # Hash after redaction so privacy changes are reflected in the
-        # duplicate-frame decision. Near-identical frames are not persisted.
-        digest = imagehash.phash(img)
-        global _last_capture_hash
-        with _lock:
-            if _last_capture_hash is not None and (digest - _last_capture_hash) <= 2:
-                return None
+            # Hash after redaction so privacy changes are reflected in the
+            # duplicate-frame decision. Near-identical frames are not persisted.
+            with timed("screenshot.hash"):
+                digest = imagehash.phash(img)
+            global _last_capture_hash
+            with _lock:
+                if _last_capture_hash is not None and (digest - _last_capture_hash) <= 2:
+                    increment("screenshots.deduplicated")
+                    return None
 
-        path = _SCREENSHORT_DIR / f"{timestamp_ms}.jpg"
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
-        path.write_bytes(buf.getvalue())
-        # UIA text can be poor while its pane geometry still identifies the
-        # user's work area. Persist this immediately; OCR may run later after
-        # the focused UI has changed.
-        save_crop_metadata(
-            path,
-            image_width=img.width,
-            image_height=img.height,
-            monitor=monitor,
-            a11y_bounds=foreground_content_bounds(),
-        )
-        remember_accessibility_text(path, _foreground_accessibility_text())
-        with _lock:
-            _last_capture_hash = digest
-        return path
+            path = _SCREENSHORT_DIR / f"{timestamp_ms}.jpg"
+            with timed("screenshot.jpeg_write"):
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+                path.write_bytes(buf.getvalue())
+            # UIA bounds/text are no longer computed here — walking a live UIA
+            # tree (or, on macOS, an AppleScript query) is exactly the cost this
+            # was meant to remove from the capture hot path. Save an instant
+            # heuristic crop so OCR always has *something* to work with, then
+            # hand off to the async worker with just enough identity to target
+            # the right window safely later.
+            with timed("screenshot.crop_metadata"):
+                save_crop_metadata(
+                    path,
+                    image_width=img.width,
+                    image_height=img.height,
+                    monitor=monitor,
+                    a11y_bounds=None,
+                )
+            with timed("screenshot.window_snapshot"):
+                hwnd = _foreground_hwnd()
+                metadata = get_window_metadata()
+            if metadata:
+                process_name = metadata.get("process_name", "")
+                title = metadata.get("current_window_title", "")
+                if not (is_clippy_window(process_name, title) or should_redact_window(process_name, title)):
+                    with timed("screenshot.uia_submit"):
+                        submit_uia_job(
+                            path,
+                            hwnd=hwnd,
+                            expected_window_key=window_key(metadata),
+                            image_width=img.width,
+                            image_height=img.height,
+                            monitor=monitor,
+                        )
+            with _lock:
+                _last_capture_hash = digest
+            increment("screenshots.captured")
+            return path
     except Exception as e:
+        increment("screenshots.errors")
         print(f"Error capturing screenshot: {e}")
         return None
 
@@ -245,6 +291,7 @@ def purge_expired_screenshots() -> None:
             if int(ts_part) < cutoff_ms:
                 path.unlink()
                 path.with_suffix(".ocr-crop.json").unlink(missing_ok=True)
+                path.with_suffix(".a11y.txt").unlink(missing_ok=True)
         except ValueError:
             continue
         except Exception as e:
@@ -298,6 +345,16 @@ def get_screenshots_near(
 def start_background_capture() -> None:
     # Periodic capture preserves context when the user is reading or watching
     # a video without producing keyboard or clipboard events.
+    #
+    # Deliberately NOT using load_backoff_multiplier() here. A skipped
+    # capture is unrecoverable — there's no getting back a frame of what the
+    # screen looked like a few minutes ago — unlike backlog *processing*
+    # (screenshot_processor.py), where the file already sits safely on disk
+    # and backing off only delays enrichment, at zero data-loss cost.
+    # Capturing itself is also cheap (~1.3s, at most every min_gap_seconds),
+    # so slowing it down buys little load relief anyway, while risking real
+    # missed content (e.g. a long reading/scrolling session with no keyboard
+    # activity, which only ever gets caught by this heartbeat).
     while True:
         _capture_if_not_recent()
         purge_expired_screenshots()

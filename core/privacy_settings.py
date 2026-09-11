@@ -31,6 +31,7 @@ PRIVACY_TARGETS: list[dict] = [
             "inprivate",
             "private browsing",
             "private window",
+            "pivate tab"
         ],
     },
     {

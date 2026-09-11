@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import re
 from collections import deque
-
+import threading
 from core.platform_support import IS_MACOS, IS_WINDOWS, _run_command
+
 
 MAX_TEXT_CHARS = 4000
 MIN_USEFUL_CHARS = 40
@@ -396,8 +397,13 @@ def _crop_candidate_score(region, root_bounds: tuple[int, int, int, int]) -> flo
     bottom = min(root_bottom, bounds[3])
     root_area = max((root_right - root_left) * (root_bottom - root_top), 1)
     area_ratio = max(0, (right - left) * (bottom - top)) / root_area
-    # A whole-window wrapper cannot distinguish app chrome from work.
-    if area_ratio < 0.08 or area_ratio > 0.92:
+    # Reject near-empty slivers outright. Do NOT reject near-full-window
+    # regions the same way — single-pane apps (editors, terminals, most
+    # Electron apps) legitimately have one content region filling nearly the
+    # entire window. Rejecting those left _best_content_region() with zero
+    # candidates for that whole class of app, forcing a heuristic crop every
+    # time (confirmed via scripts/probe_ocr.py against Cursor.exe itself).
+    if area_ratio < 0.08:
         return -1.0
 
     centre_x = (left + right) / 2
@@ -433,10 +439,15 @@ def _best_content_region(scope):
         if score > best_score:
             best = region
             best_score = score
+    if best is None:
+        # No competing region cleared the bar (e.g. every candidate was a
+        # tiny sliver). scope itself still has real UIA geometry — better
+        # than falling all the way back to a percentage-based guess.
+        return scope
     return best
 
 
-def foreground_content_bounds() -> tuple[int, int, int, int] | None:
+def foreground_content_bounds(hwnd: int | None = None) -> tuple[int, int, int, int] | None:
     """
     Best-effort screen-space work-region rectangle for OCR.
 
@@ -449,8 +460,8 @@ def foreground_content_bounds() -> tuple[int, int, int, int] | None:
         import uiautomation as auto
         import win32gui
 
-        hwnd = win32gui.GetForegroundWindow()
-        root = auto.ControlFromHandle(hwnd) if hwnd else None
+        target = hwnd or win32gui.GetForegroundWindow()
+        root = auto.ControlFromHandle(target) if target else None
         if root is None:
             return None
         document = _find_best_document(root)
@@ -499,7 +510,7 @@ def _best_region_text(scope) -> str:
     return strip_ui_chrome(_text_from_control(scope))[:MAX_TEXT_CHARS]
 
 
-def _windows_text() -> str:
+def _windows_text(hwnd: int | None = None) -> str:
     """
     Extract foreground text with structure-first filtering:
       1) focused Edit/Document
@@ -511,10 +522,10 @@ def _windows_text() -> str:
         import uiautomation as auto
         import win32gui
 
-        hwnd = win32gui.GetForegroundWindow()
-        if not hwnd:
+        target = hwnd or win32gui.GetForegroundWindow()
+        if not target:
             return ""
-        root = auto.ControlFromHandle(hwnd)
+        root = auto.ControlFromHandle(target)
         if root is None:
             return ""
 
@@ -595,10 +606,40 @@ def _mac_text() -> str:
     )
 
 
-def extract_accessibility_text() -> str:
+def extract_accessibility_text(hwnd: int | None = None) -> str:
     """Read bounded text from the foreground UI without taking a screenshot."""
     if IS_WINDOWS:
-        return _windows_text()
+        return _windows_text(hwnd)
     if IS_MACOS:
         return _mac_text()
     return ""
+
+
+def _run_with_timeout(func, timeout: float, *args, **kwargs):
+    """Run ``func`` on a helper thread and abandon it past ``timeout``.
+    UIA COM calls can hang indefinitely against certain apps. Python cannot
+    kill a thread, so on timeout we return the fallback immediately and let
+    the stuck worker thread die on its own; it only ever touches its own
+    locals, never shared state, so an abandoned thread is harmless.
+    """
+    box: list = [None]
+    def _target():
+        try:
+            box[0] = func(*args, **kwargs)
+        except Exception:
+            box[0] = None
+    thread = threading.Thread(target=_target, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        return None
+    return box[0]
+
+def foreground_content_bounds_safe(
+    hwnd: int | None = None, timeout: float = 1.0
+) -> tuple[int, int, int, int] | None:
+    """Timeout-guarded wrapper — the one background workers should call."""
+    return _run_with_timeout(foreground_content_bounds, timeout, hwnd)
+def extract_accessibility_text_safe(hwnd: int | None = None, timeout: float = 1.5) -> str:
+    """Timeout-guarded wrapper — the one background workers should call."""
+    return _run_with_timeout(extract_accessibility_text, timeout, hwnd) or ""

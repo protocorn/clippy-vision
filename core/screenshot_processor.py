@@ -14,7 +14,8 @@ except ImportError:
     from events import Event, WindowMetadata, get_session_id
     from storage import conn, store_event
 from classifier.worker import apply_vision_verdict, build_capture_text_verdict
-from core.model_residency import can_load_text, can_run_ocr
+from core.model_residency import can_load_text
+from core.performance_metrics import increment, load_backoff_multiplier, set_gauge, timed
 from core.screenshot_enrichment import enrich_screenshot
 
 POLL_SECS = 10
@@ -23,6 +24,24 @@ BURST_COLLAPSE_WINDOW_MS = 30_000
 NEAREST_EVENT_WINDOW_SECS = 10  # ±10s to find a nearby event
 RECENT_THRESHOLD_SECS = 60  # screenshots within this window are processed first
 HASH_CACHE_MAX = 512
+
+# Backlog (>RECENT_THRESHOLD_SECS old) always gets *some* throughput every
+# cycle now, never zero — it used to only get processed when recent_groups
+# was completely empty that cycle, which means a continuously-active user
+# starved it indefinitely (confirmed live: screenshot_queue.depth grew
+# 19 -> 30 within a single 200s benchmark phase, with zero old-group
+# throughput the whole time). OLD_GROUP_CATCHUP_THRESHOLD/_BATCH let it
+# speed up once it's clearly falling behind, instead of trickling at a
+# fixed rate forever regardless of how large the backlog gets.
+OLD_GROUP_BASE_BATCH = 1
+OLD_GROUP_CATCHUP_THRESHOLD = 20
+OLD_GROUP_CATCHUP_BATCH = 5
+# Purely observational — retention_days purging unprocessed screenshots is
+# the only thing bounding backlog today, and it does so silently (data loss,
+# not resolution). This at least surfaces it instead of it growing unnoticed.
+QUEUE_DEPTH_WARNING_THRESHOLD = 50
+BACKLOG_WARNING_INTERVAL_SECS = 300.0
+_last_backlog_warning_mono = 0.0
 
 try:
     from core.paths import get_screenshots_dir
@@ -163,6 +182,21 @@ def _get_unprocessed_screenshots() -> list[Path]:
         if "_processed" not in p.stem and _screenshot_timestamp_ms(p) is not None
     ]
     return sorted(candidates, key=lambda p: _screenshot_timestamp_ms(p) or 0)
+
+
+def _select_old_group_batch(old_groups: list[list[Path]], depth: int) -> list[list[Path]]:
+    """Oldest-first slice of old_groups to process this cycle.
+
+    old_groups is sorted most-recent-first by the caller, so the tail of the
+    list is the actual backlog — oldest screenshots, longest waiting. Always
+    returns at least OLD_GROUP_BASE_BATCH (never zero) when old_groups is
+    non-empty, and scales up once depth shows the backlog is genuinely
+    falling behind, instead of trickling at a fixed rate forever.
+    """
+    if not old_groups:
+        return []
+    batch_size = OLD_GROUP_CATCHUP_BATCH if depth >= OLD_GROUP_CATCHUP_THRESHOLD else OLD_GROUP_BASE_BATCH
+    return list(reversed(old_groups[-batch_size:]))
 
 
 def _mark_as_processed(path: Path):
@@ -380,17 +414,46 @@ def _process_group(group: list[Path]) -> bool:
 def screenshot_processor_loop():
     print("[screenshot_processor] Started")
 
+    global _last_backlog_warning_mono
     while True:
-        time.sleep(POLL_SECS)
-        if not can_run_ocr():
-            continue
+        # Under sustained system CPU load, check in less often — this loop's
+        # own hashing/grouping work adds to the contention, on top of
+        # whatever OCR/model calls can_run_ocr()/can_load_text() still allow.
+        # (Deliberately CPU-only — see load_backoff_multiplier()'s own
+        # docstring for why RAM% isn't used here.)
+        #
+        # Deliberately NOT gating the whole loop body on can_run_ocr() here.
+        # That used to be safe when the gate only tripped on near-zero
+        # absolute RAM (a rare, genuine emergency). It also checked relative
+        # RAM% for a while (since removed — see model_residency.py), which
+        # trips far more often and would have meant skipping the whole batch
+        # — including accessibility-only event creation, which never touches
+        # OCR at all. OCR itself already self-gates via can_run_ocr() inside
+        # core/ocr.py and degrades to an empty string instead of failing, so
+        # enrich_screenshot() still has accessibility text to fall back on
+        # when OCR specifically is skipped.
+        time.sleep(POLL_SECS * load_backoff_multiplier())
 
         all_unprocessed = _get_unprocessed_screenshots()
+        depth = len(all_unprocessed)
+        set_gauge("screenshot_queue.depth", depth)
         if not all_unprocessed:
             continue
 
-        hashes = _compute_all_hashes(all_unprocessed)
-        groups = _group_by_similarity(all_unprocessed, hashes)
+        if depth >= QUEUE_DEPTH_WARNING_THRESHOLD:
+            now_mono = time.monotonic()
+            if now_mono - _last_backlog_warning_mono >= BACKLOG_WARNING_INTERVAL_SECS:
+                _last_backlog_warning_mono = now_mono
+                print(
+                    f"  [screenshot_processor] WARNING: {depth} unprocessed screenshots "
+                    f"backlogged — processing is falling behind capture rate"
+                )
+
+        with timed("processor.hash_backlog"):
+            hashes = _compute_all_hashes(all_unprocessed)
+        with timed("processor.group_backlog"):
+            groups = _group_by_similarity(all_unprocessed, hashes)
+        set_gauge("screenshot_queue.groups", len(groups))
 
 
         # Sort groups: most recent representative first
@@ -404,17 +467,29 @@ def screenshot_processor_loop():
 
         for group in recent_groups:
             try:
-                _process_group(group)
+                with timed("processor.group_total"):
+                    completed = _process_group(group)
+                if completed:
+                    increment("processor.groups_completed")
+                    increment("processor.frames_completed", len(group))
             except Exception as exc:
+                increment("processor.group_errors")
                 print(f"  [screenshot_processor] Group failed: {exc}")
 
-        if not recent_groups and old_groups and can_load_text():
-
-            try:
-                # Process the oldest group first when idle
-                _process_group(old_groups[-1])
-            except Exception as exc:
-                print(f"  [screenshot_processor] Group failed: {exc}")
+        # Backlog gets throughput every cycle now, regardless of whether
+        # recent_groups was empty — a continuously-active user used to starve
+        # this completely (see OLD_GROUP_* constants above).
+        if old_groups and can_load_text():
+            for group in _select_old_group_batch(old_groups, depth):
+                try:
+                    with timed("processor.group_total"):
+                        completed = _process_group(group)
+                    if completed:
+                        increment("processor.groups_completed")
+                        increment("processor.frames_completed", len(group))
+                except Exception as exc:
+                    increment("processor.group_errors")
+                    print(f"  [screenshot_processor] Group failed: {exc}")
 
 
 def start_screenshot_processor() -> threading.Thread:

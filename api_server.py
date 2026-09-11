@@ -30,7 +30,8 @@ from core.intro_builder import start_intro_rebuild_daemon
 from core.memory_store import get_profile, save_identity_field, set_introduction
 from core.model_residency import can_load_light, on_capture_stop, warm_for_startup
 from core.paths import get_data_dir, get_screenshots_dir
-from core.platform_support import platform_label
+from core.performance_metrics import start_performance_monitor
+from core.platform_support import lower_process_priority, platform_label
 from core.privacy_settings import list_privacy_targets, set_privacy_enabled
 from core.rag import start_event_indexer, stop_event_indexer
 from core.screenshot_search import search_screenshots
@@ -47,6 +48,14 @@ from core.storage import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+
+    # This process still serves interactive chat requests, so only a mild
+    # step down (not idle-class) — enough to yield to real foreground apps
+    # under load without making chat feel broken while background OCR/LLM
+    # backlog work is also running.
+    lower_process_priority(background=False)
+
+    start_performance_monitor("api")
 
     # Weekly intro rebuild: immediate check + periodic background loop
     start_intro_rebuild_daemon()

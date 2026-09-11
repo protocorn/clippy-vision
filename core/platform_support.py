@@ -32,6 +32,17 @@ _mac_cache_lock = threading.Lock()
 _mac_cache_at = 0.0
 _mac_cache: tuple[WindowMetadata | None, tuple[int, int, int, int] | None] = (None, None)
 
+# _windows_browser_url() walks the browser's UIA tree looking for the address
+# bar — measured at multiple seconds per call on some machines/browsers. It
+# used to only run once per capture; now capture_screenshot() *and* the async
+# uia_worker's before/after identity checks all call get_window_metadata(),
+# so an uncached call here is paid 3+ times per screenshot. Same short-lived
+# cache strategy as macOS above.
+_WIN_CACHE_TTL_SECONDS = 0.75
+_win_cache_lock = threading.Lock()
+_win_cache_at = 0.0
+_win_cache: WindowMetadata | None = None
+
 
 def platform_label() -> str:
     if IS_MACOS:
@@ -39,6 +50,39 @@ def platform_label() -> str:
     if IS_WINDOWS:
         return "Windows"
     return "Linux"
+
+
+def lower_process_priority(*, background: bool = False) -> None:
+    """Best-effort: yield OS CPU scheduling priority to the user's foreground apps.
+
+    Capture and the API process do real background work (screenshots, OCR,
+    UIA, LLM calls) that should not compete evenly with whatever the user is
+    actively using, especially on a machine that's already under memory/CPU
+    pressure. This only affects scheduling priority, not niceness toward
+    memory — it won't fix RAM pressure, but it keeps foreground apps snappier
+    while Clippy's own work still completes, just with lower scheduling
+    priority.
+
+    ``background=True`` asks for a further step down (idle-class), intended
+    for a process that does no live/interactive work at all (e.g. batch OCR).
+    Failures here are silently ignored — worst case we just run at the
+    default priority, which is exactly today's behavior.
+    """
+    try:
+        import psutil
+
+        process = psutil.Process()
+        if IS_WINDOWS:
+            process.nice(
+                psutil.IDLE_PRIORITY_CLASS if background else psutil.BELOW_NORMAL_PRIORITY_CLASS
+            )
+        else:
+            # POSIX nice: higher value = lower priority (range roughly -20..19).
+            # 15 is a firm but not maximal de-prioritization for background work;
+            # 8 is a mild step down for the still-somewhat-live capture process.
+            process.nice(15 if background else 8)
+    except Exception:
+        pass
 
 
 def _run_command(args: list[str], timeout: float = 1.5) -> str:
@@ -59,6 +103,13 @@ def _run_command(args: list[str], timeout: float = 1.5) -> str:
 
 
 def _windows_metadata() -> WindowMetadata | None:
+    global _win_cache_at, _win_cache
+    now = time.monotonic()
+    with _win_cache_lock:
+        if _win_cache is not None and now - _win_cache_at < _WIN_CACHE_TTL_SECONDS:
+            return _win_cache
+
+    result: WindowMetadata | None
     try:
         import psutil
         import uiautomation as auto
@@ -67,22 +118,28 @@ def _windows_metadata() -> WindowMetadata | None:
 
         hwnd = win32gui.GetForegroundWindow()
         if not hwnd:
-            return None
-        class_name = win32gui.GetClassName(hwnd)
-        active_url = _windows_browser_url(auto.WindowControl(Handle=hwnd), class_name)
-        try:
-            _, pid = win32process.GetWindowThreadProcessId(hwnd)
-            process_name = psutil.Process(pid).name()
-        except Exception:
-            process_name = "unknown"
-        return WindowMetadata(
-            timestamp=time.time(),
-            current_window_title=win32gui.GetWindowText(hwnd) or "",
-            active_url=active_url,
-            process_name=process_name,
-        )
+            result = None
+        else:
+            class_name = win32gui.GetClassName(hwnd)
+            active_url = _windows_browser_url(auto.WindowControl(Handle=hwnd), class_name)
+            try:
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                process_name = psutil.Process(pid).name()
+            except Exception:
+                process_name = "unknown"
+            result = WindowMetadata(
+                timestamp=time.time(),
+                current_window_title=win32gui.GetWindowText(hwnd) or "",
+                active_url=active_url,
+                process_name=process_name,
+            )
     except Exception:
-        return None
+        result = None
+
+    with _win_cache_lock:
+        _win_cache = result
+        _win_cache_at = now
+    return result
 
 def _windows_browser_url(window: Any, class_name: str) -> str | None:
     """Read the address bar without making UI Automation a hard dependency elsewhere."""
@@ -214,6 +271,25 @@ def get_foreground_window_bounds() -> tuple[int, int, int, int] | None:
     get_window_metadata()
     with _mac_cache_lock:
         return _mac_cache[1]
+
+
+def get_foreground_window_rect(hwnd: int | None = None) -> tuple[int, int, int, int] | None:
+    """Cheap, UIA-free foreground window rectangle — instant fallback for OCR cropping.
+    Unlike foreground_content_bounds() in accessibility_text.py, this never
+    walks a UI Automation tree. It is safe to call on the capture hot path.
+    """
+    if IS_WINDOWS:
+        try:
+            import win32gui
+            target = hwnd or win32gui.GetForegroundWindow()
+            if not target:
+                return None
+            return win32gui.GetWindowRect(target)  # (left, top, right, bottom)
+        except Exception:
+            return None
+    if IS_MACOS:
+        return get_foreground_window_bounds()
+    return None
 
 
 def window_key(metadata: WindowMetadata | None) -> str:

@@ -5,14 +5,16 @@ import time
 
 from core.events import Event
 from core.paths import get_db_path
+from core.performance_metrics import observe_timing
 
 TTL_SUMMARY_DAYS = 90
+# Event types that may form session windows for summarization.
+# typing_burst stays in the DB (screenshot timing / clips) but is never summarized.
 SUMMARIZER_EVENT_TYPES = (
     "context_change",
     "screenshot_analysis",
     "paste",
     "clipboard_change",
-    "typing_burst",
 )
 
 _DB_PATH = str(get_db_path())
@@ -354,6 +356,7 @@ def store_event(event: Event):
     # but should be changed to a binary blob in the future #
     #------------------------------------------------------#
     prev = event["previous_window_context"]
+    started = time.perf_counter()
     conn.execute(
         """INSERT OR IGNORE INTO events (
             event_id, session_id, timestamp, event_type,
@@ -390,7 +393,10 @@ def store_event(event: Event):
             "pending"
         )
     )
+    observe_timing("database.event_insert", (time.perf_counter() - started) * 1000.0)
+    started = time.perf_counter()
     conn.commit()
+    observe_timing("database.event_commit", (time.perf_counter() - started) * 1000.0)
 
 
 

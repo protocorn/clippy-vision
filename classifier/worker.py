@@ -12,6 +12,7 @@ from core.backlog import (
 )
 from core.capture_state import get_capture_status
 from core.model_residency import can_load_text, ensure_text_model
+from core.performance_metrics import observe_timing
 from core.storage import conn
 
 from .tier_one_classifier import tier1_score
@@ -85,6 +86,7 @@ def apply_vision_verdict(
 
     # Vision verdict is authoritative - it can see the screen, so it overrides text-tier classification
     interesting = 0 if verdict["verdict"] == "not_interesting" else 1
+    started = time.perf_counter()
     cursor = conn.execute(
         """UPDATE events
            SET vision_ocr_text=?,
@@ -116,7 +118,10 @@ def apply_vision_verdict(
             event_id,
         ),
     )
+    observe_timing("database.vision_update", (time.perf_counter() - started) * 1000.0)
+    started = time.perf_counter()
     conn.commit()
+    observe_timing("database.vision_commit", (time.perf_counter() - started) * 1000.0)
     return bool(cursor.rowcount)
 
 

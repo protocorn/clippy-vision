@@ -8,8 +8,7 @@ Every 5 seconds prints:
   - whether that gated text would be stored with a screenshot
   - whether it counts as "useful" (skips OCR in enrichment)
 
-Usage (PowerShell):
-  cd c:\\Users\\proto\\Clippy_Vision
+Usage (PowerShell, from repo root):
   $env:PYTHONPATH = (Get-Location).Path
   python .\\scripts\\probe_accessibility.py
 """

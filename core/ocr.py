@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import threading
 from pathlib import Path
@@ -13,6 +14,19 @@ _engine_error = None
 _space_re = re.compile(r"\s+")
 
 
+def _ocr_thread_count() -> int:
+    """Threads to hand onnxruntime for OCR, instead of its default of "all
+    cores." OCR runs as background work alongside capture/UIA/the API's own
+    load, and an unbounded thread pool means a single OCR call competes with
+    everything else on the machine for every core at once - exactly the kind
+    of contention that turned single-digit-second OCR calls into 14-21s ones
+    during stress testing. Half the cores, capped at 4, keeps OCR fast
+    without letting it dominate a machine that's already under pressure.
+    """
+    cores = os.cpu_count() or 4
+    return max(1, min(4, cores // 2))
+
+
 def _get_engine():
     global _engine, _engine_error
     if _engine is not None or _engine_error is not None:
@@ -23,11 +37,27 @@ def _get_engine():
         try:
             # RapidOCR renamed its distribution; support both package layouts
             # without forcing users onto one runtime version.
+            threads = _ocr_thread_count()
             try:
                 from rapidocr import RapidOCR
+
+                _engine = RapidOCR(
+                    params={
+                        "EngineConfig.onnxruntime.intra_op_num_threads": threads,
+                        "EngineConfig.onnxruntime.inter_op_num_threads": threads,
+                    }
+                )
             except ImportError:
                 from rapidocr_onnxruntime import RapidOCR
-            _engine = RapidOCR()
+
+                try:
+                    _engine = RapidOCR(intra_op_num_threads=threads, inter_op_num_threads=threads)
+                except TypeError:
+                    # Older rapidocr_onnxruntime releases don't accept thread
+                    # kwargs — fall back to the unconfigured default rather
+                    # than failing OCR entirely over a thread count.
+                    _engine = RapidOCR()
+            print(f"[ocr] engine ready (onnxruntime threads={threads})")
         except Exception as exc:
             _engine_error = exc
             print(f"[ocr] unavailable: {exc}")

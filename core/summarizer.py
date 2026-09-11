@@ -31,7 +31,7 @@ from core.model_residency import can_load_text, ensure_text_model
 
 MODEL = "qwen3:8b"
 INTERVAL_SEC = 60  # wake cadence; session length is controlled below
-MIN_EVENTS = 3  # don't summarize if fewer than 3 interesting events
+MIN_EVENTS = 1  # contentful events only (typing bursts never count)
 RAW_LOOKBACK_SECONDS = 7 * 24 * 60 * 60
 MAX_SESSION_GROUPS_PER_TICK = 3
 MAX_VISION_REFRESHES_PER_TICK = 1
@@ -67,15 +67,18 @@ SUMMARY_SCHEMA = {
         "entities"
     ],
 }
-SYSTEM_PROMPT = """You summarize computer work sessions from activity events.
+SYSTEM_PROMPT = """You summarize computer work sessions from content-bearing events only
+(pastes, clipboard copies, screen/OCR text, and app context that includes real screen text).
 
-Given a list of recent interesting events (typing bursts, pastes, context switches, vision observations),
-produce a JSON object with:
-- summary: 2-4 sentence plain English description of what the user was doing
-- active_task: the single most likely task (e.g. "debugging code", "writing email", "reading docs")
-- entities: list of specific things mentioned (file names, URLs, error messages, tool names, people)
+Produce a JSON object with:
+- summary: 2-4 sentence plain English description of the actual work content
+- active_task: the single most likely concrete task (topic/file/decision), not "using Cursor" or "browsing"
+- entities: specific things from the content (file names, URLs, error messages, people, ticket IDs)
 
-Be specific and concrete. Use past tense. Focus on what actually happened, not generic descriptions.
+Rules:
+- Use past tense. Be specific.
+- Never treat typing speed, word counts, revision ratios, or bare app switches as the work itself.
+- If the only signal is which app was focused, say the content was too thin to summarize meaningfully.
 Respond ONLY with valid JSON, no other text."""
 
 
@@ -116,9 +119,48 @@ def _screen_text_fingerprint(text: str) -> str:
     return hashlib.sha1(normalized.encode("utf-8", errors="ignore")).hexdigest()
 
 
+def is_contentful_for_summary(event: dict) -> bool:
+    """True when an event carries substance worth summarizing.
+
+    Typing bursts / deviation stay in the DB for screenshot timing, but they must
+    never enter the summarizer prompt. Bare context switches also stay out unless
+    they already carry useful screen text.
+    """
+    et = str(event.get("event_type") or "").strip()
+    if et in {"typing_burst", "deviation", "mouse_burst"}:
+        return False
+
+    screen = event.get("vision_ocr_text") or ""
+    has_screen = is_useful_screen_text(screen)
+    summary = " ".join(str(event.get("summary") or "").split()).strip()
+    activity = " ".join(str(event.get("vision_activity") or "").split()).strip()
+
+    if et in {"paste", "clipboard_change"}:
+        # Need real copied/pasted text, not an empty shell.
+        return len(summary) >= 24 or has_screen
+
+    if et == "screenshot_analysis":
+        return has_screen or len(activity) >= 8
+
+    if et == "context_change":
+        # App focus alone is noise; only keep switches that captured real screen text.
+        return has_screen
+
+    return has_screen or (len(summary) >= 40 and not summary.casefold().startswith("typed "))
+
+
+def _contentful_events(events: list[dict]) -> list[dict]:
+    return [event for event in events if is_contentful_for_summary(event)]
+
+
 def _select_events_for_prompt(events: list[dict]) -> list[dict]:
-    """Keep an oldest-first slice so backlog drains instead of chasing the newest tip."""
-    selected = list(events[:MAX_EVENTS_PER_WINDOW]) if len(events) > MAX_EVENTS_PER_WINDOW else list(events)
+    """Keep an oldest-first contentful slice so backlog drains instead of chasing the newest tip."""
+    contentful = _contentful_events(events)
+    selected = (
+        list(contentful[:MAX_EVENTS_PER_WINDOW])
+        if len(contentful) > MAX_EVENTS_PER_WINDOW
+        else list(contentful)
+    )
     if len(selected) < 2:
         return selected
     start = selected[0]["timestamp"]
@@ -191,10 +233,13 @@ def _clear_refresh_failure(summary_id: str) -> None:
 
 
 def summarize_window(events: list[dict], session_id: str) -> dict | None:
-    if len(events) < MIN_EVENTS:
+    contentful = _contentful_events(events)
+    if len(contentful) < MIN_EVENTS:
         return None
 
     prompt = _build_prompt(events)
+    if prompt.strip() == "Events:" or len(prompt) < 40:
+        return None
 
     body = gateway.chat(
         messages=[
@@ -221,6 +266,8 @@ def summarize_window(events: list[dict], session_id: str) -> dict | None:
             pass  # best-effort; retrieval.py will back-fill on first query
 
     selected = _select_events_for_prompt(events)
+    if not selected:
+        return None
     summary = {
         "summary_id": str(uuid.uuid4()),
         "session_id": session_id,
@@ -269,7 +316,7 @@ def _refresh_vision_enriched_sessions():
             continue
 
         events = get_events_for_window(s["window_start"], s["window_end"])
-        if len(events) < MIN_EVENTS:
+        if len(_contentful_events(events)) < MIN_EVENTS:
             mark_session_vision_enriched(summary_id)
             _clear_refresh_failure(summary_id)
             continue
@@ -335,15 +382,17 @@ def summarizer_loop():
             events = get_unsummarized_events(time.time() - RAW_LOOKBACK_SECONDS)
             ready = [
                 group for group in _group_events_by_time_window(events)
-                if len(group) >= MIN_EVENTS
+                if len(_contentful_events(group)) >= MIN_EVENTS
             ]
             ready.sort(key=lambda items: items[0]["timestamp"])
 
             for session_events in ready[:MAX_SESSION_GROUPS_PER_TICK]:
                 source_session_id = session_events[0]["session_id"]
+                contentful_n = len(_contentful_events(session_events))
                 print(
-                    f"  [SUMMARIZER] Summarizing {min(len(session_events), MAX_EVENTS_PER_WINDOW)}"
-                    f"/{len(session_events)} events (window from {source_session_id[:8]})"
+                    f"  [SUMMARIZER] Summarizing {min(contentful_n, MAX_EVENTS_PER_WINDOW)}"
+                    f"/{contentful_n} contentful events "
+                    f"(window from {source_session_id[:8]}, {len(session_events)} raw)"
                 )
                 summary = summarize_window(session_events, source_session_id)
                 if summary:
@@ -354,12 +403,12 @@ def summarizer_loop():
             pending = sum(
                 len(group)
                 for group in _group_events_by_time_window(events)
-                if len(group) < MIN_EVENTS
+                if len(_contentful_events(group)) < MIN_EVENTS
             )
             if pending:
                 print(
-                    f"  [SUMMARIZER] {pending} event(s) remain in short sessions "
-                    f"below the {MIN_EVENTS}-event threshold"
+                    f"  [SUMMARIZER] {pending} event(s) remain without enough "
+                    f"contentful signal (need ≥{MIN_EVENTS})"
                 )
 
             _refresh_vision_enriched_sessions()

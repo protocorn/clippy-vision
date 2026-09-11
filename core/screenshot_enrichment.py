@@ -12,6 +12,8 @@ from core.app_settings import get_capture_settings
 from core.image_embeddings import embed_image
 from core.ocr import extract_text
 from core.ocr_crop import crop_screenshot_for_ocr
+from core.performance_metrics import increment, timed
+from core.uia_worker import read_persisted_accessibility_text
 
 _cache: dict[str, tuple[int, int, str, list[float] | None, str | None, bool, bool]] = {}
 _accessibility_cache: dict[str, tuple[int, int, str]] = {}
@@ -72,6 +74,11 @@ def _captured_accessibility_text(path: Path, stat) -> str:
         cached = _accessibility_cache.get(str(path))
         if cached and cached[:2] == (stat.st_mtime_ns, stat.st_size):
             return cached[2]
+    # Capture and enrichment run in different OS processes, so the in-memory
+    # cache above is usually empty here. Prefer the UIA worker's sidecar file.
+    persisted = read_persisted_accessibility_text(path)
+    if persisted.strip():
+        return normalize_accessibility_text(persisted)
     return ""
 
 
@@ -82,12 +89,17 @@ def extract_screenshot_ocr(path: Path) -> str:
     """
     with tempfile.TemporaryDirectory(prefix="clippy_ocr_crop_") as tmp:
         cropped_path = Path(tmp) / "content.jpg"
-        crop = crop_screenshot_for_ocr(path, cropped_path)
+        with timed("ocr.crop_prepare"):
+            crop = crop_screenshot_for_ocr(path, cropped_path)
         if crop:
-            cropped_text = extract_text(cropped_path)
+            with timed("ocr.crop_inference"):
+                cropped_text = extract_text(cropped_path)
             if is_useful_accessibility_text(cropped_text):
+                increment("ocr.crop_accepted")
                 return cropped_text
-    return extract_text(path)
+    increment("ocr.full_fallback")
+    with timed("ocr.full_inference"):
+        return extract_text(path)
 
 
 def enrich_screenshot(
@@ -114,15 +126,16 @@ def enrich_screenshot(
                     cached[4] if settings["image_embeddings_enabled"] and include_image_embedding else None,
                 )
 
-    accessibility_text = _captured_accessibility_text(path, stat)
-    should_run_ocr = settings["ocr_enabled"]
-    ocr_text = extract_screenshot_ocr(path) if should_run_ocr else ""
-    captured_text = choose_screen_text(accessibility_text, ocr_text)
-    # CLIP/image embeddings: gated by image_embeddings_enabled (default off;
-    # parked pending contributor keep/remove decision — see image_embeddings.py).
-    should_embed_image = settings["image_embeddings_enabled"] and include_image_embedding
-    image_embedding, image_embedding_model = (embed_image(path) if should_embed_image else (None, None))
-    result = (captured_text, image_embedding, image_embedding_model)
+    with timed("enrichment.total"):
+        accessibility_text = _captured_accessibility_text(path, stat)
+        should_run_ocr = settings["ocr_enabled"]
+        ocr_text = extract_screenshot_ocr(path) if should_run_ocr else ""
+        captured_text = choose_screen_text(accessibility_text, ocr_text)
+        # CLIP/image embeddings: gated by image_embeddings_enabled (default off;
+        # parked pending contributor keep/remove decision — see image_embeddings.py).
+        should_embed_image = settings["image_embeddings_enabled"] and include_image_embedding
+        image_embedding, image_embedding_model = (embed_image(path) if should_embed_image else (None, None))
+        result = (captured_text, image_embedding, image_embedding_model)
     with _cache_lock:
         _cache[key] = (
             stat.st_mtime_ns,
