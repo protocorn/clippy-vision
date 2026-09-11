@@ -771,19 +771,6 @@
       animation: pulse 1.2s ease-in-out infinite;
     }
 
-    .skill-check {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-      color: var(--text);
-    }
-
-    .skill-check input {
-      width: auto;
-      min-width: 0;
-      flex: 0;
-    }
 
     @keyframes pulse {
 
@@ -1930,170 +1917,7 @@
       }
     }
 
-    /* ------- SKILLS VIEW ------- */
 
-    #skills-view {
-      min-height: 0;
-    }
-
-    #skills-view>header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-shrink: 0;
-    }
-
-    #skills-scroll {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px 24px 32px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    .skill-card {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: var(--surface);
-      overflow: hidden;
-    }
-
-    .skill-card.is-soon {
-      opacity: 0.72;
-    }
-
-    .skill-card-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      padding: 14px 16px;
-    }
-
-    .skill-card-text {
-      min-width: 0;
-      flex: 1;
-    }
-
-    .skill-card-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 3px;
-    }
-
-    .skill-card-title strong {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text);
-    }
-
-    .skill-card-text p {
-      font-size: 12px;
-      line-height: 1.4;
-      color: var(--muted);
-    }
-
-    .skill-card-body {
-      display: none;
-      padding: 0 16px 16px;
-      border-top: 1px solid var(--border);
-    }
-
-    .skill-card.is-on .skill-card-body {
-      display: block;
-      padding-top: 14px;
-    }
-
-    .skill-rule {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      padding: 12px;
-      margin-bottom: 10px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--inset);
-    }
-
-    .skill-rule-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-    }
-
-    .skill-rule-row label {
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-      color: var(--muted);
-      min-width: 42px;
-    }
-
-    .skill-rule input,
-    .skill-rule select {
-      flex: 1;
-      min-width: 120px;
-      padding: 8px 10px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: var(--panel);
-      color: var(--text);
-      font-size: 13px;
-      font-family: inherit;
-      outline: none;
-    }
-
-    .skill-rule input:focus,
-    .skill-rule select:focus {
-      border-color: var(--accent);
-    }
-
-    .skill-rule input.skill-cooldown {
-      flex: 0;
-      width: 64px;
-      min-width: 64px;
-    }
-
-    .skill-empty {
-      font-size: 13px;
-      color: var(--muted);
-      padding: 8px 0 12px;
-    }
-
-    .skill-add-btn {
-      margin-top: 4px;
-    }
-
-    .skill-actions {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 8px;
-      margin-top: 4px;
-    }
-
-    .skill-save-btn {
-      background: var(--accent);
-      color: #fff;
-      border-color: transparent;
-    }
-
-    .skill-save-status {
-      font-size: 12px;
-      color: var(--muted);
-    }
-
-    .skill-save-status.ok {
-      color: var(--success);
-    }
-
-    .skill-save-status.error {
-      color: var(--danger);
-    }
   </style>
 </head>
 
@@ -2128,7 +1952,6 @@
       <div class="header-actions">
         <button id="new-chat-btn" class="header-btn">New Chat</button>
         <button id="timeline-btn" class="header-btn" title="Timeline">Timeline</button>
-        <button id="skills-btn" class="header-btn" title="Skills">Skills</button>
         <button id="settings-btn" class="header-btn" title="Settings">Settings</button>
         <button id="capture-btn" title="Toggle screen capture">
           <span class="capture-dot"></span>
@@ -2311,95 +2134,11 @@
     </div>
   </div>
 
-  <!-- Skills view -->
-  <div id="skills-view" class="view">
-    <header>
-      <div class="header-actions">
-        <button id="skills-back" class="header-btn" title="Back to chat">← Back</button>
-        <span>Skills</span>
-      </div>
-    </header>
-
-    <div id="skills-scroll">
-      <p class="settings-hint">Skills stay off until you turn them on. Clippy only acts when a skill is enabled.</p>
-
-      <article class="skill-card" id="skill-see-x" data-skill="see-x-do-y">
-        <div class="skill-card-head">
-          <div class="skill-card-text">
-            <div class="skill-card-title"><strong>When you see X, do Y</strong></div>
-            <p>Watch a website in the background, or the focused tab when you are not typing. Optional F5 waits 10 minutes with no mouse or keyboard — it cannot tell reading from stepped-away, so leave it off unless a reload is safe.</p>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" id="skill-see-x-toggle" />
-            <span class="toggle-track"></span>
-          </label>
-        </div>
-        <div class="skill-card-body">
-          <div id="skill-rules"></div>
-          <div class="skill-actions">
-            <button type="button" id="skill-add-rule" class="header-btn skill-add-btn">+ Add rule</button>
-            <button type="button" id="skill-save-rules" class="header-btn skill-save-btn">Save rules</button>
-            <span id="skill-save-status" class="skill-save-status"></span>
-          </div>
-        </div>
-      </article>
-
-      <article class="skill-card is-soon">
-        <div class="skill-card-head">
-          <div class="skill-card-text">
-            <div class="skill-card-title">
-              <strong>Reading &amp; quiz</strong>
-              <span class="settings-badge">Under development</span>
-            </div>
-            <p>After a study session, quiz you on what was on screen.</p>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" disabled />
-            <span class="toggle-track"></span>
-          </label>
-        </div>
-      </article>
-
-      <article class="skill-card is-soon">
-        <div class="skill-card-head">
-          <div class="skill-card-text">
-            <div class="skill-card-title">
-              <strong>Next best action</strong>
-              <span class="settings-badge">Under development</span>
-            </div>
-            <p>At a real pause, remind you what you were in the middle of.</p>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" disabled />
-            <span class="toggle-track"></span>
-          </label>
-        </div>
-      </article>
-
-      <article class="skill-card is-soon">
-        <div class="skill-card-head">
-          <div class="skill-card-text">
-            <div class="skill-card-title">
-              <strong>Meeting notes</strong>
-              <span class="settings-badge">Under development</span>
-            </div>
-            <p>When a call starts, keep light notes against what was on screen.</p>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" disabled />
-            <span class="toggle-track"></span>
-          </label>
-        </div>
-      </article>
-    </div>
-  </div>
-
   <script src="vendor/marked.umd.js"></script>
   <script src="vendor/purify.min.js"></script>
   <script>
     const nameView = document.getElementById('name-view')
     const chatView = document.getElementById('chat-view')
-    const skillsView = document.getElementById('skills-view')
     const settingsView = document.getElementById('settings-view')
     const timelineView = document.getElementById('timeline-view')
     const nameInput = document.getElementById('name-input')
@@ -2431,8 +2170,6 @@
     const convSearch = document.getElementById('conv-search')
     const convSearchHint = document.getElementById('conv-search-hint')
 
-    const skillsBtn = document.getElementById('skills-btn')
-    const skillsBack = document.getElementById('skills-back')
     const timelineBtn = document.getElementById('timeline-btn')
     const timelineBack = document.getElementById('timeline-back')
     const timelineBody = document.getElementById('timeline-body')
@@ -2442,12 +2179,6 @@
     const timelineDetailScroll = document.getElementById('timeline-detail-scroll')
     const timelineDetailContent = document.getElementById('timeline-detail-content')
     const timelineDetailBack = document.getElementById('timeline-detail-back')
-    const skillSeeXToggle = document.getElementById('skill-see-x-toggle')
-    const skillSeeXCard = document.getElementById('skill-see-x')
-    const skillRulesEl = document.getElementById('skill-rules')
-    const skillAddRuleBtn = document.getElementById('skill-add-rule')
-    const skillSaveRulesBtn = document.getElementById('skill-save-rules')
-    const skillSaveStatus = document.getElementById('skill-save-status')
 
 
     let searchTimer = null
@@ -2483,257 +2214,6 @@
     let conversationId = crypto.randomUUID()
 
 
-    function defaultSkillsState() {
-      return {
-        skills: {
-          'see-x-do-y': { enabled: false, rules: [] },
-          'reading-quiz': { enabled: false },
-          'next-best-action': { enabled: false },
-          'meeting-notes': { enabled: false },
-        },
-      }
-    }
-
-    function newRule() {
-      return {
-        id: 'r' + Date.now().toString(36),
-        mode: 'background',
-        source_url: '',
-        keywords: [],
-        poll_seconds: 60,
-        enabled: true,
-        cooldown_seconds: 120,
-        alert_message: 'XYZ match: {title}',
-        parser: 'auto',
-        require_all_keywords: false,
-        phrases: [],
-        near: [],
-        near_chars: 100,
-        intent: '',
-        generator_prompt: '',
-        allow_refresh: false,
-        refresh_seconds: 120,
-      }
-    }
-
-    let skillsState = defaultSkillsState()
-    let xyzSavedSnapshot = '[]'
-
-    function setSkillSaveStatus(text, kind) {
-      skillSaveStatus.textContent = text || ''
-      skillSaveStatus.classList.remove('ok', 'error')
-      if (kind) skillSaveStatus.classList.add(kind)
-    }
-
-    function markRulesDirty() {
-      const current = JSON.stringify(skillsState.skills['see-x-do-y'].rules || [])
-      if (current !== xyzSavedSnapshot) setSkillSaveStatus('Unsaved changes')
-      else setSkillSaveStatus('')
-    }
-
-    function markRulesClean() {
-      xyzSavedSnapshot = JSON.stringify(skillsState.skills['see-x-do-y'].rules || [])
-      setSkillSaveStatus('Saved.', 'ok')
-    }
-
-    function ruleIsReady(rule) {
-      const hasUrl = !!(rule.source_url || '').trim()
-      const hasIntent = !!(rule.intent || '').trim()
-      const hasKeywords = (rule.keywords || []).some((k) => (k || '').trim())
-      return hasUrl && (hasIntent || hasKeywords)
-    }
-
-    async function persistXyzEnabled() {
-      const skill = skillsState.skills['see-x-do-y']
-      await window.clippy.saveXyzSkill({ enabled: !!skill.enabled })
-    }
-
-    async function saveXyzRules() {
-      const skill = skillsState.skills['see-x-do-y']
-      const saved = JSON.parse(xyzSavedSnapshot || '[]')
-      const savedById = {}
-      saved.forEach((rule) => { if (rule && rule.id) savedById[rule.id] = rule })
-
-      const ready = []
-      for (const rule of skill.rules || []) {
-        if (!ruleIsReady(rule)) continue
-        const prev = savedById[rule.id]
-        if (prev && (prev.source_url || '').trim() !== (rule.source_url || '').trim()) {
-          rule.id = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-        }
-        ready.push(rule)
-      }
-      if (ready.length !== (skill.rules || []).length) {
-        setSkillSaveStatus('Fill URL and intent (or keywords) before saving a rule.', 'error')
-        if (!ready.length) return
-      }
-      skill.rules = ready
-      await window.clippy.saveXyzSkill({
-        enabled: !!skill.enabled,
-        rules: ready,
-      })
-      markRulesClean()
-      renderRules()
-    }
-
-    function addField(row, labelText, el) {
-      const label = document.createElement('label')
-      label.textContent = labelText
-      row.append(label, el)
-    }
-
-    function renderRules() {
-      const skill = skillsState.skills['see-x-do-y']
-      skillRulesEl.innerHTML = ''
-      if (!skill.rules.length) {
-        const empty = document.createElement('p')
-        empty.className = 'skill-empty'
-        empty.textContent = 'No rules yet. Add a URL to watch, then describe when Clippy should alert you. Hit Save rules when you are ready.'
-        skillRulesEl.appendChild(empty)
-        return
-      }
-      skill.rules.forEach((rule, index) => {
-        const card = document.createElement('div')
-        card.className = 'skill-rule'
-
-        const urlRow = document.createElement('div')
-        urlRow.className = 'skill-rule-row'
-        const urlInput = document.createElement('input')
-        urlInput.type = 'url'
-        urlInput.placeholder = 'https://news.ycombinator.com/newest'
-        urlInput.value = rule.source_url || ''
-        urlInput.addEventListener('input', () => {
-          skill.rules[index].source_url = urlInput.value
-          markRulesDirty()
-        })
-        addField(urlRow, 'URL', urlInput)
-
-        const intentRow = document.createElement('div')
-        intentRow.className = 'skill-rule-row'
-        const intentInput = document.createElement('input')
-        intentInput.type = 'text'
-        intentInput.placeholder = 'Notify when a new post appears at the top'
-        intentInput.value = rule.intent || ''
-        intentInput.addEventListener('input', () => {
-          skill.rules[index].intent = intentInput.value
-          markRulesDirty()
-        })
-        addField(intentRow, 'Intent', intentInput)
-
-        const kwRow = document.createElement('div')
-        kwRow.className = 'skill-rule-row'
-        const kwInput = document.createElement('input')
-        kwInput.type = 'text'
-        kwInput.placeholder = 'optional keywords, comma-separated'
-        kwInput.value = (rule.keywords || []).join(', ')
-        kwInput.addEventListener('input', () => {
-          skill.rules[index].keywords = kwInput.value.split(',').map((s) => s.trim()).filter(Boolean)
-          markRulesDirty()
-        })
-        addField(kwRow, 'Keywords', kwInput)
-
-        const modeRow = document.createElement('div')
-        modeRow.className = 'skill-rule-row'
-        const modeSelect = document.createElement('select')
-        ;[
-          ['background', 'Background (HTTP poll)'],
-          ['foreground', 'Foreground (focused tab)'],
-          ['both', 'Both'],
-        ].forEach(([value, label]) => {
-          const opt = document.createElement('option')
-          opt.value = value
-          opt.textContent = label
-          if (rule.mode === value) opt.selected = true
-          modeSelect.appendChild(opt)
-        })
-        modeSelect.addEventListener('change', () => {
-          skill.rules[index].mode = modeSelect.value
-          markRulesDirty()
-          renderRules()
-        })
-        addField(modeRow, 'Watch', modeSelect)
-
-        const refreshRow = document.createElement('div')
-        refreshRow.className = 'skill-rule-row'
-        const refreshLabel = document.createElement('label')
-        refreshLabel.className = 'skill-check'
-        const refreshBox = document.createElement('input')
-        refreshBox.type = 'checkbox'
-        refreshBox.checked = !!rule.allow_refresh
-        refreshBox.disabled = rule.mode === 'background'
-        refreshBox.addEventListener('change', () => {
-          skill.rules[index].allow_refresh = refreshBox.checked
-          markRulesDirty()
-        })
-        refreshLabel.append(refreshBox, document.createTextNode('Allow F5 after 10 min with no mouse/keyboard (reading still counts)'))
-        refreshRow.append(refreshLabel)
-
-        const metaRow = document.createElement('div')
-        metaRow.className = 'skill-rule-row'
-        const coolInput = document.createElement('input')
-        coolInput.className = 'skill-cooldown'
-        coolInput.type = 'number'
-        coolInput.min = '15'
-        coolInput.value = String(rule.cooldown_seconds || 120)
-        coolInput.addEventListener('input', () => {
-          const n = parseInt(coolInput.value, 10)
-          skill.rules[index].cooldown_seconds = Number.isFinite(n) && n > 0 ? n : 120
-          markRulesDirty()
-        })
-        const coolHint = document.createElement('span')
-        coolHint.style.cssText = 'font-size:12px;color:var(--muted)'
-        coolHint.textContent = 'seconds between alerts'
-        const delBtn = document.createElement('button')
-        delBtn.type = 'button'
-        delBtn.className = 'identity-remove'
-        delBtn.textContent = 'Delete'
-        delBtn.addEventListener('click', () => {
-          skill.rules.splice(index, 1)
-          markRulesDirty()
-          renderRules()
-        })
-        addField(metaRow, 'Wait', coolInput)
-        metaRow.append(coolHint, delBtn)
-
-        card.append(urlRow, intentRow, kwRow, modeRow, refreshRow, metaRow)
-        skillRulesEl.appendChild(card)
-      })
-    }
-
-    function syncSeeXCard() {
-      const on = !!skillsState.skills['see-x-do-y'].enabled
-      skillSeeXToggle.checked = on
-      skillSeeXCard.classList.toggle('is-on', on)
-      renderRules()
-    }
-
-    async function loadXyzFromApi() {
-      const data = await window.clippy.getXyzSkill()
-      skillsState.skills['see-x-do-y'].enabled = !!data.enabled
-      skillsState.skills['see-x-do-y'].rules = Array.isArray(data.rules) ? data.rules : []
-      xyzSavedSnapshot = JSON.stringify(skillsState.skills['see-x-do-y'].rules)
-      setSkillSaveStatus('')
-    }
-
-    async function openSkills() {
-      closeDrawer()
-      try {
-        await loadXyzFromApi()
-      } catch (err) {
-        console.error('Could not load skill rules', err)
-      }
-      syncSeeXCard()
-      showView(skillsView)
-    }
-    function closeSkills() {
-      const current = JSON.stringify(skillsState.skills['see-x-do-y'].rules || [])
-      if (current !== xyzSavedSnapshot && !confirm('You have unsaved rule changes. Discard them?')) {
-        return
-      }
-      showView(chatView)
-      if (chatMain.classList.contains('is-welcome')) welcomeInput.focus()
-      else inputBox.focus()
-    }
 
     const EVENT_TYPE_LABELS = {
       context_change: 'App switch',
@@ -3311,7 +2791,6 @@
     function showView(view) {
       nameView.classList.remove('active')
       chatView.classList.remove('active')
-      skillsView.classList.remove('active')
       loadingView.classList.remove('active')
       settingsView.classList.remove('active')
       timelineView.classList.remove('active')
@@ -4226,30 +3705,6 @@
       }
     }
 
-    // skills view
-
-    skillSeeXToggle.addEventListener('change', () => {
-      skillsState.skills['see-x-do-y'].enabled = skillSeeXToggle.checked
-      persistXyzEnabled().catch((err) => console.error(err))
-      syncSeeXCard()
-    })
-    skillAddRuleBtn.addEventListener('click', () => {
-      skillsState.skills['see-x-do-y'].rules.push(newRule())
-      markRulesDirty()
-      renderRules()
-    })
-    skillSaveRulesBtn.addEventListener('click', async () => {
-      skillSaveRulesBtn.disabled = true
-      try {
-        await saveXyzRules()
-      } catch (err) {
-        setSkillSaveStatus(`Could not save: ${err.message}`, 'error')
-      } finally {
-        skillSaveRulesBtn.disabled = false
-      }
-    })
-    skillsBtn.addEventListener('click', openSkills)
-    skillsBack.addEventListener('click', closeSkills)
     timelineBtn.addEventListener('click', openTimeline)
     timelineBack.addEventListener('click', closeTimeline)
     timelineLoadMore.addEventListener('click', () => loadTimelineSessions({ reset: false }))

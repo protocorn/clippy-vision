@@ -1,4 +1,4 @@
-"""App-lifetime background jobs that must not depend on live screen capture.
+﻿"""App-lifetime background jobs that must not depend on live screen capture.
 
 Capture may be paused as a privacy switch, but events and screenshots already
 stored from an allowed window should still be summarized and distilled.
@@ -37,10 +37,4 @@ def start_background_jobs() -> None:
     start_screenshot_processor()
     start_summarizer()
     start_catch_up_worker()
-    try:
-        from skills.when_x_then_y import start_xyz_worker
-
-        start_xyz_worker()
-    except Exception as exc:
-        print(f"[background] XYZ skill worker skipped: {exc}")
     print("[background] Summarizer, screenshot, and classification catch-up workers started")
