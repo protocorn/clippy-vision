@@ -60,6 +60,7 @@ from core.screenshot_processor import (
     _get_nearest_event,
     _group_by_similarity,
     _process_group,
+    _select_old_group_batch,
 )
 from core.screenshot_search import search_screenshots
 from core.storage import (
@@ -74,7 +75,7 @@ from core.storage import (
     store_event,
     store_summary,
 )
-from core.summarizer import _build_prompt
+from core.summarizer import _build_prompt, is_contentful_for_summary
 from core.screenshot_scheduler import _foreground_accessibility_text, get_screenshots_near
 
 
@@ -148,17 +149,52 @@ class RuntimeRegressionTests(unittest.TestCase):
         marker = "project alpha private milestone 4827 planning notes"
         prompt = _build_prompt([{
             "timestamp": 100.0,
+            "event_type": "screenshot_analysis",
             "summary": "Background screenshot",
             "vision_activity": "Code — Editor",
             "vision_ocr_text": marker,
         }])
         self.assertIn(marker, prompt)
 
-    def test_packaged_app_includes_bundled_minilm(self):
+    def test_typing_bursts_are_excluded_from_summarizer_prompt(self):
+        prompt = _build_prompt([
+            {
+                "timestamp": 100.0,
+                "event_type": "typing_burst",
+                "summary": "Typed 42 words at 68 WPM in Cursor.exe, revision ratio 0.1",
+                "vision_ocr_text": "",
+            },
+            {
+                "timestamp": 110.0,
+                "event_type": "context_change",
+                "summary": "Switched to chrome.exe from Cursor.exe after 12s",
+                "vision_ocr_text": "",
+            },
+            {
+                "timestamp": 120.0,
+                "event_type": "paste",
+                "summary": "Pasted content: fix auth token refresh in api_server.py in Cursor.exe on editor",
+                "vision_ocr_text": "",
+            },
+        ])
+        self.assertNotIn("Typed 42 words", prompt)
+        self.assertNotIn("Switched to chrome.exe", prompt)
+        self.assertIn("fix auth token refresh", prompt)
+        self.assertFalse(is_contentful_for_summary({
+            "event_type": "typing_burst",
+            "summary": "Typed 12 words at 40 WPM in notepad",
+        }))
+        self.assertTrue(is_contentful_for_summary({
+            "event_type": "paste",
+            "summary": "Pasted content: meeting notes for Q3 roadmap review in Slack",
+        }))
+
+    def test_packaged_app_downloads_minilm_instead_of_bundling(self):
         package_path = Path(__file__).resolve().parents[1] / "electron-ui" / "package.json"
         package = json.loads(package_path.read_text())
         filters = package["build"]["extraResources"][0]["filter"]
-        self.assertIn("models/embeddings/all-MiniLM-L6-v2/**/*", filters)
+        self.assertNotIn("models/embeddings/all-MiniLM-L6-v2/**/*", filters)
+        self.assertNotIn("models/router_classifier/best/**/*", filters)
 
     def test_clear_events_removes_activity_derived_memory_but_preserves_chat_memory(self):
         stamp = time.time()
@@ -542,6 +578,38 @@ class RuntimeRegressionTests(unittest.TestCase):
         groups = _group_by_similarity(paths, {path.stem: digest for path in paths})
         self.assertEqual(sorted(len(group) for group in groups), [1, 2])
 
+    def test_old_group_batch_is_never_empty_when_backlog_exists(self):
+        """The backlog used to only get processed when recent_groups was
+        completely empty that cycle — a continuously-active user starved it
+        indefinitely (screenshot_queue.depth grew 19 -> 30 within a single
+        200s benchmark phase with zero old-group throughput). It must always
+        get at least OLD_GROUP_BASE_BATCH groups regardless of depth."""
+        from core import screenshot_processor as processor
+
+        old_groups = [[Path(f"{i}.jpg")] for i in range(5)]
+        batch = _select_old_group_batch(old_groups, depth=3)
+        self.assertEqual(len(batch), processor.OLD_GROUP_BASE_BATCH)
+        # Oldest-first: old_groups is sorted most-recent-first by the caller,
+        # so the last element is the actual oldest and must come out first.
+        self.assertEqual(batch[0], old_groups[-1])
+
+    def test_old_group_batch_scales_up_once_backlog_is_falling_behind(self):
+        from core import screenshot_processor as processor
+
+        old_groups = [[Path(f"{i}.jpg")] for i in range(10)]
+        below_threshold = _select_old_group_batch(
+            old_groups, depth=processor.OLD_GROUP_CATCHUP_THRESHOLD - 1
+        )
+        at_threshold = _select_old_group_batch(old_groups, depth=processor.OLD_GROUP_CATCHUP_THRESHOLD)
+        self.assertEqual(len(below_threshold), processor.OLD_GROUP_BASE_BATCH)
+        self.assertEqual(len(at_threshold), processor.OLD_GROUP_CATCHUP_BATCH)
+        # Still oldest-first even in the larger batch.
+        self.assertEqual(at_threshold[0], old_groups[-1])
+        self.assertEqual(at_threshold[-1], old_groups[-processor.OLD_GROUP_CATCHUP_BATCH])
+
+    def test_old_group_batch_is_empty_when_no_backlog(self):
+        self.assertEqual(_select_old_group_batch([], depth=0), [])
+
     def test_accessibility_text_skips_ocr_when_ui_text_is_useful(self):
         path = get_screenshots_dir() / "accessibility-first.jpg"
         Image.new("RGB", (4, 4), "white").save(path, format="JPEG")
@@ -612,12 +680,12 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertFalse(settings["rag_enabled"])
         self.assertNotIn("needs_vision", VERDICT_SCHEMA["properties"]["verdict"]["enum"])
 
-    def test_text_embeddings_are_bundled_and_local(self):
+    def test_text_embeddings_are_local(self):
         vector = embed_text("local semantic memory test")
         status = embedding_status()
         self.assertEqual(len(vector), MODEL_DIMENSION)
         self.assertEqual(MODEL_DIMENSION, 384)
-        self.assertEqual(status["provider"], "bundled")
+        self.assertEqual(status["provider"], "local")
         self.assertEqual(status["model"], MODEL_ID)
         self.assertTrue(status["bundled"])
         self.assertTrue(status["loaded"])
@@ -730,6 +798,8 @@ class RuntimeRegressionTests(unittest.TestCase):
         from core import model_residency as residency
         gb = residency._GB
         with patch.object(residency, "_commit_pressured", return_value=False), patch.object(
+            residency, "_cpu_pressured", return_value=False
+        ), patch.object(
             residency, "text_model_loaded", return_value=False
         ), patch.object(residency, "server_reachable", return_value=True), patch.object(
             residency, "gpu_can_host_text", return_value=False
@@ -751,6 +821,8 @@ class RuntimeRegressionTests(unittest.TestCase):
         with patch.object(residency, "text_model_loaded", return_value=True), patch.object(
             residency, "_available", return_value=int(0.4 * residency._GB)
         ), patch.object(residency, "_commit_pressured", return_value=False), patch.object(
+            residency, "_cpu_pressured", return_value=False
+        ), patch.object(
             residency, "server_reachable", return_value=True
         ), patch.object(residency, "gpu_can_host_text", return_value=False):
             self.assertTrue(residency.can_load_text())
@@ -811,14 +883,14 @@ class RuntimeRegressionTests(unittest.TestCase):
             residency, "gpu_can_host_text", return_value=True
         ), patch.object(residency, "_available", return_value=int(0.3 * residency._GB)), patch.object(
             residency, "_commit_pressured", return_value=False
-        ):
+        ), patch.object(residency, "_cpu_pressured", return_value=False):
             self.assertTrue(residency.can_cold_load_text())
 
         with patch.object(residency, "server_reachable", return_value=True), patch.object(
             residency, "gpu_can_host_text", return_value=False
         ), patch.object(residency, "_available", return_value=int(0.3 * residency._GB)), patch.object(
             residency, "_commit_pressured", return_value=False
-        ):
+        ), patch.object(residency, "_cpu_pressured", return_value=False):
             self.assertFalse(residency.can_cold_load_text())
 
     def test_text_load_blocked_when_ollama_is_down(self):
@@ -888,6 +960,140 @@ class RuntimeRegressionTests(unittest.TestCase):
             self.assertFalse(residency.can_load_text())
             self.assertFalse(residency.can_load_light())
             self.assertFalse(residency.can_run_ocr())
+
+    def test_high_ram_percent_alone_does_not_defer_work(self):
+        """A flat virtual_memory().percent threshold was tried and dropped: a
+        machine can sit at 90%+ RAM 'used' via harmless OS file-cache/standby
+        pages and be perfectly healthy — that used to false-trigger and
+        silently stop the OCR/model pipeline on exactly this kind of machine
+        (see the benchmark this guards against). Only swap/commit pressure or
+        real CPU contention should defer work now; there is no RAM%-based
+        gate left to patch around, which this test also documents by not
+        touching virtual_memory() at all — pressure_reason() must come back
+        clean regardless of whatever RAM% this test machine is actually at."""
+        from core import model_residency as residency
+        with patch.object(residency, "text_model_loaded", return_value=False), patch.object(
+            residency, "_available", return_value=int(8 * residency._GB)
+        ), patch.object(residency, "_commit_pressured", return_value=False), patch.object(
+            residency, "_cpu_pressured", return_value=False
+        ), patch.object(residency, "server_reachable", return_value=True), patch.object(
+            residency, "gpu_can_host_text", return_value=False
+        ):
+            self.assertTrue(residency.can_load_text())
+            self.assertTrue(residency.can_load_light())
+            self.assertTrue(residency.can_run_ocr())
+            self.assertIsNone(residency.pressure_reason())
+        self.assertFalse(hasattr(residency, "_ram_pressured"))
+
+    def test_relative_cpu_pressure_defers_ocr_and_model_loads(self):
+        """A CPU-saturated system (e.g. concurrent OCR/UIA calls) makes a single
+        OCR pass take 15-20x longer than usual without ever touching a memory
+        floor — this is the condition profiling actually caught."""
+        from core import model_residency as residency
+        with patch.object(residency, "text_model_loaded", return_value=False), patch.object(
+            residency, "_available", return_value=int(8 * residency._GB)
+        ), patch.object(residency, "_commit_pressured", return_value=False), patch.object(
+            residency, "_cpu_pressured", return_value=True
+        ), patch.object(residency, "server_reachable", return_value=True), patch.object(
+            residency, "gpu_can_host_text", return_value=False
+        ):
+            self.assertFalse(residency.can_load_text())
+            self.assertFalse(residency.can_load_light())
+            self.assertFalse(residency.can_run_ocr())
+            self.assertIn("CPU usage", residency.pressure_reason())
+
+    def test_ram_pressure_gate_only_skips_ocr_not_accessibility_enrichment(self):
+        """can_run_ocr() must gate the OCR call itself, not the whole
+        enrichment path. On a benchmark run this exact scenario (RAM sitting
+        at ~90%, above the new relative-pressure threshold) silently zeroed
+        out processor.groups_completed/frames_completed for an entire 200s
+        phase, because screenshot_processor_loop used to skip its whole loop
+        body on can_run_ocr()==False. enrich_screenshot() must still surface
+        accessibility text when OCR is gated, so that regression can't recur."""
+        from core import model_residency as residency
+
+        path = get_screenshots_dir() / "pressure-accessibility-only.jpg"
+        Image.new("RGB", (4, 4), "white").save(path, format="JPEG")
+        self.addCleanup(path.unlink, missing_ok=True)
+        ui_text = normalize_accessibility_text(
+            "Project settings\nConfigure local capture and privacy controls"
+        )
+        self.assertTrue(is_useful_accessibility_text(ui_text))
+        remember_accessibility_text(path, ui_text)
+
+        with patch.object(residency, "can_run_ocr", return_value=False), patch(
+            "core.screenshot_enrichment.get_capture_settings",
+            return_value={"ocr_enabled": True, "image_embeddings_enabled": False},
+        ):
+            captured_text, image_embedding, image_model = enrich_screenshot(path)
+
+        self.assertEqual(captured_text, ui_text)
+        self.assertIsNone(image_embedding)
+        self.assertIsNone(image_model)
+
+    def test_screenshot_processor_loop_does_not_import_can_run_ocr(self):
+        """Guards against re-introducing a module-level `if not can_run_ocr():
+        continue` at the top of the loop, which is what caused the regression
+        above — the loop must let OCR self-gate deeper in the stack instead."""
+        import core.screenshot_processor as processor_module
+
+        self.assertFalse(hasattr(processor_module, "can_run_ocr"))
+
+    def test_ocr_thread_count_is_capped_but_scales_with_low_core_counts(self):
+        """onnxruntime defaults to 'all cores'; OCR must not do that here —
+        it competes with capture/UIA/the API for cycles on every call."""
+        from core import ocr
+
+        with patch.object(ocr.os, "cpu_count", return_value=32):
+            self.assertEqual(ocr._ocr_thread_count(), 4)
+        with patch.object(ocr.os, "cpu_count", return_value=8):
+            self.assertEqual(ocr._ocr_thread_count(), 4)
+        with patch.object(ocr.os, "cpu_count", return_value=4):
+            self.assertEqual(ocr._ocr_thread_count(), 2)
+        with patch.object(ocr.os, "cpu_count", return_value=2):
+            self.assertEqual(ocr._ocr_thread_count(), 1)
+        with patch.object(ocr.os, "cpu_count", return_value=None):
+            self.assertGreaterEqual(ocr._ocr_thread_count(), 1)
+
+    def test_load_backoff_multiplier_stretches_background_intervals_under_sustained_pressure(self):
+        """Background capture/processor loops must check in less often once the
+        snapshot this module already collects shows sustained high CPU load —
+        otherwise the data is gathered but never actually changes behavior.
+        Deliberately CPU-only: a high system_ram_percent must NOT stretch the
+        interval by itself (same reasoning as model_residency.py dropping its
+        RAM%-based gate — RAM% used is mostly harmless OS cache, not a real
+        signal of a struggling machine, and this machine's own idle baseline
+        sits at ~90% RAM, which would otherwise 3x every interval for free)."""
+        from core import performance_metrics as pm
+
+        def snapshot_with(cpu_avg: float, ram_avg: float = 5.0) -> dict:
+            return {
+                "processes": [
+                    {
+                        "resources": {
+                            "rolling_1m": {
+                                "system_cpu_percent": {"avg": cpu_avg},
+                                "system_ram_percent": {"avg": ram_avg},
+                            }
+                        }
+                    }
+                ]
+            }
+
+        with patch.object(pm, "get_performance_snapshot", return_value=snapshot_with(10.0)):
+            self.assertEqual(pm.load_backoff_multiplier(), 1.0)
+        with patch.object(pm, "get_performance_snapshot", return_value=snapshot_with(72.0)):
+            self.assertEqual(pm.load_backoff_multiplier(), 1.5)
+        with patch.object(pm, "get_performance_snapshot", return_value=snapshot_with(85.0)):
+            self.assertEqual(pm.load_backoff_multiplier(), 2.0)
+        with patch.object(pm, "get_performance_snapshot", return_value=snapshot_with(95.0)):
+            self.assertEqual(pm.load_backoff_multiplier(), 3.0)
+        with patch.object(pm, "get_performance_snapshot", return_value=snapshot_with(10.0, ram_avg=97.0)):
+            self.assertEqual(pm.load_backoff_multiplier(), 1.0)
+        with patch.object(pm, "get_performance_snapshot", return_value={"processes": []}):
+            self.assertEqual(pm.load_backoff_multiplier(), 1.0)
+        with patch.object(pm, "get_performance_snapshot", side_effect=RuntimeError("boom")):
+            self.assertEqual(pm.load_backoff_multiplier(), 1.0)
 
     def test_live_classify_defers_ambiguous_events_without_llm(self):
         from classifier.worker import classify_event

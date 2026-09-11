@@ -1,6 +1,11 @@
 import os
 import sys
+import logging
 from contextlib import redirect_stdout
+
+# MCP clients treat stderr noise as errors; keep protocol logs quiet.
+logging.getLogger("mcp").setLevel(logging.WARNING)
+logging.getLogger("mcp.server").setLevel(logging.WARNING)
 
 # Make sure both the project root and core/ are importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

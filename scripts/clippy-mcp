@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Stable stdio entrypoint for MCP clients (Cursor, Claude Desktop, etc.).
+# Clients should launch THIS file, not raw python mcp_server.py.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLIPPY_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+if [[ ! -f "${CLIPPY_ROOT}/mcp_server.py" ]]; then
+  echo "clippy-mcp: mcp_server.py not found under ${CLIPPY_ROOT}" >&2
+  exit 1
+fi
+
+if [[ -z "${CLIPPY_PYTHON:-}" ]]; then
+  if command -v python3 >/dev/null 2>&1; then
+    CLIPPY_PYTHON="$(command -v python3)"
+  elif command -v python >/dev/null 2>&1; then
+    CLIPPY_PYTHON="$(command -v python)"
+  else
+    echo "clippy-mcp: Python not found on PATH. Set CLIPPY_PYTHON to your interpreter." >&2
+    exit 1
+  fi
+fi
+
+if [[ -z "${CLIPPY_DATA_DIR:-}" ]]; then
+  MAC_DATA="${HOME}/Library/Application Support/Clippy Vision/data"
+  LINUX_DATA="${XDG_CONFIG_HOME:-${HOME}/.config}/Clippy Vision/data"
+  if [[ -d "${MAC_DATA}" ]]; then
+    CLIPPY_DATA_DIR="${MAC_DATA}"
+  elif [[ -d "${LINUX_DATA}" ]]; then
+    CLIPPY_DATA_DIR="${LINUX_DATA}"
+  else
+    CLIPPY_DATA_DIR="${CLIPPY_ROOT}/core/data"
+  fi
+fi
+
+export CLIPPY_DATA_DIR
+export PYTHONPATH="${CLIPPY_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONIOENCODING=utf-8
+export PYTHONUTF8=1
+
+# All diagnostics must go to stderr — stdout is the MCP protocol stream.
+exec "${CLIPPY_PYTHON}" "${CLIPPY_ROOT}/mcp_server.py"
