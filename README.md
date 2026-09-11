@@ -1,10 +1,11 @@
 ﻿# Clippy Vision
 
-> **A fully local AI assistant that watches your work to build context automatically without needing to explain much to an LLM. 100% private - no cloud, no data leakage.**
+> **A local, free, auditable memory layer for your AI agents — and a local LLM chat you can talk to yourself.** It watches your work on-device, stores it privately, and lets you use that memory two ways: through MCP (Cursor, Claude Desktop, VS Code, or any MCP client), or directly in Clippy's own chat with a local model. MCP is optional; the app works without it.
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Models](https://img.shields.io/badge/models-Ollama%20local-orange)
+![MCP](https://img.shields.io/badge/MCP-Cursor%20%7C%20Claude%20Desktop%20%7C%20VS%20Code-purple)
 [![All Contributors](https://img.shields.io/github/all-contributors/protocorn/clippy-vision?color=ee8449&style=flat-square)](#contributors)
 [![Open Source Helpers](https://www.codetriage.com/protocorn/clippy-vision/badges/users.svg)](https://www.codetriage.com/protocorn/clippy-vision)
 
@@ -16,36 +17,44 @@
 
 ## What is Clippy Vision?
 
-Clippy Vision is a desktop AI companion that passively observes your work - active windows, clipboard, typing patterns, and screenshots - and builds a continuously updating memory of everything you do. When you open the chat, it already knows your context. No copy-pasting. No re-explaining.
+Clippy Vision is **infrastructure for personal context**: it watches your work, remembers it on-device, and answers from that memory.
 
-Everything runs entirely on your machine. No API keys, no cloud, no data leaving your device.
+It passively observes active windows, clipboard, typing patterns, and screenshots, then builds a continuously updating store of what you actually did. You can use that memory in **two equal ways**:
+
+1. **Local LLM chat (built into the app)** — open Clippy and ask it yourself. Answers come from a local model (Ollama, e.g. `qwen3:8b`) plus the same retrieval tools. No MCP setup required.
+2. **MCP for external agents** — connect Cursor, Claude Desktop, VS Code, or any MCP client so *those* agents can query Clippy's memory without you pasting context.
+
+MCP is an optional bridge. If you never connect a client, Clippy still captures, remembers, and chats locally.
+
+Everything runs on your machine. No API keys required for capture or memory. No cloud. No data leaving your device.
 
 ---
 
-## One memory across every app you work in
+## Two ways to talk to the same memory
 
-Your work is not stored in one place. It is spread across the browser, your IDE, local PDFs, terminal output, chat apps, notes files, spreadsheets, and design tools. Each of those keeps its own partial record, or none at all, and none of them know about each other.
+Claude, Cursor, and ChatGPT are strong at **reasoning**. They are weak at **knowing what was on your screen** unless you paste it in. Clippy fills that gap: it watches across apps and distills activity into searchable sessions and long-term facts. That store is shared — the path you use to query it is up to you.
 
-Clippy watches all of them and keeps one timeline. Two things follow from that, and neither is possible from any single app's own history:
+### 1. Local LLM chat (no MCP needed)
 
-1. **You can search what was on the screen, not just what things were called.** Titles and filenames are usually useless later. A paper saved as `2103.00020v1.pdf`, a Jira ticket referred to only by its ID, a config you edited in a nameless scratch buffer. Clippy read the content, so the words that were actually in front of you are what you search.
-2. **You can reconstruct a whole stretch of work, not look up one artifact.** "What was I doing Tuesday afternoon" spans the paper you read, the file you edited, the snippet you copied, and the conversation you had about it. Clippy answers that as a summary of the work. Every per-app history hands you a list and leaves the reconstruction to you.
+Open the Clippy desktop app and chat. A local model runs on your machine, routes your question, and retrieves from sessions / events / long-term memory. This is the default experience after install: capture runs in the background, you ask when you want answers. Examples:
 
-## How Clippy Vision fits with Claude / ChatGPT
+- "What was I debugging before lunch?"
+- "Which paper URLs did I open while researching X?"
+- "What did I copy from Slack about the deploy?"
 
-Claude and ChatGPT are built for **reasoning, writing, and general knowledge**. They are excellent when you bring them context. They are not built to know what was on your screen yesterday without you telling them.
+### 2. MCP for agents you already use (optional)
 
-Clippy Vision is built for the **context problem**. It watches your work, remembers it, and answers from that memory. It does not replace Claude or ChatGPT. It fills the gap they cannot: your personal activity history.
+Prefer Cursor, Claude Desktop, or another MCP client? Connect once from the app. Those agents call Clippy's tools (`search_sessions`, `search_events`, memory recall, notes) over stdio MCP and pull the same history — still local, still no paste ritual. Skip this entirely if you only want Clippy's own chat.
 
-| | Per-app history (browser, recent files) | Claude / ChatGPT | Clippy Vision |
+| | Per-app history | Cloud chat alone | Clippy Vision |
 |--|--|--|--|
 | Sees | Names and timestamps, one app at a time | Whatever you paste or upload | Screen content across every app |
-| Answers with | A list to scan | Its general knowledge | What you were actually doing |
-| Needs you to reconstruct context | Yes | Yes | No - already saw it |
+| Who queries it | You, manually | You, by pasting | You (local LLM chat) and/or your agents (MCP) |
+| Needs you to reconstruct context | Yes | Yes | No — already saw it |
 | Runs where | Local | Cloud | 100% on your machine |
-| Best for | "Which tab or file did I open?" | "Help me solve / write / explain this" | "What was I doing / reading / debugging?" |
+| Best for | "Which tab did I open?" | "Help me solve / write / explain this" | "Get my real work history back — in Clippy or in my agent" |
 
-Use Clippy when you need your own work history back. Use Claude or ChatGPT when you need a strong reasoning partner. Many people use both: Clippy to reconstruct context, then paste that into Claude to go deeper.
+Clippy does not replace Claude or ChatGPT. It either answers you locally, or feeds those tools the personal activity history they cannot see on their own.
 
 <p align="center">
   <img src="assets/demo-product.png" alt="Clippy Vision reconstructing research across apps and files" width="720" />
@@ -53,11 +62,15 @@ Use Clippy when you need your own work history back. Use Claude or ChatGPT when 
 
 <p align="center"><em>One question. Answer pulled from papers, chat tools, and a local notes file from the same research stretch.</em></p>
 
+---
+
 <p align="center">
   <img src="assets/demo-vs-claude-urls.png" alt="Clippy Vision vs Claude on a personal activity question" width="720" />
 </p>
 
-<p align="center"><em>Same kind of personal question. Clippy answers from activity it saw on your machine. Claude has no record of that work, because it never saw it.</em></p>
+<p align="center"><em>Same kind of personal question. Clippy's local chat answers from activity it saw on your machine. A cloud chat has no record of that work unless you paste it in.</em></p>
+
+Your work is not stored in one place. It is spread across the browser, your IDE, local PDFs, terminal output, chat apps, notes, spreadsheets, and design tools. Clippy keeps one timeline across them, so you — in the app or via an MCP agent — can search what was on the screen — not just filenames — and reconstruct a whole stretch of work instead of hunting one artifact at a time.
 
 ---
 
@@ -98,10 +111,10 @@ Clippy Vision runs a local text model for chat and uses accessibility APIs plus 
 | GPU VRAM | Not required (integrated OK) | 4 GB+ dedicated |
 | Free disk | 8 GB | 10 GB+ |
 
-- **First run** needs internet once for the text model (`qwen3:8b`, ~4.7 GB).
+- **First run** needs internet for dependencies and for the chat model you choose in setup (for example `qwen3:8b` is ~4.7 GB). Clippy does not force a specific model.
 - The setup wizard **checks your PC** against these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that chat may feel slower.
 - Integrated / shared GPUs are allowed at minimum; a dedicated GPU still helps chat speed.
-- **Lower-spec / contributor machines:** capture uses accessibility + OCR (no vision model in setup). Only the chat model downloads by default; pick a smaller chat model in setup if needed. Details in [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
+- **Lower-spec / contributor machines:** capture uses accessibility + OCR (no vision model in setup). Pick a smaller chat model in setup if needed. Details in [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
 
 ---
 
@@ -129,11 +142,13 @@ The app will open the setup wizard on first launch and walk you through dependen
 
 ## Features
 
+- **Local LLM chat** - talk to Clippy in the desktop app; a local model answers from your captured memory (works with zero MCP setup)
+- **MCP memory server (optional)** - connect Cursor, Claude Desktop, or VS Code so *those* agents can search the same sessions, events, and long-term memory
 - **Passive screen awareness** - captures foreground windows, clipboard, typing bursts, and screenshots in the background
+- **Hierarchical memory** - events → session summaries → distilled long-term facts; memory never resets
 - **Privacy-first redaction** - Clippy Vision's own window is blacked out in every screenshot before the AI ever sees it
 - **Three-tier event classification** - rule-based → feature-based → LLM fallback, so only meaningful events are stored
 - **Low-cost screen text** - accessibility/UI text first with RapidOCR fallback; no vision model in capture
-- **Hierarchical memory** - events → session summaries → distilled long-term facts; memory never resets
 - **Smart query router** - a fine-tuned MiniLM classifier routes every question to the right retrieval strategy before the LLM is even called
 - **ReAct agent** - structured reasoning with tools: SQL generation, memory recall, fact saving
 - **Conversation memory** - rolling summaries + semantic search over past conversations
@@ -144,7 +159,7 @@ The app will open the setup wizard on first launch and walk you through dependen
 
 ## Where this is going
 
-Clippy is reactive today: you ask, it answers. The next bet is making it proactive, so it can act on what it sees instead of waiting to be asked. Capture now reads window text through accessibility APIs and falls back to local OCR without loading a vision model. A timeline view remains another priority so you can see and delete exactly what was captured.
+Clippy's bet is to be a **local memory layer** you can query two ways: built-in local LLM chat, and optional MCP for external agents. Next priorities: ship the MCP server cleanly with the packaged app (paths and docs for Cursor / Claude Desktop / VS Code), a timeline/audit view so you can see and delete exactly what was captured, and stronger per-app privacy controls. Proactive skills come after trust and access are solid.
 
 No dates attached to any of it. [PROJECT_VISION.md](PROJECT_VISION.md) has the current thinking, the priority order, and an honest list of what does not work yet. If you want to shape any of it, the [open issues](https://github.com/protocorn/clippy-vision/issues) are the place to start.
 
@@ -157,7 +172,7 @@ No dates attached to any of it. [PROJECT_VISION.md](PROJECT_VISION.md) has the c
 | Desktop UI | Electron |
 | Backend | Python / FastAPI / Uvicorn |
 | Local LLM runtime | [Ollama](https://ollama.com) |
-| Main reasoning model | `qwen3:8b` |
+| Main reasoning model | User-chosen Ollama model (suggested default `qwen3:8b`) |
 | Screenshot text | Accessibility APIs + RapidOCR fallback |
 | Embedding model | Bundled `all-MiniLM-L6-v2` (event RAG is opt-in) |
 | Query classifier | Fine-tuned MiniLM-L3 |
