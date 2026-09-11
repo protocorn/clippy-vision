@@ -71,6 +71,7 @@ _tmp_*.py
 *.temp
 *.bak
 .cache/
+@AutomationLog.txt
 
 # ============================================================
 # IDE & EDITOR FILES
