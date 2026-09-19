@@ -132,6 +132,31 @@ contextBridge.exposeInMainWorld('clippy', {
         return response.json()
     },
 
+    listWorkspaceRoots: async () => {
+        const response = await fetch(await apiUrl('/settings/workspace-roots'))
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    addWorkspaceRoot: async (path, label = '') => {
+        const response = await fetch(await apiUrl('/settings/workspace-roots'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path, label: label || null }),
+        })
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    removeWorkspaceRoot: async (rootId) => {
+        const response = await fetch(
+            await apiUrl(`/settings/workspace-roots/${encodeURIComponent(rootId)}`),
+            { method: 'DELETE' },
+        )
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
     listConversations: async () => {
         const response = await fetch(await apiUrl('/conversations'))
         if (!response.ok) throw new Error(await getErrorMessage(response))

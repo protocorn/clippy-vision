@@ -1,6 +1,14 @@
 """
 Benchmark: Classification Cascade Efficiency
 Measures how much the 3-tier cascade reduces LLM inference calls.
+
+Intentionally reads the REAL production database (core/data/events.db) to
+grade the classifier against real historical activity. Run standalone with
+`python bench/test_classification_cascade.py` — do not add a CLIPPY_DATA_DIR
+isolation guard here, that would defeat the point of this script. It is
+excluded from automated `pytest` discovery via pyproject.toml's
+[tool.pytest.ini_options] testpaths; core/paths.py also has a defense-in-depth
+fallback if it's ever collected by pytest anyway.
 """
 
 import json

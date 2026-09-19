@@ -66,8 +66,11 @@ The timeline shows what was captured; the missing half is deleting individual en
 *Audio capture and speaker attribution for meetings*
 Local transcription with faster-whisper or whisper.cpp, pinned to CPU so it does not compete with the reasoning model for RAM or VRAM. First version attributes speech by audio source rather than by voice: microphone is the user, system output loopback is everyone else, which needs no enrollment and no extra model. Voiceprint matching (a one-time voice sample, then embedding similarity per segment) is a later addition for in-person conversations where every voice arrives through the mic. No meeting-platform APIs or bots, loopback capture works the same across Zoom, Meet and Teams. macOS system audio is the hard part and will need ScreenCaptureKit audio or a virtual device.
 
-*Mouse and idle signals*
-Mouse activity is intended as an idle detector that gates capture, not as stored events. Storing raw clicks and scrolls adds volume without meaning and works against the bounded-storage design.
+*Memory → action agent (Plan B — product north star for capabilities)*
+Clippy already perceives and remembers. The next capability bet is general actions on top of that memory: retrieve what the user saw/did, then open paths/URLs, focus apps, and later use a11y-first GUI primitives — always **tools/OS first, pixel-click last**, and **not** a pile of per-app integrations. Observe → retrieve → reason → act → verify. Design: `docs/computer_use_agent.md`. Proactive stuck-detection (`docs/stuck_detector.md`) becomes a later policy layer that can *offer* these same actions at the right time.
+
+*Mouse and idle signals (capture reliability — Phase A enough before Plan B v0)*
+Mouse/HID exists first to make **capture reliable**: OS last-input / idle age, and idle that **stretches** background screenshot gaps (does not hard-skip — on-screen automation can continue while the user is away). Short polls so returning from idle resets quickly. Do **not** store raw click/scroll streams. Bounded mouse aggregates and proactive `need_for_help` scoring are deferred while Plan B v0 (open-from-memory) is built. Full mouse-kinematics baselines remain optional later work.
 
 # Licensing
 Core stays free and open source for individuals, always, latest version, no delay, source is visible for every version we release. Leaning toward AGPL (or similar) for the core, with a separate commercial license for companies that want to use it without AGPL's obligations. Still being finalized.

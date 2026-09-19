@@ -1,4 +1,4 @@
-import { nameInput, nameSubmit, nameError, chatView, chatMain, nameView, loadingView, loadingSub, inputBox, sendBtn, welcomeInput, welcomeSend, welcomeCharCount, inputCharCount, newChatBtn, appBrand, settingsBtn, captureBtn, captureLabel, drawerToggle, drawerClose, drawerBackdrop, convSearch, timelineBtn, timelineLoadMore, timelineDetailBack, updateBanner, updateBannerText, updateBannerLink, updateBannerDismiss, wideLayoutMq, identityAddBtn, identityNewKey, identityNewVal, settingsName, settingsIntro, updateCheckToggle, mcpCopyBtn, navMore, navMoreBtn, navMoreMenu, store } from './dom.js'
+import { nameInput, nameSubmit, nameError, chatView, chatMain, nameView, loadingView, loadingSub, inputBox, sendBtn, welcomeInput, welcomeSend, welcomeCharCount, inputCharCount, newChatBtn, appBrand, settingsBtn, captureBtn, captureLabel, drawerToggle, drawerClose, drawerBackdrop, convSearch, timelineBtn, timelineLoadMore, timelineDetailBack, updateBanner, updateBannerText, updateBannerLink, updateBannerDismiss, wideLayoutMq, identityAddBtn, identityNewKey, identityNewVal, settingsName, settingsIntro, updateCheckToggle, mcpCopyBtn, workspaceRootAddBtn, workspaceRootInput, navMore, navMoreBtn, navMoreMenu, store } from './dom.js'
 import { updateCharCount, showView, isWideLayout } from './utils.js'
 import { submitName, send, resetConversation, setChatMode } from './chat.js'
 import {
@@ -6,7 +6,7 @@ import {
 } from './conversations.js'
 import {
   openSettings, addIdentityField, saveProfile, saveUpdateCheck, copyMcpConfig,
-  wireSettingsNav,
+  wireSettingsNav, addWorkspaceRootFromInput,
 } from './settings.js'
 import { openTimeline, loadTimelineSessions, closeTimelineDetail } from './timeline.js'
 import { setCaptureUI } from './capture-ui.js'
@@ -155,6 +155,10 @@ function wireUi() {
   on(settingsIntro, 'change', () => saveProfile({ statusText: 'Introduction saved.' }))
   on(updateCheckToggle, 'change', saveUpdateCheck)
   on(mcpCopyBtn, 'click', copyMcpConfig)
+  on(workspaceRootAddBtn, 'click', addWorkspaceRootFromInput)
+  on(workspaceRootInput, 'keydown', e => {
+    if (e.key === 'Enter') addWorkspaceRootFromInput()
+  })
 
   on(timelineBtn, 'click', openTimeline)
   on(timelineLoadMore, 'click', () => loadTimelineSessions({ reset: false }))

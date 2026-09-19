@@ -141,6 +141,62 @@ def _windows_metadata() -> WindowMetadata | None:
         _win_cache_at = now
     return result
 
+
+def get_idle_seconds() -> float | None:
+    """Seconds since last keyboard/mouse input, or None if unavailable.
+
+    Uses the OS last-input clock (HID), not Clippy's own event stream —
+    so scrolling/mouse-only activity still counts even before we add a
+    pynput mouse listener.
+    """
+    if IS_WINDOWS:
+        return _windows_idle_seconds()
+    if IS_MACOS:
+        return _macos_idle_seconds()
+    return None
+
+
+def _windows_idle_seconds() -> float | None:
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class LASTINPUTINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.UINT),
+                ("dwTime", wintypes.DWORD),
+            ]
+
+        info = LASTINPUTINFO()
+        info.cbSize = ctypes.sizeof(LASTINPUTINFO)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+            return None
+        # GetTickCount wraps ~49 days; use tick difference carefully.
+        tick = ctypes.windll.kernel32.GetTickCount()
+        elapsed_ms = (tick - info.dwTime) & 0xFFFFFFFF
+        return elapsed_ms / 1000.0
+    except Exception:
+        return None
+
+
+def _macos_idle_seconds() -> float | None:
+    try:
+        from Quartz import (
+            CGEventSourceSecondsSinceLastEventType,
+            kCGAnyInputEventType,
+            kCGEventSourceStateCombinedSessionState,
+        )
+
+        return float(
+            CGEventSourceSecondsSinceLastEventType(
+                kCGEventSourceStateCombinedSessionState,
+                kCGAnyInputEventType,
+            )
+        )
+    except Exception:
+        return None
+
+
 def _windows_browser_url(window: Any, class_name: str) -> str | None:
     """Read the address bar without making UI Automation a hard dependency elsewhere."""
     try:

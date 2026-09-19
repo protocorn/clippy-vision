@@ -1,5 +1,6 @@
 import { drawer, drawerBackdrop, convList, convSearch, convSearchHint, chatView, messages, wideLayoutMq, store } from './dom.js'
 import { isWideLayout, getTimeBucket, formatConversationTime } from './utils.js'
+import { confirmDialog, alertDialog } from './dialogs.js'
 
 // NOTE: do not static-import chat.js here — chat.js imports this file (cycle).
 // Use dynamic import() inside functions that need chat helpers.
@@ -59,7 +60,13 @@ export function groupConversationsByTime(items) {
 
 export async function deleteConversation(id, title) {
  const label = title || 'this chat'
- const ok = window.confirm(`Delete "${label}"? This cannot be undone.`)
+ const ok = await confirmDialog({
+  title: 'Delete chat',
+  message: `Delete "${label}"?`,
+  detail: 'This cannot be undone.',
+  confirmLabel: 'Delete',
+  danger: true,
+ })
  if (!ok) return
 
  try {
@@ -73,7 +80,10 @@ export async function deleteConversation(id, title) {
  }
  await refreshConversationList()
  } catch (error) {
- window.alert(`Could not delete chat: ${error.message}`)
+ await alertDialog({
+  title: 'Could not delete chat',
+  message: error.message || 'Something went wrong.',
+ })
  }
 }
 

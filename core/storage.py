@@ -314,6 +314,22 @@ conn.commit()
 conn.execute("INSERT OR IGNORE INTO user_profile (id, name) VALUES (1, '')")
 conn.commit()
 
+#-------------------------------------#
+#------- WORKSPACE ROOTS (trusted) ---#
+#-------------------------------------#
+conn.execute("""
+CREATE TABLE IF NOT EXISTS workspace_roots (
+    root_id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    path TEXT NOT NULL UNIQUE,
+    source TEXT NOT NULL DEFAULT 'user',
+    created_at REAL NOT NULL,
+    last_used_at REAL,
+    enabled INTEGER NOT NULL DEFAULT 1
+)
+""")
+conn.commit()
+
 
 def get_user_name() -> str:
     row = conn.execute("SELECT name FROM user_profile WHERE id = 1").fetchone()
@@ -805,6 +821,21 @@ def export_data() -> dict:
         "settings": {
             "capture": get_capture_settings(),
             "privacy": get_privacy_enabled(),
+            "workspace_roots": [
+                {
+                    "root_id": row[0],
+                    "label": row[1],
+                    "path": row[2],
+                    "source": row[3],
+                    "created_at": row[4],
+                    "last_used_at": row[5],
+                    "enabled": bool(row[6]),
+                }
+                for row in conn.execute(
+                    """SELECT root_id, label, path, source, created_at, last_used_at, enabled
+                       FROM workspace_roots ORDER BY created_at ASC"""
+                ).fetchall()
+            ],
         },
         "events": [
             {

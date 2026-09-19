@@ -8,6 +8,20 @@ from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Windows consoles default to a legacy codepage (e.g. cp1252) that can't encode
+# characters like "→" or "—" used in debug prints throughout the agent/core
+# modules. An uncaught UnicodeEncodeError inside a print() call would otherwise
+# raise from deep inside e.g. the prefetch pipeline, get swallowed by a broad
+# except Exception handler, and silently disable that feature for the rest of
+# the request — exactly the kind of failure that's hard to notice. Force UTF-8
+# with lossy fallback so a stray non-ASCII debug character never breaks logic.
+for _stream in (sys.stdout, sys.stderr):
+    if getattr(_stream, "encoding", "").lower() != "utf-8":
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,6 +58,7 @@ from core.storage import (
     list_timeline_sessions,
     set_user_name,
 )
+from core.workspace_roots import list_roots, remember_root, remove_root
 
 
 @asynccontextmanager
@@ -125,6 +140,11 @@ class ProfileUpdateRequest(BaseModel):
 class PrivacyUpdateRequest(BaseModel):
 
     enabled: dict[str, bool]
+
+
+class WorkspaceRootAddRequest(BaseModel):
+    path: str
+    label: str | None = None
 
 
 class CaptureSettingsRequest(BaseModel):
@@ -288,6 +308,30 @@ def write_privacy_settings(req: PrivacyUpdateRequest):
     set_privacy_enabled(req.enabled)
 
     return {"targets": list_privacy_targets()}
+
+
+@app.get("/settings/workspace-roots")
+def read_workspace_roots():
+    return {"roots": list_roots(enabled_only=False)}
+
+
+@app.post("/settings/workspace-roots")
+def add_workspace_root(req: WorkspaceRootAddRequest):
+    path = (req.path or "").strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="path is required")
+    try:
+        root = remember_root(path, label=req.label, source="user")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"root": root, "roots": list_roots(enabled_only=False)}
+
+
+@app.delete("/settings/workspace-roots/{root_id}")
+def delete_workspace_root(root_id: str):
+    if not remove_root(root_id):
+        raise HTTPException(status_code=404, detail="workspace root not found")
+    return {"ok": True, "roots": list_roots(enabled_only=False)}
 
 
 @app.get("/settings/capture")

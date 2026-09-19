@@ -11,6 +11,22 @@ version = "1.2.2"
 where = ["."]
 include = ["core*", "classifier*", "agent*"]
 
+[tool.pytest.ini_options]
+# bench/ holds manual benchmark scripts that read the REAL production
+# database on purpose (e.g. bench/test_classification_cascade.py grades the
+# classifier against real historical events). They are named test_*.py only
+# so they're runnable standalone with `python bench/whatever.py` — they must
+# never be swept into an automated `pytest` run, which is expected to be
+# safely isolated via CLIPPY_DATA_DIR. Likewise test_installation.py at the
+# repo root is a human-run setup-verification script, not a regression test.
+# A bare `pytest` from the repo root used to collect all of these together,
+# and bench/test_classification_cascade.py's unguarded `from core.storage
+# import conn` (no CLIPPY_DATA_DIR) got imported before any test file's
+# isolation guard could run, silently binding the whole test session to the
+# real core/data/events.db. Destructive tests elsewhere in tests/ then wiped
+# real sessions/events. Scoping discovery to tests/ prevents this collision.
+testpaths = ["tests"]
+
 [tool.ruff]
 line-length = 88
 

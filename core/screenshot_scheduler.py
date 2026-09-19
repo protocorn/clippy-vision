@@ -21,6 +21,7 @@ try:
         IS_MACOS,
         IS_WINDOWS,
         get_foreground_window_bounds,
+        get_idle_seconds,
         get_window_metadata,
         window_key,
     )
@@ -29,6 +30,7 @@ except ImportError:
         IS_MACOS,
         IS_WINDOWS,
         get_foreground_window_bounds,
+        get_idle_seconds,
         get_window_metadata,
         window_key,
     )
@@ -44,6 +46,15 @@ JPEG_QUALITY = 75
 
 # Coalesce typing, paste, and context-change notifications into one capture.
 ACTIVITY_DEBOUNCE_SECONDS = 2.0
+
+# HID idle stretches *background* cadence only — never hard-skips. Automated
+# work (builds, logs, progress UIs) can still change the screen while the user
+# is away; phash dedup drops truly static frames. Short polls so returning
+# from idle resets within ~BACKGROUND_POLL_SECS, not after a long sleep.
+IDLE_STRETCH_AFTER_SECS = 120.0
+IDLE_BACKGROUND_GAP_SECS = 300.0
+BACKGROUND_POLL_SECS = 10.0
+PURGE_EVERY_SECS = 60.0
 
 
 try:
@@ -342,23 +353,62 @@ def get_screenshots_near(
     candidates.sort(key=lambda x: x[0])
     return [path for _, path in candidates[:max_count]]
 
+def _background_gap_seconds() -> float:
+    """How long between background frames given current HID idle.
+
+    Active / lightly idle → normal ``background_interval_seconds``.
+    Away (idle ≥ IDLE_STRETCH_AFTER_SECS) → longer gap, still capturing so
+    on-screen automation is not missed. ``None`` idle (unsupported OS) keeps
+    the normal interval.
+    """
+    settings = get_capture_settings()
+    gap = float(settings["background_interval_seconds"])
+    idle = get_idle_seconds()
+    if idle is not None and idle >= IDLE_STRETCH_AFTER_SECS:
+        gap = max(gap, IDLE_BACKGROUND_GAP_SECS)
+    return gap
+
+
+def _background_capture_due() -> bool:
+    gap_ms = int(_background_gap_seconds() * 1000)
+    with _lock:
+        now_ms = int(time.time() * 1000)
+        return (now_ms - _last_capture_ms) >= gap_ms
+
+
 def start_background_capture() -> None:
-    # Periodic capture preserves context when the user is reading or watching
-    # a video without producing keyboard or clipboard events.
+    # Periodic capture preserves context when the user is reading, watching,
+    # or when on-screen work continues without keyboard/mouse (builds, etc.).
     #
     # Deliberately NOT using load_backoff_multiplier() here. A skipped
     # capture is unrecoverable — there's no getting back a frame of what the
     # screen looked like a few minutes ago — unlike backlog *processing*
     # (screenshot_processor.py), where the file already sits safely on disk
     # and backing off only delays enrichment, at zero data-loss cost.
-    # Capturing itself is also cheap (~1.3s, at most every min_gap_seconds),
-    # so slowing it down buys little load relief anyway, while risking real
-    # missed content (e.g. a long reading/scrolling session with no keyboard
-    # activity, which only ever gets caught by this heartbeat).
+    #
+    # Idle only *stretches* the gap between background frames; we poll often
+    # so coming back from away resumes normal cadence within one poll tick.
+    # Activity-triggered captures (on_activity_event) are unchanged and still
+    # use min_gap_seconds.
+    last_purge_at = 0.0
     while True:
-        _capture_if_not_recent()
-        purge_expired_screenshots()
-        time.sleep(get_capture_settings()["background_interval_seconds"])
+        settings = get_capture_settings()
+        if settings["capture_screenshots"] and _background_capture_due():
+            idle = get_idle_seconds()
+            if idle is not None and idle >= IDLE_STRETCH_AFTER_SECS:
+                print(
+                    f"[idle] background capture (idle={idle:.0f}s, "
+                    f"gap={_background_gap_seconds():.0f}s)",
+                    flush=True,
+                )
+            _capture_if_not_recent()
+
+        now = time.time()
+        if now - last_purge_at >= PURGE_EVERY_SECS:
+            purge_expired_screenshots()
+            last_purge_at = now
+
+        time.sleep(BACKGROUND_POLL_SECS)
 
 def start_screenshot_daemon() -> threading.Thread:
     # A daemon thread lets the desktop process exit without waiting on the

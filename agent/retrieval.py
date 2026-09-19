@@ -2,7 +2,9 @@ import json
 import math
 import re
 import time
+from difflib import get_close_matches
 
+from agent.helpers.keywords import keywords_from_query
 from agent.helpers.time_resolver import resolve_temporal_range
 from core.chat_model import get_chat_model
 from core.llm_gateway import Priority, gateway
@@ -11,8 +13,26 @@ from core.rag import search_event_rag
 from core.storage import conn
 
 MAX_RESULT_ROWS = 20
-MAX_RESULT_CHARS = 4000
-_HEAVY_COLS = {"payload", "vector_embedding", "summary_embedding"}
+MAX_RESULT_CHARS = 8000
+# Embeddings only — never strip payload. Paste/clipboard answers live there
+# (JSON with pasted_content), and omitting it forced MCP callers to open
+# events.db by hand to recover essay text the tools were supposed to return.
+_HEAVY_COLS = {"vector_embedding", "summary_embedding", "image_embedding"}
+_PAYLOAD_FIELD_MAX = 3000
+_OCR_FIELD_MAX = 2000
+
+# Schema the LLM SQL path may reference. Unknown identifiers are fuzzy-matched
+# against this set (not a hardcoded typo dictionary); weak/no match is left
+# alone so aliases survive, and SQLite + one corrective retry handles the rest.
+_EVENT_COLUMNS = frozenset({
+    "event_id", "session_id", "timestamp", "event_type", "process_name",
+    "current_window_title", "active_url", "previous_process_name",
+    "previous_window_title", "summary", "payload", "interesting",
+    "interest_score", "interest_reason", "vision_ocr_text", "vision_activity",
+    "vision_suggested_action", "screenshot_filename", "classification_status",
+})
+# Strict cutoff so aliases like event_time are not rewritten to event_type.
+_COLUMN_FUZZY_CUTOFF = 0.88
 
 MODEL = get_chat_model()
 
@@ -76,16 +96,16 @@ You generate SQLite SELECT queries against an events table.
 
 events (
     timestamp             REAL,
-    event_type            TEXT,
+    event_type            TEXT,   -- paste | clipboard_change | context_change | screenshot_analysis | typing_burst | ...
     process_name          TEXT,
     current_window_title  TEXT,
     active_url            TEXT,
     summary               TEXT,
-    payload               TEXT,
+    payload               TEXT,   -- JSON; paste/clipboard text lives here as pasted_content (or similar keys)
     interesting           INTEGER,
     interest_score        REAL,
     interest_reason       TEXT,
-    vision_ocr_text       TEXT,
+    vision_ocr_text       TEXT,   -- EXACT name of the column
     vision_activity       TEXT,
     vision_suggested_action TEXT
 )
@@ -106,11 +126,18 @@ references a prior tool result that contained a specific timestamp — compute t
 Specific date helper with the literal 'YYYY-MM-DD' string. NEVER use a relative helper (yesterday / -1 day) as a
 substitute for a date that is 2 or more days ago — you will search the wrong day.
 
+COLUMN NAME RULE (hard):
+- Use ONLY the column names listed above, character-for-character.
+- Paste / clipboard / essay / form-answer content is in payload, never in a invented column.
+
 Rules:
 - SELECT only columns needed to answer the question — never SELECT *.
-- For keyword searches use: summary, current_window_title, active_url, vision_ocr_text, interest_reason.
+- For keyword searches use: summary, current_window_title, active_url, vision_ocr_text, interest_reason, payload.
 - For any question about what the user was doing, reading, working on, or looking at — always include
   vision_activity and vision_ocr_text in the SELECT list alongside summary (they may be NULL but include them).
+- For paste, clipboard, copied text, essay, form answer, or "what did I write/paste" questions:
+  filter event_type IN ('paste', 'clipboard_change') and SELECT payload, summary, current_window_title,
+  datetime(timestamp,'unixepoch','localtime') as time. Prefer LIKE '%keyword%' on payload and summary.
 - Use OR between search conditions, not AND.
   Only filter by event_type when the question explicitly asks for a specific event kind (e.g. "what did I paste",
   "what URLs did I visit"). Invented event_type values will return zero rows — always use LIKE on text columns instead.
@@ -144,6 +171,21 @@ def _is_safe(sql: str) -> bool:
 # ─────────────────────────────────────────────────────────────
 # Core helpers
 # ─────────────────────────────────────────────────────────────
+_SQL_STRING_RE = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"")
+_IDENT_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_.]*)\b")
+_SQL_KEYWORDS = frozenset({
+    "select", "from", "where", "and", "or", "not", "in", "like", "between",
+    "is", "null", "as", "on", "join", "left", "right", "inner", "outer",
+    "order", "by", "group", "having", "limit", "offset", "asc", "desc",
+    "case", "when", "then", "else", "end", "distinct", "count", "sum",
+    "avg", "min", "max", "cast", "strftime", "datetime", "date", "time",
+    "unixepoch", "localtime", "start", "of", "day", "weekday", "integer",
+    "real", "text", "exists", "union", "all", "ifnull", "coalesce",
+    "lower", "upper", "length", "substr", "replace", "trim", "round",
+    "abs", "events", "sessions",
+})
+
+
 def _generate_sql(system_prompt: str, user_content: str) -> str:
     body = gateway.chat(
         [{"role": "system", "content": system_prompt},
@@ -156,6 +198,111 @@ def _generate_sql(system_prompt: str, user_content: str) -> str:
     return parsed.get("sql_query", "").strip()
 
 
+def _normalize_ident(name: str) -> str:
+    """Normalize invented forms like vision_ocr.txt toward underscored names."""
+    return name.replace(".", "_").casefold()
+
+
+def _fuzzy_column_leaf(leaf: str) -> str | None:
+    allowed = {col.casefold(): col for col in _EVENT_COLUMNS}
+    key = _normalize_ident(leaf)
+    if key in allowed:
+        return allowed[key]
+    if key in _SQL_KEYWORDS or len(key) <= 1:
+        return None
+    matches = get_close_matches(
+        key, list(allowed.keys()), n=1, cutoff=_COLUMN_FUZZY_CUTOFF
+    )
+    return allowed[matches[0]] if matches else None
+
+
+def _fuzzy_column(name: str) -> str | None:
+    """Return the real schema column closest to name, or None if no strong match.
+
+    `_SQL_KEYWORDS` skips SQL grammar/functions (`strftime`, `localtime`, …).
+    Anything else that is not already a real column is a candidate: close
+    enough → rewrite to the schema name; otherwise leave alone (aliases) and
+    let SQLite error → one corrective retry.
+    """
+    # Table-qualified refs (e.vision_ocr_text). Do NOT split typo dots like
+    # vision_ocr.txt — those are one invented identifier.
+    if "." in name:
+        prefix, leaf = name.rsplit(".", 1)
+        is_qualifier = (
+            prefix.casefold() in {"events", "sessions"}
+            or (len(prefix) <= 2 and prefix.isalpha())
+        )
+        if is_qualifier:
+            resolved = _fuzzy_column_leaf(leaf)
+            return f"{prefix}.{resolved}" if resolved else None
+
+    return _fuzzy_column_leaf(name)
+
+
+def _sanitize_event_sql(sql: str) -> str:
+    """Fuzzy-resolve unknown identifiers against the real events schema."""
+    # Mask string literals so LIKE '%vision_ocr.txt%' is not rewritten.
+    pieces: list[str] = []
+    last = 0
+    for match in _SQL_STRING_RE.finditer(sql):
+        pieces.append(_rewrite_idents_in_span(sql[last:match.start()]))
+        pieces.append(match.group(0))
+        last = match.end()
+    pieces.append(_rewrite_idents_in_span(sql[last:]))
+    return "".join(pieces)
+
+
+def _rewrite_idents_in_span(span: str) -> str:
+    if not span:
+        return span
+    out: list[str] = []
+    last = 0
+    for match in _IDENT_RE.finditer(span):
+        out.append(span[last:match.start()])
+        ident = match.group(1)
+        resolved = _fuzzy_column(ident)
+        out.append(resolved if resolved else ident)
+        last = match.end()
+    out.append(span[last:])
+    return "".join(out)
+
+
+def _format_field_value(col: str, val) -> str:
+    if val is None:
+        return "None"
+    if not isinstance(val, str):
+        return str(val)
+    text = val.encode("utf-8", errors="replace").decode("utf-8")
+    if col == "payload":
+        text = _payload_display_text(text)
+        if len(text) > _PAYLOAD_FIELD_MAX:
+            text = text[:_PAYLOAD_FIELD_MAX] + f"... (truncated to {_PAYLOAD_FIELD_MAX} chars)"
+    elif col == "vision_ocr_text" and len(text) > _OCR_FIELD_MAX:
+        text = text[:_OCR_FIELD_MAX] + f"... (truncated to {_OCR_FIELD_MAX} chars)"
+    return text
+
+
+def _payload_display_text(payload: str) -> str:
+    """Surface pasted_content (etc.) instead of raw JSON when possible."""
+    if not payload:
+        return ""
+    try:
+        obj = json.loads(payload)
+        if isinstance(obj, dict):
+            for key in ("pasted_content", "clipboard_content", "text", "content"):
+                value = obj.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            for value in obj.values():
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        if isinstance(obj, str):
+            return obj.strip()
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return payload.strip()
+
+
 def _run_sql(sql: str) -> tuple[list, int]:
     """Execute sql, return (rows_as_text_list, total_matched_count)."""
     cur = conn.execute(sql)
@@ -166,12 +313,154 @@ def _run_sql(sql: str) -> tuple[list, int]:
         row_text = []
         for i, col in enumerate(cur.description):
             if col[0] not in _HEAVY_COLS:
-                val = row[i]
-                if isinstance(val, str):
-                    val = val.encode("utf-8", errors="replace").decode("utf-8")
-                row_text.append(f"{col[0]}: {val}")
+                row_text.append(f"{col[0]}: {_format_field_value(col[0], row[i])}")
         result_text.append("\n".join(row_text))
     return result_text, total
+
+
+def _sanitize_for_fts(keyword: str) -> str:
+    clean = re.sub(r"[^\w]", "", keyword)
+    return f'"{clean}"' if clean else ""
+
+
+def _fts_event_search(question: str) -> tuple[list, int] | None:
+    """Deterministic keyword path over events_fts — no LLM SQL required.
+
+    This is what should have answered the Makeable paste/OCR hunt without
+    inventing column names. Returns None when there are no usable keywords.
+    """
+    keywords = keywords_from_query(question)
+    if not keywords:
+        return None
+    tokens = [_sanitize_for_fts(kw) for kw in keywords[:8]]
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        return None
+
+    fts_query = " OR ".join(tokens)
+    temporal = resolve_temporal_range(question)
+    time_filter = "1=1"
+    params: list = [fts_query]
+    if temporal is not None:
+        time_filter = "e.timestamp >= ? AND e.timestamp < ?"
+        params.extend([temporal.start_ts, temporal.end_ts])
+
+    # Prefer paste/clipboard when the question is clearly about that, otherwise
+    # search titles/OCR/payload together so screen text still surfaces.
+    q_lower = question.casefold()
+    paste_only = any(
+        word in q_lower
+        for word in ("paste", "pasted", "clipboard", "copied", "essay", "form answer")
+    )
+    type_filter = ""
+    if paste_only:
+        type_filter = "AND e.event_type IN ('paste', 'clipboard_change')"
+
+    sql = f"""
+        SELECT e.timestamp, e.event_type, e.process_name, e.current_window_title,
+               e.active_url, e.summary, e.payload, e.vision_ocr_text, e.vision_activity
+        FROM events_fts
+        JOIN events e ON events_fts.rowid = e.rowid
+        WHERE events_fts MATCH ?
+          AND {time_filter}
+          {type_filter}
+        ORDER BY events_fts.rank, e.timestamp DESC
+        LIMIT 40
+    """
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    except Exception as exc:
+        print(f"[fts:events] unavailable: {exc}")
+        return None
+    if not rows:
+        return [], 0
+
+    result_text = []
+    for row in rows[:MAX_RESULT_ROWS]:
+        (
+            ts, event_type, process_name, window_title, active_url,
+            summary, payload, ocr, activity,
+        ) = row
+        parts = [
+            f"time: {time.strftime('%Y-%m-%d %H:%M', time.localtime(ts))}",
+            f"event_type: {event_type}",
+        ]
+        if process_name:
+            parts.append(f"process_name: {process_name}")
+        if window_title:
+            parts.append(f"current_window_title: {window_title}")
+        if active_url:
+            parts.append(f"active_url: {active_url}")
+        if summary:
+            parts.append(f"summary: {summary}")
+        if payload:
+            parts.append(f"payload: {_format_field_value('payload', payload)}")
+        if activity:
+            parts.append(f"vision_activity: {activity}")
+        if ocr:
+            parts.append(f"vision_ocr_text: {_format_field_value('vision_ocr_text', ocr)}")
+        result_text.append("\n".join(parts))
+    return result_text, len(rows)
+
+
+# A small model hand-writing date arithmetic + hard filters like "interesting = 1"
+# is a narrow, single-shot guess — if that guess is even slightly off (wrong week
+# boundary, filter too strict for this data), it silently returns zero rows and
+# the caller reports "no data" even when real activity exists. Widen once before
+# trusting an empty result, the same way we already retry once on a bad column name.
+_INTERESTING_FILTER_RE = re.compile(r"\s+AND\s+interesting\s*=\s*1\b", re.IGNORECASE)
+
+
+def _drop_interesting_filter(sql: str) -> str | None:
+    widened = _INTERESTING_FILTER_RE.sub("", sql, count=1)
+    return widened if widened != sql else None
+
+
+def _execute_event_sql(question: str, user_content: str) -> tuple[list, int] | str:
+    """Generate → sanitize → run event SQL, with one corrective retry on failure
+    and one widen retry if a valid query returns nothing (see note above)."""
+    sql = _generate_sql(_EVENTS_PROMPT, user_content)
+    if not sql:
+        return (
+            "search_events: could not generate a SQL query.\n"
+            "→ Try search_sessions for broader topic/summary search."
+        )
+
+    for attempt in range(2):
+        print(f"[sql:events] {sql}")
+        if not _is_safe(sql):
+            return "search_events: unsafe query blocked."
+        sanitized = _sanitize_event_sql(sql)
+        try:
+            rows, total = _run_sql(sanitized)
+        except Exception as e:
+            err = str(e)
+            print(f"[sql:events] error: {err}")
+            if attempt == 0 and "no such column" in err.casefold():
+                sql = _generate_sql(
+                    _EVENTS_PROMPT,
+                    user_content
+                    + f"\n\nPrevious SQL failed with: {err}\n"
+                    "Regenerate using ONLY the exact column names from the schema "
+                    f"({', '.join(sorted(_EVENT_COLUMNS))}). Never invent columns.",
+                )
+                if not sql:
+                    return f"search_events: SQL error — {e}\n→ Try search_sessions instead."
+                continue
+            return f"search_events: SQL error — {e}\n→ Try search_sessions instead."
+
+        if total == 0:
+            widened = _drop_interesting_filter(sanitized)
+            if widened:
+                print("[sql:events] 0 rows with interesting=1 — retrying without that filter")
+                try:
+                    widened_rows, widened_total = _run_sql(widened)
+                    if widened_total > 0:
+                        return widened_rows, widened_total
+                except Exception as e:
+                    print(f"[sql:events] widen retry failed: {e}")
+        return rows, total
+    return "search_events: SQL error — retries exhausted.\n→ Try search_sessions instead."
 
 
 
@@ -355,6 +644,30 @@ def search_sessions(question: str) -> str:
             return f"search_sessions: SQL error — {e}\n→ Try search_events instead."
 
     if not _rows_are_useful(rows):
+        # The exact time window came back empty even though the table has real
+        # summaries somewhere (checked at the top of this function) — same class
+        # of failure as the events widen-retry above: a single LLM-guessed date
+        # boundary is not trustworthy enough to declare "no data" on its own.
+        # Widen once to "most recent sessions, any window" before giving up.
+        if where_fragment:
+            try:
+                widened_rows, widened_total = _run_sql(
+                    "SELECT summary, active_task, entities, "
+                    "datetime(window_start,'unixepoch','localtime') as time "
+                    "FROM sessions WHERE summary IS NOT NULL AND summary != '' "
+                    "ORDER BY window_start DESC LIMIT 20"
+                )
+            except Exception as e:
+                widened_rows, widened_total = [], 0
+                print(f"[sql:sessions] widen retry failed: {e}")
+            if _rows_are_useful(widened_rows):
+                header = (
+                    f"search_sessions: nothing matched the exact requested window — "
+                    f"showing the {len(widened_rows)} most recent sessions instead "
+                    "(tell the user this is outside the timeframe they asked about):"
+                )
+                return _truncate_result(header + "\n\n" + "\n---\n".join(widened_rows))
+
         return (
             "search_sessions: no matching session summaries found.\n"
             "Sessions store broad topic summaries — if you need specific "
@@ -380,8 +693,6 @@ def search_events(question: str) -> str:
     """Search individual events. Best for: specific messages, OCR text,
     exact URLs, clipboard content, app switches, fine-grained timestamps."""
 
-
-
     try:
         temporal = resolve_temporal_range(question)
         rag = search_event_rag(
@@ -404,24 +715,33 @@ def search_events(question: str) -> str:
     except Exception as exc:
         print(f"[rag] event search unavailable; using SQL fallback: {exc}")
 
+    # Deterministic FTS before LLM SQL — keyword/paste/OCR hunts must not
+    # depend on the model inventing valid column names.
+    try:
+        fts = _fts_event_search(question)
+        if fts is not None:
+            rows, total = fts
+            if rows and _rows_are_useful(rows):
+                shown = len(rows)
+                if total > shown:
+                    header = (
+                        f"search_events FTS results (showing {shown} most relevant of {total} "
+                        "keyword matches — refine the query for more detail):"
+                    )
+                else:
+                    header = f"search_events FTS results ({shown} keyword matches):"
+                return _truncate_result(header + "\n\n" + "\n---\n".join(rows))
+    except Exception as exc:
+        print(f"[fts] event search unavailable; using SQL fallback: {exc}")
+
     now_ts  = int(time.time())
     now_str = time.strftime("%A %B %d, %Y at %H:%M (local time)")
     user_content = f"Current timestamp: {now_ts} ({now_str})\n\nQuestion: {question}"
 
-    sql = _generate_sql(_EVENTS_PROMPT, user_content)
-    if not sql:
-        return (
-            "search_events: could not generate a SQL query.\n"
-            "→ Try search_sessions for broader topic/summary search."
-        )
-    print(f"[sql:events] {sql}")
-    if not _is_safe(sql):
-        return "search_events: unsafe query blocked."
-
-    try:
-        rows, total = _run_sql(sql)
-    except Exception as e:
-        return f"search_events: SQL error — {e}\n→ Try search_sessions instead."
+    outcome = _execute_event_sql(question, user_content)
+    if isinstance(outcome, str):
+        return outcome
+    rows, total = outcome
 
     if not _rows_are_useful(rows):
         return (
@@ -430,8 +750,6 @@ def search_events(question: str) -> str:
             "topic or time-window summary, call search_sessions."
         )
 
-
-    # Fix 1: include total count
     shown = len(rows)
     if total > shown:
         header = (

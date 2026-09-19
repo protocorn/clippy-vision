@@ -398,7 +398,11 @@ export async function loadTimelineSessions({ reset = false } = {}) {
   if (reset) {
    timelineList.innerHTML = `<div class="timeline-error">Failed to load sessions: ${error.message}</div>`
   } else {
-   window.alert(`Could not load more sessions: ${error.message}`)
+   const { alertDialog } = await import('./dialogs.js')
+   await alertDialog({
+    title: 'Could not load more sessions',
+    message: error.message || 'Something went wrong.',
+   })
   }
  } finally {
   store.timelineLoading = false

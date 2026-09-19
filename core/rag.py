@@ -278,13 +278,32 @@ def search_event_rag(
             ("current_window_title", "window"),
             ("active_url", "url"),
             ("summary", "summary"),
+            ("payload", "payload"),
             ("vision_activity", "vision_activity"),
             ("vision_ocr_text", "vision_ocr_text"),
             ("interest_reason", "interest_reason"),
         ):
             value = row.get(key)
             if value:
-                parts.append(f"{label}: {value}")
+                text = str(value)
+                if key == "payload":
+                    try:
+                        obj = json.loads(text) if isinstance(value, str) else value
+                        if isinstance(obj, dict):
+                            for candidate in ("pasted_content", "clipboard_content", "text", "content"):
+                                if isinstance(obj.get(candidate), str) and obj[candidate].strip():
+                                    text = obj[candidate].strip()
+                                    break
+                            else:
+                                for candidate in obj.values():
+                                    if isinstance(candidate, str) and candidate.strip():
+                                        text = candidate.strip()
+                                        break
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        pass
+                    if len(text) > 3000:
+                        text = text[:3000] + "... (truncated)"
+                parts.append(f"{label}: {text}")
         filename = resolve_screenshot_filename(row["timestamp"], row.get("screenshot_filename"))
         if filename:
             parts.append(f"screenshot_source: {filename}")

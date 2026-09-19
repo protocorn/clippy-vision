@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -1316,6 +1317,96 @@ class RuntimeRegressionTests(unittest.TestCase):
             summarizer_mod._note_refresh_failure(sid, TimeoutError("timed out"))
         )
         summarizer_mod._refresh_failures.clear()
+
+
+class RetrieveAnswerHarnessTests(unittest.TestCase):
+    """Retrieve → evidence-card → answer helpers (no LLM)."""
+
+    def test_cap_tool_result_truncates_hard(self):
+        from agent.react_agent import MAX_TOOL_RESULT_CHARS, _cap_tool_result
+
+        capped = _cap_tool_result("x" * (MAX_TOOL_RESULT_CHARS + 4000))
+        self.assertLessEqual(len(capped), MAX_TOOL_RESULT_CHARS + 120)
+        self.assertIn("truncated", capped)
+
+    def test_evidence_card_ranks_question_terms(self):
+        from agent.react_agent import MAX_EVIDENCE_CARD_CHARS, _build_evidence_card
+
+        payload = "\n".join([
+            "[activity summaries]",
+            "---",
+            "summary: Clippy Vision computer-use agent work on screen_capture.py",
+            "---",
+            "summary: Oasis scheduling calendar research",
+            "---",
+            "summary: grocery list and unrelated email",
+        ])
+        card = _build_evidence_card(
+            "What did I do on Clippy Vision this week with Oasis?",
+            [("search_sessions", payload)],
+        )
+        self.assertLessEqual(len(card), MAX_EVIDENCE_CARD_CHARS)
+        self.assertIn("Clippy Vision", card)
+        self.assertIn("Oasis", card)
+        # Matched topic blocks should appear before the unrelated grocery line.
+        self.assertLess(card.find("Clippy Vision"), card.find("grocery"))
+
+
+class WorkspaceRootsAndFindFilesTests(unittest.TestCase):
+    """Trusted folders + bounded filesystem search."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory(prefix="clippy-roots-")
+        self.root = Path(self._tmpdir.name)
+        self.proj = self.root / "Clippy_Vision"
+        self.core = self.proj / "core"
+        self.core.mkdir(parents=True)
+        (self.core / "screenshot_processor.py").write_text("# test\n", encoding="utf-8")
+        (self.core / "background_jobs.py").write_text("# test\n", encoding="utf-8")
+        (self.proj / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+
+    def tearDown(self):
+        from core import workspace_roots as wr
+
+        for root in wr.list_roots(enabled_only=False):
+            if str(root["path"]).startswith(str(self.root)):
+                wr.remove_root(root["root_id"])
+        self._tmpdir.cleanup()
+
+    def test_remember_and_find_files(self):
+        from core import fs_search, workspace_roots
+
+        remembered = workspace_roots.remember_root(self.proj, label="Clippy_Vision", source="user")
+        self.assertEqual(remembered["label"], "Clippy_Vision")
+        self.assertTrue(Path(remembered["path"]).is_dir())
+
+        result = fs_search.find_files("screenshot_processor.py")
+        self.assertTrue(result["ok"], result)
+        paths = [m["path"] for m in result["matches"]]
+        self.assertTrue(any(p.endswith("screenshot_processor.py") for p in paths), paths)
+
+        both = fs_search.find_files("background_jobs.py", under="Clippy_Vision")
+        self.assertTrue(both["ok"], both)
+        self.assertTrue(any(m["name"] == "background_jobs.py" for m in both["matches"]))
+
+    def test_find_files_requires_trusted_root(self):
+        from core import fs_search
+
+        # Search with no overlapping trusted root and a path outside home bootstrap
+        # is covered by under= bootstrap under home — use a missing name under empty roots.
+        # Clear any roots created by other tests that might include this tmp path.
+        result = fs_search.find_files(
+            "no_such_unique_file_zz99.py",
+            under=str(self.root / "does_not_exist"),
+        )
+        self.assertFalse(result["ok"])
+
+    def test_infer_project_root_from_file(self):
+        from core.workspace_roots import infer_project_root
+
+        target = self.core / "screenshot_processor.py"
+        inferred = infer_project_root(target)
+        self.assertEqual(inferred, self.proj)
 
 
 if __name__ == "__main__":

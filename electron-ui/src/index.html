@@ -198,6 +198,27 @@
                 <span id="privacy-count" class="settings-foot-muted">—</span>
                 <span id="privacy-status" class="settings-status"></span>
               </div>
+
+              <h3 class="settings-subhead" style="margin-top: 22px;">Trusted folders</h3>
+              <p class="settings-hint">
+                Clippy may search these folders on disk when you ask it to find or open a file.
+                Activity history alone is not enough — add project roots here (or tell Clippy in chat).
+              </p>
+              <div id="workspace-roots-list" class="privacy-list"></div>
+              <div class="settings-field" style="margin-top: 12px;">
+                <label for="workspace-root-input">Add folder path</label>
+                <div class="settings-actions" style="gap: 8px; align-items: stretch;">
+                  <input
+                    id="workspace-root-input"
+                    type="text"
+                    spellcheck="false"
+                    placeholder="C:\Users\proto\Clippy_Vision"
+                    style="flex: 1;"
+                  />
+                  <button type="button" id="workspace-root-add-btn" class="settings-text-link">Add</button>
+                </div>
+                <span id="workspace-roots-status" class="settings-status" style="display:block;margin-top:8px;"></span>
+              </div>
             </section>
 
             <section class="settings-panel" id="mcp-section" data-settings-panel="mcp" hidden>

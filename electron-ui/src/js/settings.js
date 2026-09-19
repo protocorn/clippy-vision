@@ -2,7 +2,8 @@
  settingsView, chatView, chatMain, welcomeInput, inputBox, settingsName, settingsIntro,
  identityFields, identityNewKey, identityNewVal, identityAddBtn, profileStatus,
  updateCheckToggle, updatesStatus, aboutVersion, aboutPlatform, aboutModel, aboutMemory,
- aboutBadge, privacyList, privacyStatus, privacyCount, settingsUserLabel, settingsRuntimeLabel,
+ aboutBadge, privacyList, privacyStatus, privacyCount, workspaceRootsList, workspaceRootInput,
+ workspaceRootAddBtn, workspaceRootsStatus, settingsUserLabel, settingsRuntimeLabel,
  settingsRuntimeDot, settingsNavItems, settingsPanels, mcpReadyLabel, mcpReadyDetail,
  mcpConfigPreview, mcpClientList, mcpCopyBtn, mcpStatus, MCP_CLIENT_ICONS, PRIVACY_TARGET_ICONS,
  store, updateBanner,
@@ -79,7 +80,13 @@ export function renderIdentityFields() {
 }
 
 export async function removeIdentityField(key) {
- const ok = window.confirm(`Remove “${key}” from your memory profile?`)
+ const { confirmDialog } = await import('./dialogs.js')
+ const ok = await confirmDialog({
+  title: 'Remove memory',
+  message: `Remove “${key}” from your memory profile?`,
+  confirmLabel: 'Remove',
+  danger: true,
+ })
  if (!ok) return
  store.identityCleared.add(key)
  delete store.identityDraft[key]
@@ -244,6 +251,93 @@ export async function loadPrivacySettings() {
   privacyList.innerHTML = ''
   if (privacyCount) privacyCount.textContent = '—'
   setStatus(privacyStatus, `Could not load privacy settings: ${error.message}`, 'error')
+ }
+ loadWorkspaceRoots()
+}
+
+export function renderWorkspaceRoots(roots) {
+ if (!workspaceRootsList) return
+ workspaceRootsList.innerHTML = ''
+ const items = Array.isArray(roots) ? roots : []
+ if (!items.length) {
+  const empty = document.createElement('div')
+  empty.className = 'settings-hint'
+  empty.textContent = 'No trusted folders yet. Add a project path below or tell Clippy in chat.'
+  workspaceRootsList.appendChild(empty)
+  return
+ }
+ for (const root of items) {
+  const row = document.createElement('div')
+  row.className = 'privacy-row'
+
+  const text = document.createElement('div')
+  text.className = 'privacy-row-text'
+  const title = document.createElement('strong')
+  title.textContent = root.label || 'Folder'
+  const detail = document.createElement('span')
+  detail.textContent = root.path || ''
+  text.appendChild(title)
+  text.appendChild(detail)
+
+  const removeBtn = document.createElement('button')
+  removeBtn.type = 'button'
+  removeBtn.className = 'settings-text-link'
+  removeBtn.textContent = 'Remove'
+  removeBtn.addEventListener('click', () => removeWorkspaceRoot(root.root_id))
+
+  row.appendChild(text)
+  row.appendChild(removeBtn)
+  workspaceRootsList.appendChild(row)
+ }
+}
+
+export async function loadWorkspaceRoots() {
+ if (!workspaceRootsList) return
+ if (workspaceRootsStatus) setStatus(workspaceRootsStatus, 'Loading...', null)
+ try {
+  const data = await window.clippy.listWorkspaceRoots()
+  renderWorkspaceRoots(data.roots || [])
+  if (workspaceRootsStatus) setStatus(workspaceRootsStatus, '', null)
+ } catch (error) {
+  workspaceRootsList.innerHTML = ''
+  if (workspaceRootsStatus) {
+   setStatus(workspaceRootsStatus, `Could not load trusted folders: ${error.message}`, 'error')
+  }
+ }
+}
+
+export async function addWorkspaceRootFromInput() {
+ if (!workspaceRootInput) return
+ const path = workspaceRootInput.value.trim()
+ if (!path) {
+  setStatus(workspaceRootsStatus, 'Enter a folder path first.', 'error')
+  return
+ }
+ if (workspaceRootAddBtn) workspaceRootAddBtn.disabled = true
+ setStatus(workspaceRootsStatus, 'Saving...', null)
+ try {
+  const data = await window.clippy.addWorkspaceRoot(path)
+  workspaceRootInput.value = ''
+  renderWorkspaceRoots(data.roots || [])
+  setStatus(workspaceRootsStatus, 'Trusted folder added.', 'ok')
+  setTimeout(() => setStatus(workspaceRootsStatus, '', null), 1500)
+ } catch (error) {
+  setStatus(workspaceRootsStatus, `Could not add folder: ${error.message}`, 'error')
+ } finally {
+  if (workspaceRootAddBtn) workspaceRootAddBtn.disabled = false
+ }
+}
+
+export async function removeWorkspaceRoot(rootId) {
+ if (!rootId) return
+ setStatus(workspaceRootsStatus, 'Removing...', null)
+ try {
+  const data = await window.clippy.removeWorkspaceRoot(rootId)
+  renderWorkspaceRoots(data.roots || [])
+  setStatus(workspaceRootsStatus, 'Removed.', 'ok')
+  setTimeout(() => setStatus(workspaceRootsStatus, '', null), 1500)
+ } catch (error) {
+  setStatus(workspaceRootsStatus, `Could not remove: ${error.message}`, 'error')
  }
 }
 
