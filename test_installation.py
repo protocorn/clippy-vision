@@ -139,7 +139,7 @@ def main():
         print("\n✓ All tests passed! Clippy Vision is ready to use.")
         print("\nNext steps:")
         print(f"  1. Start capture: python core{os.sep}screen_capture.py")
-        print(f"  2. Chat with Clippy: python agent{os.sep}react_agent.py")
+        print(f"  2. Connect MCP in Cursor/Claude (Settings → Connect apps in the desktop UI)")
     else:
         print("\n✗ Some tests failed. Please fix the issues above.")
         print("  See QUICKSTART.md for troubleshooting help.")

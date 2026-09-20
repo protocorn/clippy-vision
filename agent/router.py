@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # torch is NOT imported at module level on purpose: this module is imported
-# by api_server.py and agent/react_agent.py regardless of whether the router
+# by api_server.py (legacy) and eval scripts regardless of whether the router
 # classifier ever loads (can_load_light() may say no, or the checkpoint may
 # be missing). Importing torch unconditionally cost real RSS in the API
 # process even when the classifier never actually loads. It's imported lazily

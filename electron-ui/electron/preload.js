@@ -35,6 +35,7 @@ async function getErrorMessage(response) {
 
 contextBridge.exposeInMainWorld('clippy', {
 
+    // ARCHIVED in-app chat — UI moved to archive/in_app_chat/. Stubs remain for restore.
     chat: async (message, conversationId) => {
         const response = await fetch(await apiUrl('/chat'), {
             method: 'POST',
@@ -82,6 +83,59 @@ contextBridge.exposeInMainWorld('clippy', {
                 } catch (_) { /* ignore malformed chunk */ }
             }
         }
+    },
+
+    getInsightHome: async (limit = 14) => {
+        const params = new URLSearchParams({ limit: String(limit) })
+        const response = await fetch(await apiUrl(`/insight/home?${params}`))
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    getInsightDay: async (day, generate = false) => {
+        const params = new URLSearchParams()
+        if (generate) params.set('generate', 'true')
+        const q = params.toString()
+        const response = await fetch(
+            await apiUrl(`/insight/day/${encodeURIComponent(day)}${q ? `?${q}` : ''}`)
+        )
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    generateInsightDay: async (day, force = false) => {
+        const response = await fetch(
+            await apiUrl(`/insight/day/${encodeURIComponent(day)}/generate`),
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ force: Boolean(force) }),
+            }
+        )
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    getInsightThreads: async (lookbackDays = 7, generate = false) => {
+        const params = new URLSearchParams({ lookback_days: String(lookbackDays) })
+        if (generate) params.set('generate', 'true')
+        const response = await fetch(await apiUrl(`/insight/threads?${params}`))
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    generateInsightThreads: async ({ lookback_days = 7, force = false, dates = null } = {}) => {
+        const response = await fetch(await apiUrl('/insight/threads/generate'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                lookback_days,
+                force: Boolean(force),
+                dates,
+            }),
+        })
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
     },
 
     getName: async () => {
@@ -157,6 +211,7 @@ contextBridge.exposeInMainWorld('clippy', {
         return response.json()
     },
 
+    // ARCHIVED conversation drawer helpers — kept for Settings data clear / restore.
     listConversations: async () => {
         const response = await fetch(await apiUrl('/conversations'))
         if (!response.ok) throw new Error(await getErrorMessage(response))

@@ -1,15 +1,21 @@
-import { nameInput, nameSubmit, nameError, chatView, chatMain, nameView, loadingView, loadingSub, inputBox, sendBtn, welcomeInput, welcomeSend, welcomeCharCount, inputCharCount, newChatBtn, appBrand, settingsBtn, captureBtn, captureLabel, drawerToggle, drawerClose, drawerBackdrop, convSearch, timelineBtn, timelineLoadMore, timelineDetailBack, updateBanner, updateBannerText, updateBannerLink, updateBannerDismiss, wideLayoutMq, identityAddBtn, identityNewKey, identityNewVal, settingsName, settingsIntro, updateCheckToggle, mcpCopyBtn, workspaceRootAddBtn, workspaceRootInput, navMore, navMoreBtn, navMoreMenu, store } from './dom.js'
-import { updateCharCount, showView, isWideLayout } from './utils.js'
-import { submitName, send, resetConversation, setChatMode } from './chat.js'
 import {
-  openDrawer, closeDrawer, syncDrawerLayout, scheduleConversationSearch,
-} from './conversations.js'
+  nameInput, nameSubmit, nameError, nameView, loadingView, loadingSub,
+  appBrand, settingsBtn, captureBtn, captureLabel, timelineBtn, timelineLoadMore,
+  timelineDetailBack, updateBanner, updateBannerText, updateBannerLink,
+  updateBannerDismiss, identityAddBtn, identityNewKey, identityNewVal,
+  settingsName, settingsIntro, updateCheckToggle, mcpCopyBtn,
+  workspaceRootAddBtn, workspaceRootInput, navMore, navMoreBtn, navMoreMenu, store,
+  insightsView,
+} from './dom.js'
+import { showView } from './utils.js'
+import { submitName } from './onboarding.js'
 import {
   openSettings, addIdentityField, saveProfile, saveUpdateCheck, copyMcpConfig,
   wireSettingsNav, addWorkspaceRootFromInput,
 } from './settings.js'
 import { openTimeline, loadTimelineSessions, closeTimelineDetail } from './timeline.js'
 import { setCaptureUI } from './capture-ui.js'
+import { openInsights, wireInsights } from './insights.js'
 
 function on(el, event, handler) {
   if (!el) return
@@ -60,39 +66,7 @@ function wireUi() {
     if (e.key === 'Enter') submitName()
   })
 
-  on(drawerToggle, 'click', () => {
-    if (!chatView.classList.contains('active')) showView(chatView)
-    openDrawer()
-  })
-  on(drawerClose, 'click', closeDrawer)
-  on(drawerBackdrop, 'click', closeDrawer)
-
-  on(convSearch, 'input', scheduleConversationSearch)
-  on(convSearch, 'keydown', e => {
-    if (e.key === 'Escape') {
-      if (convSearch.value) {
-        convSearch.value = ''
-        scheduleConversationSearch()
-      } else if (!isWideLayout()) {
-        closeDrawer()
-      } else {
-        convSearch.blur()
-      }
-    }
-  })
-
-  if (wideLayoutMq.addEventListener) {
-    wideLayoutMq.addEventListener('change', syncDrawerLayout)
-  } else if (wideLayoutMq.addListener) {
-    wideLayoutMq.addListener(syncDrawerLayout)
-  }
-
-  on(newChatBtn, 'click', resetConversation)
-  on(appBrand, 'click', () => {
-    showView(chatView)
-    if (chatMain?.classList.contains('is-welcome')) welcomeInput.focus()
-    else inputBox.focus()
-  })
+  on(appBrand, 'click', () => openInsights())
 
   function setNavMoreOpen(open) {
     if (!navMore || !navMoreBtn || !navMoreMenu) return
@@ -116,32 +90,6 @@ function wireUi() {
     if (e.key === 'Escape') setNavMoreOpen(false)
   })
 
-  on(sendBtn, 'click', () => send(false))
-  on(inputBox, 'keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      send(false)
-    }
-  })
-
-  on(welcomeSend, 'click', () => send(true))
-  on(welcomeInput, 'keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      send(true)
-    }
-  })
-  on(welcomeInput, 'input', () => {
-    welcomeInput.style.height = 'auto'
-    welcomeInput.style.height = Math.min(welcomeInput.scrollHeight, 160) + 'px'
-    updateCharCount(welcomeInput, welcomeCharCount)
-  })
-  on(inputBox, 'input', () => {
-    inputBox.style.height = 'auto'
-    inputBox.style.height = Math.min(inputBox.scrollHeight, 160) + 'px'
-    updateCharCount(inputBox, inputCharCount)
-  })
-
   on(settingsBtn, 'click', openSettings)
   wireSettingsNav()
   on(identityAddBtn, 'click', addIdentityField)
@@ -163,6 +111,8 @@ function wireUi() {
   on(timelineBtn, 'click', openTimeline)
   on(timelineLoadMore, 'click', () => loadTimelineSessions({ reset: false }))
   on(timelineDetailBack, 'click', closeTimelineDetail)
+
+  wireInsights()
 }
 
 export async function init() {
@@ -213,8 +163,6 @@ export async function init() {
     if (data?.sub && loadingSub) loadingSub.textContent = data.sub
   })
 
-  // Reliable handshake: main resolves this only after residency warm finishes.
-  // Also covers the case where warm already finished before the UI subscribed.
   try {
     if (typeof window.clippy.waitForApiReady === 'function') {
       await window.clippy.waitForApiReady()
@@ -251,11 +199,10 @@ export async function init() {
   try {
     const { name } = await window.clippy.getName()
     if (name && name.trim()) {
-      showView(chatView)
+      showView(insightsView)
       const active = await window.clippy.getCaptureStatus()
       setCaptureUI(active)
-      setChatMode('welcome')
-      syncDrawerLayout()
+      openInsights()
     } else {
       showView(nameView)
       nameInput?.focus()
@@ -272,4 +219,3 @@ init().catch((error) => {
   const loadingError = document.getElementById('loading-error')
   if (loadingError) loadingError.textContent = `UI failed to start: ${error.message || error}`
 })
-  

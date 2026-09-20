@@ -1,0 +1,44 @@
+<!-- Archived fragment: former #chat-view from electron-ui/src/index.html.
+     Restored UI would wrap this as <div id="chat-view" class="app-panel active">…</div>
+     See archive/in_app_chat/README.md -->
+        <div id="chat-layout">
+          <div id="drawer-backdrop"></div>
+          <aside id="conv-drawer">
+            <div class="drawer-header">
+              <span>Conversations</span>
+              <button id="drawer-close" aria-label="Close">✕</button>
+            </div>
+            <div class="drawer-search-wrap">
+              <input id="conv-search" type="search" placeholder="Search chats…" autocomplete="off" />
+              <div id="conv-search-hint" class="conv-search-hint"></div>
+            </div>
+            <div id="conv-list"></div>
+          </aside>
+
+          <div id="chat-main" class="is-welcome">
+            <div id="welcome-screen" class="welcome-screen">
+              <div class="welcome-brand">
+                <img class="welcome-logo" src="../assets/logo_active.png" alt="" />
+                <h1 class="welcome-title">Clippy Vision</h1>
+                <p class="welcome-sub">Captures what you do. Plug a big model in via MCP.</p>
+              </div>
+              <div class="welcome-composer">
+                <textarea id="welcome-input" rows="2" placeholder="Try asking from Cursor/Claude (MCP) — or open Timeline"
+                  autocomplete="off"
+                  maxlength="4000"></textarea>
+                <div class="welcome-composer-bar">
+                  <span id="welcome-char-count" class="char-count" aria-live="polite"></span>
+                  <button type="button" id="welcome-send">Send</button>
+                </div>
+              </div>
+            </div>
+
+            <div id="messages"></div>
+
+            <div id="input-row">
+              <textarea id="input-box" rows="1" placeholder="Ask Clippy..." maxlength="4000"></textarea>
+              <span id="input-char-count" class="char-count" aria-live="polite"></span>
+              <button id="send-btn">Send</button>
+            </div>
+          </div>
+        </div>

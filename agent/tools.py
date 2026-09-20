@@ -3,39 +3,11 @@ import json
 from agent.memory import delete_note, save_identity, save_note
 from agent.retrieval import search_events, search_sessions
 from core.fs_search import find_files_json
-from core.os_actions import open_path_and_verify, open_url_and_verify
 from core.workspace_roots import (
     format_roots_for_prompt,
     list_roots,
-    maybe_learn_root_from_open,
     remember_root,
 )
-
-
-def open_path(path: str) -> str:
-    """Open a local file/folder and verify foreground (JSON string for the model)."""
-    path = (path or "").strip()
-    if not path:
-        return json.dumps({"ok": False, "error": "empty path"})
-    result = open_path_and_verify(path)
-    # Learn / refresh trusted project roots after a successful open.
-    if result.get("ok"):
-        learned = maybe_learn_root_from_open(path)
-        if learned:
-            result = dict(result)
-            result["learned_workspace_root"] = {
-                "label": learned.get("label"),
-                "path": learned.get("path"),
-            }
-    return json.dumps(result, default=str)
-
-
-def open_url(url: str) -> str:
-    """Open an http(s) URL and verify foreground (JSON string for the model)."""
-    url = (url or "").strip()
-    if not url:
-        return json.dumps({"ok": False, "error": "empty url"})
-    return json.dumps(open_url_and_verify(url), default=str)
 
 
 def find_files(name: str, under: str = "", limit: int = 15) -> str:
@@ -77,8 +49,6 @@ TOOLS = {
     "find_files": find_files,
     "remember_workspace_root": remember_workspace_root,
     "list_workspace_roots": list_workspace_roots,
-    "open_path": open_path,
-    "open_url": open_url,
 }
 
 
@@ -135,7 +105,7 @@ TOOL_SCHEMAS = [
                 "ONLY for: yesterday/this week/today overviews, 'what did I work on', topic recaps. "
                 "NOT for: exact URLs, clipboard/paste text, OCR, file paths, or single messages "
                 "(use search_events). "
-                "NOT for: finding files on disk (use find_files) or opening them (use open_path). "
+                "NOT for: finding files on disk (use find_files). "
                 "If get_prefetched_context is available and its synopsis matches the question, "
                 "call that FIRST; use search_sessions only when the bundle is missing, empty, "
                 "or insufficient. "
@@ -163,7 +133,6 @@ TOOL_SCHEMAS = [
                 "ONLY for: specific artifacts and granular activity detail. "
                 "NOT for: day/week summaries (use search_sessions or get_prefetched_context). "
                 "NOT for: locating a file on disk by name (use find_files). "
-                "NOT for: opening a path/URL (find_files or search_events for URL, then open_*)."
             ),
             "parameters": {
                 "type": "object",
@@ -183,13 +152,13 @@ TOOL_SCHEMAS = [
             "name": "find_files",
             "description": (
                 "Search the REAL filesystem under trusted workspace folders for a file/folder name. "
-                "USE THIS when the user asks to open/find a file by name (e.g. screenshot_processor.py) "
-                "and you do not already have an absolute path. "
+                "USE THIS when the user asks to find a file by name (e.g. screenshot_processor.py) "
+                "and you do not already have an absolute path. Returns absolute paths for the host "
+                "agent to open if needed — Clippy does not open files/URLs itself. "
                 "NOT a substitute for search_events (activity history). "
                 "If no trusted folders exist, call remember_workspace_root with a path the user gave "
                 "(e.g. C:\\Users\\proto or a project folder), then find_files again. "
-                "Optional under= restricts to a root label or path. "
-                "Then call open_path with one absolute path from the matches."
+                "Optional under= restricts to a root label or path."
             ),
             "parameters": {
                 "type": "object",
@@ -222,7 +191,7 @@ TOOL_SCHEMAS = [
                 "Trust a folder for future find_files searches. "
                 "Call when the user gives a project/root path (e.g. C:\\Users\\proto\\Clippy_Vision) "
                 "or says to remember where their projects live. "
-                "NOT for opening files (use find_files + open_path)."
+                "NOT for opening files (return paths via find_files; host opens them)."
             ),
             "parameters": {
                 "type": "object",
@@ -320,52 +289,6 @@ TOOL_SCHEMAS = [
                     }
                 },
                 "required": ["note_text"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "open_path",
-            "description": (
-                "ACTION: open a local file/folder in the OS default app, then verify. "
-                "ONLY when the user explicitly asks to open/show/launch a file or folder. "
-                "Requires an absolute path. If you only have a filename: call find_files FIRST "
-                "(after remember_workspace_root if the user just gave a root), then open_path. "
-                "Do not use search_events as a filesystem search. Never invent paths."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Absolute local filesystem path to open.",
-                    }
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "open_url",
-            "description": (
-                "ACTION: open an http(s) URL in the default browser, then verify. "
-                "ONLY when the user explicitly asks to open a link/site/page. "
-                "If you lack the URL: call search_events "
-                "(or get_prefetched_context if its synopsis has URLs) FIRST — "
-                "do not ask the user until search fails. Never invent URLs."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "http(s) URL to open.",
-                    }
-                },
-                "required": ["url"],
             },
         },
     },

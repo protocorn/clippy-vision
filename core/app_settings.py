@@ -27,6 +27,9 @@ _DEFAULTS: dict[str, Any] = {
     "activity_debounce_seconds": 2.0,
     "raw_retention_days": 7,
     "screenshot_retention_days": 1,
+    # Adaptive TTL cap: high-signal frames may live up to this many days
+    # (never longer than raw_retention_days). See core/screenshot_ttl.py.
+    "screenshot_retention_max_days": 7,
     "launch_at_login": False,
     # Hard ceiling for a single UIA bounds/text query on the async worker.
     # UIA COM calls can hang against certain apps; this bounds the damage.
@@ -60,6 +63,10 @@ def normalize_capture_settings(values: dict[str, Any] | None = None) -> dict[str
     source = dict(_DEFAULTS)
     if values:
         source.update(values)
+    base_days = _as_int(source.get("screenshot_retention_days"), 1, 1, 30)
+    max_days = _as_int(source.get("screenshot_retention_max_days"), 7, 1, 30)
+    if max_days < base_days:
+        max_days = base_days
     return {
         "capture_screenshots": _as_bool(source.get("capture_screenshots"), True),
         "capture_all_monitors": _as_bool(source.get("capture_all_monitors"), False),
@@ -71,7 +78,8 @@ def normalize_capture_settings(values: dict[str, Any] | None = None) -> dict[str
         "background_interval_seconds": _as_float(source.get("background_interval_seconds"), 60.0, 15.0, 3600.0),
         "activity_debounce_seconds": _as_float(source.get("activity_debounce_seconds"), 2.0, 0.5, 15.0),
         "raw_retention_days": _as_int(source.get("raw_retention_days"), 7, 1, 90),
-        "screenshot_retention_days": _as_int(source.get("screenshot_retention_days"), 1, 1, 30),
+        "screenshot_retention_days": base_days,
+        "screenshot_retention_max_days": max_days,
         "launch_at_login": _as_bool(source.get("launch_at_login"), False),
         "uia_timeout_seconds": _as_float(source.get("uia_timeout_seconds"), 1.5, 0.5, 5.0),
     }

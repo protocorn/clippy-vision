@@ -1,7 +1,6 @@
 import json
 import os
 import sys
-import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -34,15 +33,13 @@ from agent.conversation import (
     list_conversations,
     search_conversations,
 )
-from agent.react_agent import USER_MESSAGE_MAX_CHARS, run, run_stream
-from agent.router import load_classifier
 from core.app_settings import get_capture_settings, set_capture_settings
 from core.backlog import get_backlog_status
 from core.capture_state import get_capture_status
 from core.diagnostics import get_diagnostics
 from core.intro_builder import start_intro_rebuild_daemon
 from core.memory_store import get_profile, save_identity_field, set_introduction
-from core.model_residency import can_load_light, on_capture_stop, warm_for_startup
+from core.model_residency import on_capture_stop, warm_for_startup
 from core.paths import get_data_dir, get_screenshots_dir
 from core.performance_metrics import start_performance_monitor
 from core.platform_support import lower_process_priority, platform_label
@@ -60,24 +57,34 @@ from core.storage import (
 )
 from core.workspace_roots import list_roots, remember_root, remove_root
 
+# Soft cap for any leftover composer text.
+# ARCHIVED UI: in-app chat shell moved to archive/in_app_chat/ — home is insight cards.
+# These /chat stubs remain so old clients / restore paths do not 404.
+USER_MESSAGE_MAX_CHARS = 4000
+
+MCP_CHAT_GUIDANCE = (
+    "Clippy Vision captures what you do on this PC and keeps that history local.\n\n"
+    "In-app chat with a small local agent has been removed. "
+    "The home screen shows Day Cards and Threads instead.\n\n"
+    "Ask about your activity from Cursor, Claude Desktop, or any MCP client:\n\n"
+    "1. Open Settings → Connect apps\n"
+    "2. Copy the MCP launch config into your client\n"
+    "3. Use search_sessions / search_events / memory tools from a bigger model\n\n"
+    "Timeline, capture, privacy, and trusted folders stay in this app."
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    # This process still serves interactive chat requests, so only a mild
-    # step down (not idle-class) — enough to yield to real foreground apps
-    # under load without making chat feel broken while background OCR/LLM
-    # backlog work is also running.
+    # API serves timeline/settings/MCP-adjacent status; keep priority mild so
+    # foreground apps stay snappy while OCR/summarizer backlog runs.
     lower_process_priority(background=False)
 
     start_performance_monitor("api")
 
     # Weekly intro rebuild: immediate check + periodic background loop
     start_intro_rebuild_daemon()
-
-    # Preload router classifier only when a small torch model still fits.
-    if can_load_light():
-        threading.Thread(target=load_classifier, daemon=True, name="router-classifier-warmup").start()
 
     # Summarizer / OCR backlog / distil run with the app, not only while capture
     # is on — pause capture stops new intake, not processing of allowed history.
@@ -159,6 +166,7 @@ class CaptureSettingsRequest(BaseModel):
     activity_debounce_seconds: float | None = None
     raw_retention_days: int | None = None
     screenshot_retention_days: int | None = None
+    screenshot_retention_max_days: int | None = None
     launch_at_login: bool | None = None
 
 
@@ -178,54 +186,121 @@ def _validate_user_message(message: str) -> str:
     return text
 
 
+# --- Archived in-app chat (see archive/in_app_chat/) ---
+
 @app.post("/chat")
-
 def chat(req: QueryRequest):
-
-    message = _validate_user_message(req.message)
-
-    result = run(message, req.conversation_id)
-
-    return {"result": result}
-
+    _validate_user_message(req.message)
+    return {"result": MCP_CHAT_GUIDANCE, "chat_disabled": True, "use": "mcp"}
 
 
 @app.post("/chat/stream")
-
 def chat_stream(req: QueryRequest):
-
-    message = _validate_user_message(req.message)
+    _validate_user_message(req.message)
 
     def event_gen():
-
         try:
-
-            for event in run_stream(message, req.conversation_id):
-
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-
+            yield f"data: {json.dumps({'type': 'status', 'text': 'MCP is the chat surface'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'content', 'delta': MCP_CHAT_GUIDANCE}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'result': MCP_CHAT_GUIDANCE, 'chat_disabled': True, 'use': 'mcp'}, ensure_ascii=False)}\n\n"
         except Exception as e:
-
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
-
         event_gen(),
-
         media_type="text/event-stream",
-
         headers={
-
             "Cache-Control": "no-cache",
-
             "Connection": "keep-alive",
-
             "X-Accel-Buffering": "no",
-
         },
-
     )
 
+
+# --- Insight cards (default home surface) ---
+
+class InsightDayRequest(BaseModel):
+    force: bool = False
+
+
+class InsightThreadsRequest(BaseModel):
+    lookback_days: int = 7
+    force: bool = False
+    dates: list[str] | None = None
+
+
+@app.get("/insight/home")
+def insight_home(limit: int = Query(14, ge=1, le=60)):
+    from agent.insight_cards import list_insight_home
+
+    return list_insight_home(limit=limit)
+
+
+@app.get("/insight/day/{day}")
+def insight_day_get(day: str, generate: bool = Query(False)):
+    from agent.insight_cards import get_or_generate_day_card, load_day_card
+
+    try:
+        if generate:
+            return get_or_generate_day_card(day, force=False)
+        card = load_day_card(day)
+        if not card:
+            raise HTTPException(status_code=404, detail="Day card not generated yet")
+        return card
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/insight/day/{day}/generate")
+def insight_day_generate(day: str, req: InsightDayRequest = InsightDayRequest()):
+    from agent.insight_cards import get_or_generate_day_card
+
+    try:
+        return get_or_generate_day_card(day, force=bool(req.force))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/insight/threads")
+def insight_threads_get(
+    lookback_days: int = Query(7, ge=2, le=30),
+    generate: bool = Query(False),
+):
+    from agent.insight_cards import generate_threads_card, list_recent_days, load_threads_card
+
+    days = list(reversed(list_recent_days(lookback_days)))
+    key = f"{days[0]}_{days[-1]}" if days else "empty"
+    try:
+        if generate:
+            return generate_threads_card(lookback_days=lookback_days, force=False)
+        card = load_threads_card(key)
+        if not card:
+            raise HTTPException(status_code=404, detail="Threads card not generated yet")
+        return card
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/insight/threads/generate")
+def insight_threads_generate(req: InsightThreadsRequest = InsightThreadsRequest()):
+    from agent.insight_cards import generate_threads_card
+
+    try:
+        return generate_threads_card(
+            req.dates,
+            lookback_days=int(req.lookback_days or 7),
+            force=bool(req.force),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/user/name")
@@ -424,7 +499,7 @@ def session_detail(summary_id: str):
 
 
 @app.get("/conversations")
-
+# ARCHIVED UI drawer — API kept for data clear / restore (archive/in_app_chat/)
 def conversations():
 
     return {"conversations": list_conversations()}

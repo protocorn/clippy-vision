@@ -5,7 +5,7 @@
 Status: **Active design + early implementation.**  
 - Phase A idle “enough” done (OS idle + stretched background screenshots).  
 - Plan B Steps 1–2 done: `core/os_actions.py` + `scripts/probe_os_actions.py`.  
-- Plan B Step 3 done: `open_path` / `open_url` registered in `agent/tools.py` with ReAct prompt policy in `agent/react_agent.py`.  
+- Plan B open tools live in `agent/tools.py` / `core/os_actions.py` (available for future MCP exposure). In-app ReAct chat (`agent/react_agent.py`) has been **removed** — ask via MCP + a bigger model.  
 - **Trusted folders + `find_files`:** Clippy can search the real filesystem under user-approved roots (`core/workspace_roots.py`, `core/fs_search.py`), remember roots from chat/Settings, and open absolute paths. Activity DB is no longer used as a fake filesystem search.  
 - Next: `open_app` / `focus_window`; confirm-on-ambiguous opens.  
 - Next: chat dogfood (search → open on request); then confirm UX / `open_app` / `focus_app`.  
@@ -144,8 +144,8 @@ Yes: `retrieve → act → verify`.
 
 | Tool | Status |
 |---|---|
-| `open_path` | **Done** (`core/os_actions.py` + agent tool) |
-| `open_url` | **Done** (`core/os_actions.py` + agent tool) |
+| `open_path` | **Dropped from MCP/agent** — host opens paths; `core/os_actions.py` remains for probes only |
+| `open_url` | **Dropped from MCP/agent** — same |
 | `verify_foreground` / `open_*_and_verify` | **Done** (patient across Open-with) |
 | `find_files` / `remember_workspace_root` / trusted folders | **Done** (`core/fs_search.py`, `core/workspace_roots.py`, Settings → Privacy) |
 | `open_app` / `focus_app` / `reveal_in_folder` | Later |

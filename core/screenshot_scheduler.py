@@ -292,17 +292,27 @@ def _capture_if_not_recent() -> None:
     capture_screenshot(now_ms)
 
 def purge_expired_screenshots() -> None:
-    # Filenames begin with epoch milliseconds, keeping cleanup portable across
-    # filesystems with different birth-time semantics.
-    retention_days = get_capture_settings()["screenshot_retention_days"]
-    cutoff_ms = int(time.time() * 1000) - int(retention_days * 86400 * 1000)
+    # Filenames begin with epoch milliseconds. Base retention is short; frames
+    # linked to high-signal events get an adaptive TTL (see screenshot_ttl).
+    # OCR remains on events.vision_ocr_text after the JPEG is deleted.
+    from core.screenshot_ttl import should_purge_screenshot
+
+    settings = get_capture_settings()
+    now_ms = int(time.time() * 1000)
+    base_days = settings["screenshot_retention_days"]
+    flat_cutoff_ms = now_ms - int(base_days * 86400 * 1000)
     for path in _SCREENSHORT_DIR.glob("*.jpg"):
         try:
             ts_part = path.stem.split("_")[0]
-            if int(ts_part) < cutoff_ms:
-                path.unlink()
-                path.with_suffix(".ocr-crop.json").unlink(missing_ok=True)
-                path.with_suffix(".a11y.txt").unlink(missing_ok=True)
+            ts_ms = int(ts_part)
+            # Still inside the base window — always keep.
+            if ts_ms >= flat_cutoff_ms:
+                continue
+            if not should_purge_screenshot(path, settings=settings, now_ms=now_ms):
+                continue
+            path.unlink()
+            path.with_suffix(".ocr-crop.json").unlink(missing_ok=True)
+            path.with_suffix(".a11y.txt").unlink(missing_ok=True)
         except ValueError:
             continue
         except Exception as e:

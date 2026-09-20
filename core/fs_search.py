@@ -324,8 +324,8 @@ def find_files(
         "truncated": truncated or len(matches) >= limit,
         "elapsed_ms": int((time.time() - t0) * 1000),
         "hint": (
-            "Call open_path with one absolute path from matches. "
-            "If multiple matches, ask the user which one."
+            "Return absolute paths to the user/host agent; Clippy does not open files. "
+            "If multiple matches, ask which one."
             if matches
             else "No matches. Try a shorter substring, or remember_workspace_root with a better folder."
         ),

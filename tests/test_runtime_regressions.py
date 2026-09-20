@@ -1319,39 +1319,6 @@ class RuntimeRegressionTests(unittest.TestCase):
         summarizer_mod._refresh_failures.clear()
 
 
-class RetrieveAnswerHarnessTests(unittest.TestCase):
-    """Retrieve → evidence-card → answer helpers (no LLM)."""
-
-    def test_cap_tool_result_truncates_hard(self):
-        from agent.react_agent import MAX_TOOL_RESULT_CHARS, _cap_tool_result
-
-        capped = _cap_tool_result("x" * (MAX_TOOL_RESULT_CHARS + 4000))
-        self.assertLessEqual(len(capped), MAX_TOOL_RESULT_CHARS + 120)
-        self.assertIn("truncated", capped)
-
-    def test_evidence_card_ranks_question_terms(self):
-        from agent.react_agent import MAX_EVIDENCE_CARD_CHARS, _build_evidence_card
-
-        payload = "\n".join([
-            "[activity summaries]",
-            "---",
-            "summary: Clippy Vision computer-use agent work on screen_capture.py",
-            "---",
-            "summary: Oasis scheduling calendar research",
-            "---",
-            "summary: grocery list and unrelated email",
-        ])
-        card = _build_evidence_card(
-            "What did I do on Clippy Vision this week with Oasis?",
-            [("search_sessions", payload)],
-        )
-        self.assertLessEqual(len(card), MAX_EVIDENCE_CARD_CHARS)
-        self.assertIn("Clippy Vision", card)
-        self.assertIn("Oasis", card)
-        # Matched topic blocks should appear before the unrelated grocery line.
-        self.assertLess(card.find("Clippy Vision"), card.find("grocery"))
-
-
 class WorkspaceRootsAndFindFilesTests(unittest.TestCase):
     """Trusted folders + bounded filesystem search."""
 
@@ -1392,9 +1359,6 @@ class WorkspaceRootsAndFindFilesTests(unittest.TestCase):
     def test_find_files_requires_trusted_root(self):
         from core import fs_search
 
-        # Search with no overlapping trusted root and a path outside home bootstrap
-        # is covered by under= bootstrap under home — use a missing name under empty roots.
-        # Clear any roots created by other tests that might include this tmp path.
         result = fs_search.find_files(
             "no_such_unique_file_zz99.py",
             under=str(self.root / "does_not_exist"),
@@ -1407,6 +1371,147 @@ class WorkspaceRootsAndFindFilesTests(unittest.TestCase):
         target = self.core / "screenshot_processor.py"
         inferred = infer_project_root(target)
         self.assertEqual(inferred, self.proj)
+
+
+class MemoryFreshnessTests(unittest.TestCase):
+    def test_agent_fact_outranks_recovered_placeholder(self):
+        from core.memory_freshness import fact_freshness
+
+        now = time.time()
+        agent = fact_freshness(
+            text="User is building Clippy Vision MCP tools for Cursor",
+            source="agent",
+            valid_from=now - 86400,
+            created_at=now - 86400,
+            cluster_label="projects",
+            now=now,
+        )
+        junk = fact_freshness(
+            text="unknown",
+            source="distiller",
+            valid_from=now - 86400 * 40,
+            created_at=now - 86400 * 40,
+            cluster_label="recovered_ocr_dump",
+            now=now,
+        )
+        self.assertGreater(agent, 0.5)
+        self.assertLess(junk, 0.05)
+        self.assertGreater(agent, junk * 10)
+
+    def test_recall_hides_recovered_by_default(self):
+        from agent.memory import recall_memory
+        from core.storage import conn
+
+        stamp = time.time()
+        conn.execute(
+            """INSERT OR REPLACE INTO memory_clusters
+               (cluster_id, label, description, centroid, created_at, updated_at, fact_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            ("fresh-c", "job_search", "active", "[]", stamp, stamp, 1),
+        )
+        conn.execute(
+            """INSERT OR REPLACE INTO memory_clusters
+               (cluster_id, label, description, centroid, created_at, updated_at, fact_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            ("junk-c", "recovered_noise", "junk", "[]", stamp, stamp, 1),
+        )
+        conn.execute(
+            """INSERT OR REPLACE INTO memory_facts
+               (fact_id, cluster_id, text, vector_embedding, valid_from, source, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            ("fresh-f", "fresh-c", "Applied to Greenhouse roles this week", "[]", stamp, "agent", stamp),
+        )
+        conn.execute(
+            """INSERT OR REPLACE INTO memory_facts
+               (fact_id, cluster_id, text, vector_embedding, valid_from, source, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            ("junk-f", "junk-c", "unknown", "[]", stamp - 86400 * 60, "distiller", stamp - 86400 * 60),
+        )
+        conn.commit()
+
+        listed = recall_memory(include_stale=False)
+        self.assertIn("job_search", listed)
+        self.assertNotIn("recovered_noise", listed)
+        stale = recall_memory(include_stale=True)
+        self.assertIn("recovered_noise", stale)
+
+
+class AdaptiveScreenshotTTLTests(unittest.TestCase):
+    def test_high_interest_keeps_longer_than_base(self):
+        from core.screenshot_ttl import keep_score_from_event, ttl_days_for_score
+
+        settings = {
+            "screenshot_retention_days": 1,
+            "screenshot_retention_max_days": 7,
+            "raw_retention_days": 7,
+        }
+        boring = keep_score_from_event({
+            "interesting": 0,
+            "interest_score": 0,
+            "active_url": "",
+            "event_type": "screenshot_analysis",
+        })
+        salient = keep_score_from_event({
+            "interesting": 1,
+            "interest_score": 0.9,
+            "active_url": "https://example.com/page",
+            "event_type": "paste",
+        })
+        self.assertLess(boring, 0.2)
+        self.assertGreater(salient, 0.7)
+        self.assertAlmostEqual(ttl_days_for_score(boring, settings), 1.0, places=1)
+        self.assertGreater(ttl_days_for_score(salient, settings), 5.0)
+
+    def test_get_screenshot_falls_back_to_ocr(self):
+        from core.screenshot_ttl import get_screenshot_payload
+        from core.storage import conn, store_event
+
+        stamp = time.time()
+        fname = f"{int(stamp * 1000)}_missing.jpg"
+        event = make_event(f"ocr-fallback-{int(stamp)}", event_type="screenshot_analysis", timestamp=stamp)
+        event["screenshot_filename"] = fname
+        event["interesting"] = True
+        event["interest_score"] = 0.8
+        event["window_context"] = {
+            "timestamp": stamp,
+            "current_window_title": "Confirm",
+            "active_url": "https://example.com/confirm",
+            "process_name": "chrome.exe",
+        }
+        store_event(event)
+        conn.execute(
+            "UPDATE events SET vision_ocr_text = ? WHERE event_id = ?",
+            ("Application submitted successfully", event["event_id"]),
+        )
+        conn.commit()
+        payload = get_screenshot_payload(filename=fname)
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["image_available"])
+        self.assertIn("Application submitted", payload["ocr_text"])
+
+
+class McpQueryHelpersTests(unittest.TestCase):
+    def test_activity_coverage_and_urls(self):
+        from agent.mcp_query import activity_coverage, list_urls, parse_time_bound
+        from core.storage import store_event
+
+        day = "2099-01-15"
+        start = parse_time_bound(day)
+        stamp = start + 3600
+        event = make_event("cov-1", event_type="context_change", timestamp=stamp)
+        event["window_context"] = {
+            "timestamp": stamp,
+            "current_window_title": "Clippy",
+            "active_url": "https://boards.greenhouse.io/x/confirmation",
+            "process_name": "Code.exe",
+        }
+        store_event(event)
+        cov = activity_coverage(day, day, bucket_hours=1.0)
+        self.assertTrue(cov["ok"])
+        self.assertGreaterEqual(cov["total_events"], 1)
+        urls = list_urls(pattern="greenhouse", start=day, end=day)
+        self.assertTrue(urls["ok"])
+        self.assertTrue(any("greenhouse" in u["url"].lower() for u in urls["urls"]))
 
 
 if __name__ == "__main__":

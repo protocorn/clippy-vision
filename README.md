@@ -1,4 +1,4 @@
-﻿# Clippy Vision
+# Clippy Vision
 
 > **A local, free, auditable memory layer for your AI agents — and a local LLM chat you can talk to yourself.** It watches your work on-device, stores it privately, and lets you use that memory two ways: through MCP (Cursor, Claude Desktop, VS Code, or any MCP client), or directly in Clippy's own chat with a local model. MCP is optional; the app works without it.
 
@@ -247,20 +247,24 @@ Each category has a dedicated prefetch module. Context is retrieved in parallel 
 
 ---
 
-### Segment 5 - The Agent
+### Segment 5 - Asking about your history (MCP)
 
-A **ReAct agent** (`agent/react_agent.py`) with function calling. Tools available:
+Clippy Vision is the **capture + memory layer**. Conversational Q&A is meant to happen in a bigger model via **MCP** (Cursor, Claude Desktop, etc.):
 
-| Tool | Description |
+| MCP tool | Description |
 |------|-------------|
-| `search_sessions` | SQL queries against the sessions/summaries table |
-| `search_events` | SQL queries against the raw events table |
-| `recall_memory` | Lists all memory cluster labels |
-| `fetch_cluster` | Fetches facts from a specific cluster |
-| `save_identity` | Saves autobiographical details |
-| `save_note` | Saves explicit things the user wants remembered |
+| `search_sessions_tool` / `search_events_tool` | NL search (sessions / raw events) |
+| `search_bounded_tool` | Keyword search with explicit `start`/`end` + pagination |
+| `list_sessions_tool` | Chronological deduped sessions for a time window |
+| `activity_coverage_tool` | Hourly event counts (honest capture gaps) |
+| `app_time_summary_tool` | Approximate per-app time in a window |
+| `list_urls_tool` | Distinct URLs (optional pattern filter) |
+| `list_screenshots_tool` / `get_screenshot_tool` | Frames when on disk; OCR backup after adaptive TTL |
+| `recall_memory_tool` / `fetch_cluster_tool` | Long-term memory (freshness-ranked; hides recovered junk by default) |
+| `save_identity_tool` / `save_note_tool` / `delete_note_tool` | Explicit memory writes |
+| `find_files_tool` / `list_workspace_roots_tool` | Trusted filesystem path recall (host opens files/URLs) |
 
-Prompt components: conversation history (last 8 turns + rolling summaries), user profile, top-8 memory facts by semantic similarity, and prefetched context from the router.
+Connect under **Settings → Connect apps**. Timeline, privacy, and capture controls stay in this desktop app. There is no in-app ReAct chat agent.
 
 ---
 
@@ -289,7 +293,7 @@ FTS5 virtual tables on `events` and `sessions` enable full-text search across al
 - Clippy Vision's own window is blacked out in screenshots before any AI model sees them.
 - You can toggle data capture on/off at any time from the tray icon.
 - Per-app redaction is in progress for WhatsApp, Telegram, Signal, incognito windows, and similar targets. Matching is not reliable enough yet outside Clippy's own window, so capture on/off is the dependable privacy switch today.
-- Captured data has TTLs: raw events expire after 7 days, session summaries after 90 days.
+- Captured data has TTLs: raw events expire after 7 days, session summaries after 90 days. Screenshots default to 1 day; high-signal frames (interesting flag, interest score, URL present, clipboard/paste) can live up to `screenshot_retention_max_days` (default 7). OCR text on events remains after the JPEG is purged.
 - The local API binds to `127.0.0.1` on a port chosen at launch, so it is never reachable from your network.
 
 **The one outbound request:** Clippy Vision checks the public GitHub releases page for a newer version, at most once every 12 hours. It sends no chat, screen, profile, or account data — only the request itself, like opening the releases page in a browser. Turn it off any time under **Settings → Updates**.

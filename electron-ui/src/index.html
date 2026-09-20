@@ -37,18 +37,10 @@
   <div id="app-shell" class="view">
     <header id="app-header" style="display:flex; justify-content:space-between; align-items:center;">
       <div class="header-actions">
-        <button id="drawer-toggle" class="header-btn icon-label-btn" title="View previous chats">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
-          <span>Chats</span>
-        </button>
-        <button type="button" id="app-brand" class="app-brand" title="Back to chat">Clippy Vision</button>
+        <!-- ARCHIVED: Chats drawer + New Chat — see archive/in_app_chat/ -->
+        <button type="button" id="app-brand" class="app-brand" title="Day cards home">Clippy Vision</button>
       </div>
       <div class="header-actions">
-        <button id="new-chat-btn" class="header-btn icon-label-btn" title="Start a new chat">
-          <svg class="new-chat-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-          <span class="new-chat-label">New Chat</span>
-          <svg class="new-chat-goto-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-        </button>
         <div class="nav-more" id="nav-more">
           <button type="button" id="nav-more-btn" class="header-btn" aria-haspopup="true" aria-expanded="false" title="More">
             More
@@ -75,46 +67,37 @@
     </div>
 
     <div id="app-panels">
-      <!-- Chat / message panel -->
-      <div id="chat-view" class="app-panel active">
-        <div id="chat-layout">
-          <div id="drawer-backdrop"></div>
-          <aside id="conv-drawer">
-            <div class="drawer-header">
-              <span>Conversations</span>
-              <button id="drawer-close" aria-label="Close">✕</button>
+      <!-- Insight cards home (in-app chat archived → archive/in_app_chat/) -->
+      <div id="insights-view" class="app-panel active">
+        <div class="insights-shell">
+          <div class="insights-toolbar">
+            <div class="insights-day-nav">
+              <button type="button" id="insights-prev-day" class="header-btn" title="Previous day">←</button>
+              <h1 id="insights-date-label" class="insights-date-label">Today</h1>
+              <button type="button" id="insights-next-day" class="header-btn" title="Next day">→</button>
             </div>
-            <div class="drawer-search-wrap">
-              <input id="conv-search" type="search" placeholder="Search chats…" autocomplete="off" />
-              <div id="conv-search-hint" class="conv-search-hint"></div>
+            <div class="insights-toolbar-actions">
+              <button type="button" id="insights-threads-btn" class="header-btn" aria-expanded="false">
+                Threads in motion
+              </button>
+              <button type="button" id="insights-refresh-btn" class="header-btn" title="Regenerate day card">
+                Refresh
+              </button>
             </div>
-            <div id="conv-list"></div>
-          </aside>
-
-          <div id="chat-main" class="is-welcome">
-            <div id="welcome-screen" class="welcome-screen">
-              <div class="welcome-brand">
-                <img class="welcome-logo" src="../assets/logo_active.png" alt="" />
-                <h1 class="welcome-title">Clippy Vision</h1>
-                <p class="welcome-sub">Sees what you do. Remembers what you don't.</p>
+          </div>
+          <p id="insights-status" class="insights-status" aria-live="polite"></p>
+          <div class="insights-scroll">
+            <article id="insights-day-body" class="insights-card-body message-body md"></article>
+            <section id="insights-threads-panel" class="insights-threads-panel" hidden>
+              <div class="insights-threads-head">
+                <h2>Threads in motion</h2>
+                <button type="button" id="insights-threads-refresh" class="header-btn">Refresh threads</button>
               </div>
-              <div class="welcome-composer">
-                <textarea id="welcome-input" rows="2" placeholder="How can I help you today?" autocomplete="off"
-                  maxlength="4000"></textarea>
-                <div class="welcome-composer-bar">
-                  <span id="welcome-char-count" class="char-count" aria-live="polite"></span>
-                  <button type="button" id="welcome-send">Send</button>
-                </div>
-              </div>
-            </div>
-
-            <div id="messages"></div>
-
-            <div id="input-row">
-              <textarea id="input-box" rows="1" placeholder="Ask Clippy..." maxlength="4000"></textarea>
-              <span id="input-char-count" class="char-count" aria-live="polite"></span>
-              <button id="send-btn">Send</button>
-            </div>
+              <div id="insights-threads-body" class="insights-card-body message-body md"></div>
+            </section>
+            <p class="insights-footnote">
+              Ask deeper questions by connecting via MCP (Settings → Connect apps).
+            </p>
           </div>
         </div>
       </div>
@@ -202,7 +185,8 @@
               <h3 class="settings-subhead" style="margin-top: 22px;">Trusted folders</h3>
               <p class="settings-hint">
                 Clippy may search these folders on disk when you ask it to find or open a file.
-                Activity history alone is not enough — add project roots here (or tell Clippy in chat).
+                Activity history alone is not enough — add project roots here
+                (or ask your MCP client to call remember_workspace_root when that tool is exposed).
               </p>
               <div id="workspace-roots-list" class="privacy-list"></div>
               <div class="settings-field" style="margin-top: 12px;">

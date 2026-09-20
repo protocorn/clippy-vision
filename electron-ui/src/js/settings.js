@@ -1,5 +1,5 @@
 ﻿import {
- settingsView, chatView, chatMain, welcomeInput, inputBox, settingsName, settingsIntro,
+ settingsView, insightsView, settingsName, settingsIntro,
  identityFields, identityNewKey, identityNewVal, identityAddBtn, profileStatus,
  updateCheckToggle, updatesStatus, aboutVersion, aboutPlatform, aboutModel, aboutMemory,
  aboutBadge, privacyList, privacyStatus, privacyCount, workspaceRootsList, workspaceRootInput,
@@ -9,7 +9,7 @@
  store, updateBanner,
 } from './dom.js'
 import { showView, setStatus } from './utils.js'
-import { closeDrawer } from './conversations.js'
+import { openInsights } from './insights.js'
 
 let profileSaveInFlight = false
 
@@ -440,15 +440,12 @@ export async function saveProfile({ statusText = 'Saved.' } = {}) {
 }
 
 export async function openSettings() {
- closeDrawer()
  showView(settingsView)
  await loadSettings()
 }
 
 export function closeSettings() {
- showView(chatView)
- if (chatMain.classList.contains('is-welcome')) welcomeInput.focus()
- else inputBox.focus()
+ openInsights()
 }
 
 export async function saveUpdateCheck() {

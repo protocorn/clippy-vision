@@ -1,6 +1,6 @@
-import { timelineView, chatView, chatMain, welcomeInput, inputBox, timelineBody, timelineList, timelineLoadMore, timelineDetailWrap, timelineDetailScroll, timelineDetailContent, TIMELINE_PAGE_SIZE, store } from './dom.js'
+import { timelineView, timelineBody, timelineList, timelineLoadMore, timelineDetailWrap, timelineDetailScroll, timelineDetailContent, TIMELINE_PAGE_SIZE, store } from './dom.js'
 import { showView, startOfDay, formatConversationTime } from './utils.js'
-import { closeDrawer } from './conversations.js'
+import { openInsights } from './insights.js'
 
 const APP_ICON_COLORS = [
  '#c9a24a', '#5b8def', '#5cbf8a', '#d67a8a', '#9b7bff', '#e07a5f', '#4db6ac', '#81a1c1',
@@ -412,7 +412,6 @@ export async function loadTimelineSessions({ reset = false } = {}) {
 }
 
 export async function openTimeline() {
- closeDrawer()
  closeTimelineDetail()
  showView(timelineView)
  await loadTimelineSessions({ reset: true })
@@ -420,7 +419,5 @@ export async function openTimeline() {
 
 export function closeTimeline() {
  closeTimelineDetail()
- showView(chatView)
- if (chatMain.classList.contains('is-welcome')) welcomeInput.focus()
- else inputBox.focus()
+ openInsights()
 }

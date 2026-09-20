@@ -6,7 +6,6 @@ from typing import Optional
 from core.distil import save_note_to_memory
 from core.local_embeddings import embed_text
 from core.memory_store import (
-    get_active_facts,
     get_all_clusters,
     get_identity,
     get_identity_for_semantic_profile,
@@ -38,9 +37,15 @@ def _cosine_sim(a: list, b: list) -> float:
 def semantic_memory_context_from_vec(q_vec: list) -> str:
     """Same as semantic_memory_context but accepts a pre-computed query vector.
     Use this when the caller has already embedded the query to avoid a second embed call."""
+    from core.memory_freshness import (
+        combined_score,
+        fact_freshness,
+        unresolved_conflict_fact_ids,
+    )
+
     rows = conn.execute("""
         SELECT f.fact_id, f.text, f.vector_embedding, f.cluster_id,
-               c.label, c.description
+               c.label, c.description, f.source, f.valid_from, f.created_at
         FROM memory_facts f
         JOIN memory_clusters c ON c.cluster_id = f.cluster_id
         WHERE f.valid_to IS NULL
@@ -49,14 +54,26 @@ def semantic_memory_context_from_vec(q_vec: list) -> str:
     if not rows:
         return ""
 
+    conflict_ids = unresolved_conflict_fact_ids(conn)
+    now = time.time()
     scored = []
-    for fact_id, text, vec_json, cluster_id, label, description in rows:
+    for fact_id, text, vec_json, cluster_id, label, description, source, valid_from, created_at in rows:
         if not vec_json:
             continue
         f_vec = json.loads(vec_json)
         sim = _cosine_sim(q_vec, f_vec)
         if sim >= MEMORY_MIN_SIM:
-            scored.append((sim, text, cluster_id, label, description))
+            fresh = fact_freshness(
+                text=text,
+                source=source,
+                valid_from=valid_from,
+                created_at=created_at,
+                cluster_label=label,
+                in_unresolved_conflict=fact_id in conflict_ids,
+                now=now,
+            )
+            score = combined_score(sim, fresh)
+            scored.append((score, text, cluster_id, label, description))
 
     if not scored:
         return ""
@@ -65,13 +82,13 @@ def semantic_memory_context_from_vec(q_vec: list) -> str:
     top = scored[:MEMORY_TOP_K]
 
     seen_clusters: dict[str, dict] = {}
-    for sim, text, cluster_id, label, description in top:
+    for score, text, cluster_id, label, description in top:
         if cluster_id not in seen_clusters:
             seen_clusters[cluster_id] = {
                 "label": label, "description": description,
-                "facts": [], "max_sim": sim
+                "facts": [], "max_sim": score
             }
-        seen_clusters[cluster_id]["facts"].append((sim, text))
+        seen_clusters[cluster_id]["facts"].append((score, text))
 
     clusters_ordered = sorted(
         seen_clusters.values(), key=lambda c: c["max_sim"], reverse=True
@@ -161,26 +178,124 @@ def get_autobiographical_context(q_vec: list | None = None) -> str:
 
     return "\n".join(lines) if lines else "No profile data yet. Ask the user to share more about themselves."
 
-def recall_memory() -> str:
-    """List clusters for the recall_memory tool."""
+def recall_memory(
+    query: str = "",
+    include_stale: bool = False,
+    min_freshness: float | None = None,
+) -> str:
+    """List clusters for the recall_memory tool, ranked by freshness.
+
+    By default hides recovered_* clusters and those whose best active fact
+    freshness is below min_freshness (0.20). Pass include_stale=True to see all.
+    Optional query runs a semantic memory_query instead of a full listing.
+    """
+    from core.memory_freshness import (
+        DEFAULT_MIN_CLUSTER_FRESHNESS,
+        cluster_freshness_summary,
+        is_recovered_label,
+        unresolved_conflict_fact_ids,
+    )
+
+    if (query or "").strip():
+        from agent.prefetch.memory_query import memory_query
+        return memory_query(query.strip())
+
     clusters = get_all_clusters()
     if not clusters:
         return "No memory clusters yet."
-    lines = ["Memory clusters:"]
+
+    conflict_ids = unresolved_conflict_fact_ids(conn)
+    now = time.time()
+    floor = (
+        DEFAULT_MIN_CLUSTER_FRESHNESS
+        if min_freshness is None
+        else max(0.0, min(1.0, float(min_freshness)))
+    )
+
+    scored_clusters = []
     for c in clusters:
-        lines.append(f"  [{c['label']}] {c['description']} ({c['fact_count']} facts)")
+        rows = conn.execute(
+            """SELECT fact_id, text, source, valid_from, created_at
+               FROM memory_facts
+               WHERE cluster_id = ? AND valid_to IS NULL""",
+            (c["cluster_id"],),
+        ).fetchall()
+        facts = [
+            {
+                "fact_id": r[0],
+                "text": r[1],
+                "source": r[2],
+                "valid_from": r[3],
+                "created_at": r[4],
+                "label": c["label"],
+            }
+            for r in rows
+        ]
+        summary = cluster_freshness_summary(facts, conflict_ids=conflict_ids, now=now)
+        scored_clusters.append((summary["ranking"], summary["max"], c, summary))
+
+    scored_clusters.sort(key=lambda x: x[0], reverse=True)
+
+    lines = ["Memory clusters (ranked by freshness):"]
+    shown = 0
+    hidden = 0
+    for _rank, mx, c, summary in scored_clusters:
+        if not include_stale:
+            if is_recovered_label(c["label"]) or mx < floor:
+                hidden += 1
+                continue
+        lines.append(
+            f"  [{c['label']}] {c['description']} "
+            f"({c['fact_count']} facts, freshness={mx:.2f})"
+        )
+        shown += 1
+
+    if shown == 0:
+        return (
+            "No fresh memory clusters matched. "
+            "Retry with include_stale=true to see recovered/low-freshness clusters."
+        )
+    if hidden:
+        lines.append(f"  ({hidden} stale/recovered clusters hidden — pass include_stale=true to show)")
     return "\n".join(lines)
 
-def fetch_cluster(label: str) -> str:
-    """Get all facts in a named cluster."""
+
+def fetch_cluster(label: str, include_stale_facts: bool = True) -> str:
+    """Get facts in a named cluster, annotated with freshness."""
+    from core.memory_freshness import fact_freshness, unresolved_conflict_fact_ids
+
     clusters = get_all_clusters()
     match = next((c for c in clusters if c["label"].lower() == label.strip().lower()), None)
     if not match:
         return f"No cluster found with label '{label}'."
-    facts = get_active_facts(match["cluster_id"])
-    if not facts:
+    rows = conn.execute(
+        """SELECT fact_id, text, source, valid_from, created_at
+           FROM memory_facts
+           WHERE cluster_id = ? AND valid_to IS NULL
+           ORDER BY valid_from DESC""",
+        (match["cluster_id"],),
+    ).fetchall()
+    if not rows:
         return f"Cluster '{label}' exists but has no active facts."
-    return "\n".join(f"- {f}" for f in facts)
+    conflict_ids = unresolved_conflict_fact_ids(conn)
+    now = time.time()
+    lines = []
+    for fact_id, text, source, valid_from, created_at in rows:
+        fresh = fact_freshness(
+            text=text,
+            source=source,
+            valid_from=valid_from,
+            created_at=created_at,
+            cluster_label=match["label"],
+            in_unresolved_conflict=fact_id in conflict_ids,
+            now=now,
+        )
+        if not include_stale_facts and fresh < 0.15:
+            continue
+        lines.append(f"- ({fresh:.2f}) {text}")
+    if not lines:
+        return f"Cluster '{label}' has no fresh facts (try include_stale_facts=true)."
+    return "\n".join(lines)
 
 def save_identity(field: str, value: str = "", op: str = "set", items: list[str] | None = None) -> str:
     return save_identity_field(field, value=value, source="agent", op=op, items=items)

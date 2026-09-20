@@ -1,3 +1,8 @@
+/**
+ * ARCHIVED — in-app chat UI.
+ * Live home is insight cards. Restore notes: archive/in_app_chat/README.md
+ * Original path: electron-ui/src/js/chat.js
+ */
 import { messages, inputBox, sendBtn, welcomeInput, welcomeSend, welcomeCharCount, inputCharCount, nameInput, nameSubmit, nameError, nameView, chatView, chatMain, USER_MESSAGE_MAX_CHARS, store } from './dom.js'
 import { showView, updateCharCount } from './utils.js'
 import { syncDrawerLayout, refreshConversationList, highlightActiveConversation, closeDrawer } from './conversations.js'
