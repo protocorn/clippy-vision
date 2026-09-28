@@ -266,7 +266,7 @@ FTS5 virtual tables on `events` and `sessions` enable full-text search across al
 - Per-app redaction blacks out windows you choose in Settings, including Instagram, WhatsApp, Telegram, Signal, Slack, Discord, and private browsing. Capture on/off is still the switch when you want nothing stored.
 
 <p align="center">
-  <img src="assets/instagram-redaction.jpg" alt="Instagram login with the private area blacked out in a Clippy capture" width="720" />
+  <img src="assets/instagram-redaction.jpg" alt="Instagram login with the password field blacked out in a Clippy capture" width="720" />
 </p>
 - Captured data has TTLs: raw events expire after 7 days, session summaries after 90 days. Screenshots default to 1 day; high-signal frames (interesting flag, interest score, URL present, clipboard/paste) can live up to `screenshot_retention_max_days` (default 7). OCR text on events remains after the JPEG is purged.
 - The local API binds to `127.0.0.1` on a port chosen at launch, so it is never reachable from your network.
