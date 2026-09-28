@@ -6,8 +6,9 @@ import time
 from pathlib import Path
 from typing import Optional
 
-if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+_REPO = Path(__file__).resolve().parents[2]
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
 
 from agent.helpers.keywords import content_keywords, keywords_from_query
 from core.local_embeddings import embed_text

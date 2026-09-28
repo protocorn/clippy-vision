@@ -357,7 +357,7 @@ def _rolling_window_delta(n: int, unit: str) -> tuple[timedelta, str]:
 
 
     # parsedatetime has no month arithmetic; 30-day blocks are close enough
-    # for prefetch windowing — callers still clip to now via _finalize().
+    # for search windowing — callers still clip to now via _finalize().
     return timedelta(days=30 * n), "month"
 
 

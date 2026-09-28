@@ -1,11 +1,14 @@
-import os
 import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_HERE = Path(__file__).resolve().parent
+_REPO = _HERE.parents[1]
+sys.path.insert(0, str(_REPO))
+sys.path.insert(0, str(_HERE))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from agent.helpers.time_resolver import resolve_temporal_range
-from agent.prefetch.specific_recall import (
+from specific_recall import (
     detect_artifact_type,
     detect_recency_hint,
     keywords_from_query,

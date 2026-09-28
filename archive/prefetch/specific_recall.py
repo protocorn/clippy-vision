@@ -1,11 +1,20 @@
 import json
 import re
+import sys
 import time
+from pathlib import Path
 
-from agent.helpers.detect_recency import detect_recency_hint
+_HERE = Path(__file__).resolve().parent
+_REPO = _HERE.parents[1]
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+from detect_recency import detect_recency_hint
 from agent.helpers.keywords import STOPWORDS, content_keywords, keywords_from_query
 from agent.helpers.time_resolver import resolve_temporal_range
-from agent.prefetch.topic_search import cosine_similarity
+from topic_search import cosine_similarity
 from core.screenshot_search import resolve_screenshot_filename
 
 # Ensure events / events_fts tables exist before we touch the index

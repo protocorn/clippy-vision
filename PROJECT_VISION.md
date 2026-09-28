@@ -21,8 +21,8 @@ No fixed timeline, ordered by priority rather than by date.
 - [x] Screen capture for Windows
 - [x] Context building using `qwen3:8b` (early releases also used `qwen3-vl:4b` on screenshots; that path is gone)
 - [x] Hierarchical memory handling
-- [x] Intent detection and query routing
-- [x] ReAct agent for data retrieval and answering
+- [x] Intent detection and query routing (removed from the live app; the classifier and prefetch strategies are in `archive/`)
+- [x] ReAct agent for data retrieval and answering (in-app agent removed; ask through MCP)
 
 **Version 1.1.0 (Shipped)**
 - [x] Delete option for conversations (chats with agent)
@@ -48,6 +48,7 @@ No fixed timeline, ordered by priority rather than by date.
 
 **Version 1.3.1 (Current)**
 - [x] Runtime LLM calls respect the chat model chosen in setup (`CLIPPY_CHAT_MODEL` / `llm_config.json`) instead of always requesting hardcoded `qwen3:8b`, which caused Ollama to auto-pull qwen3 even when another model was already configured.
+- [x] Questions go through MCP tools (`search_sessions`, `search_events`, `recall_memory`). The query router and the old prefetch strategies (specific recall, time anchor, topic search) are archived. Semantic memory search stays in `agent/prefetch/memory_query.py`.
 
 **Planned next, ordered by priority**
 

@@ -1,4 +1,5 @@
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -6,7 +7,6 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from agent.prefetch.topic_search import cosine_similarity
 from core.local_embeddings import embed_text
 from core.memory_freshness import (
     combined_score,
@@ -18,6 +18,13 @@ from core.storage import conn
 MEMORY_TOP_K     = 8
 MEMORY_MIN_SIM   = 0.55
 CLUSTER_GATE_SIM = 0.38
+
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
 
 def _fetch_memory(q_vec: list) -> str:
     cluster_rows =  conn.execute("""

@@ -9,11 +9,15 @@ import sys
 import time
 from pathlib import Path
 
-if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+_HERE = Path(__file__).resolve().parent
+_REPO = _HERE.parents[1]
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
 
 from agent.helpers.time_resolver import TemporalRange, resolve_temporal_range
-from agent.prefetch.topic_search import cosine_similarity
+from topic_search import cosine_similarity
 from core.storage import conn
 
 EVENT_TIER_MAX_SECONDS = 7200  # 2 hours'

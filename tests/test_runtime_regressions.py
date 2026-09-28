@@ -22,12 +22,6 @@ from PIL import Image
 from agent.helpers.time_resolver import resolve_temporal_range
 from agent.memory import get_autobiographical_context
 from agent.prefetch.memory_query import memory_query
-from agent.prefetch.specific_recall import (
-    detect_artifact_type,
-    search_events_for_artifact,
-    specific_recall,
-)
-from agent.prefetch.topic_search import topic_search
 from classifier.tier_two_classifier import VERDICT_SCHEMA
 from classifier.worker import apply_verdict, apply_vision_verdict
 from core import rag
@@ -246,24 +240,6 @@ class RuntimeRegressionTests(unittest.TestCase):
             result = memory_query("what do you know about me?", q_vec=[1.0])
         self.assertEqual(result, "semantic memory facts")
 
-    def test_screen_keyword_miss_does_not_fall_back_to_recent_frames(self):
-        event = make_event("unrelated-screen", event_type="screenshot_analysis")
-        event["summary"] = "an unrelated captured frame"
-        store_event(event)
-
-        def cleanup_event():
-            conn.execute("DELETE FROM events WHERE event_id=?", (event["event_id"],))
-            conn.commit()
-
-        self.addCleanup(cleanup_event)
-
-        results = search_events_for_artifact(
-            "screen",
-            ["review_token_that_does_not_exist_1739"],
-        )
-
-        self.assertEqual(results, [])
-
     def test_exact_numeric_datetime_resolves_to_instant(self):
         result = resolve_temporal_range(
             "screenshot from 8/4/2026, 1:12:29 PM",
@@ -274,45 +250,6 @@ class RuntimeRegressionTests(unittest.TestCase):
         expected = datetime(2026, 8, 4, 13, 12, 29).timestamp()
         self.assertEqual(result.start_ts, expected - 2)
         self.assertEqual(result.end_ts, expected + 2)
-
-    def test_exact_screenshot_recall_uses_only_matching_frame(self):
-        stamp = datetime(2026, 8, 4, 13, 12, 29).timestamp()
-        path = get_screenshots_dir() / f"{int(stamp * 1000)}.jpg"
-        Image.new("RGB", (3, 3), "white").save(path, format="JPEG")
-        event = make_event("exact-screenshot", event_type="screenshot_analysis", timestamp=stamp)
-        event["window_context"]["process_name"] = "Clippy Vision"
-        event["window_context"]["current_window_title"] = "New chat"
-        event["summary"] = "Clippy Vision conversation drawer"
-        event["screenshot_filename"] = path.name
-        store_event(event)
-        conn.execute(
-            "UPDATE events SET vision_ocr_text=? WHERE event_id=?",
-            ("New chat Conversations", event["event_id"]),
-        )
-        conn.commit()
-
-        temporal_range = resolve_temporal_range(
-            "screenshot from 8/4/2026, 1:12:29 PM",
-            now=datetime(2026, 8, 4, 14, 0, 0),
-        )
-        result = specific_recall(
-            "What was I doing in the screenshot from 8/4/2026, 1:12:29 PM?",
-            temporal_range=temporal_range,
-        )
-        self.assertEqual(detect_artifact_type("that screenshot"), "screen")
-        self.assertIn("exact screenshot evidence", result)
-        self.assertIn("app: Clippy Vision", result)
-        self.assertIn("window: New chat", result)
-        self.assertIn(f"screenshot_source: {path.name}", result)
-
-    def test_topic_search_falls_back_to_event_rag_without_sessions(self):
-        event = make_event("topic-event-fallback", event_type="context_change")
-        event["summary"] = "quasarneedle project planning"
-        store_event(event)
-        with patch("core.rag.get_capture_settings", return_value={"rag_enabled": True}):
-            result = topic_search("quasarneedle", q_vec=None)
-        self.assertIn("event-level activity fallback", result)
-        self.assertIn("quasarneedle", result)
 
     def test_profile_context_is_not_duplicated_in_memory_prefetch(self):
         set_user_name("Profile Test User")

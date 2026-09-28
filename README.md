@@ -1,6 +1,6 @@
 # Clippy Vision
 
-> **A local, free, auditable memory layer for your AI agents — and a local LLM chat you can talk to yourself.** It watches your work on-device, stores it privately, and lets you use that memory two ways: through MCP (Cursor, Claude Desktop, VS Code, or any MCP client), or directly in Clippy's own chat with a local model. MCP is optional; the app works without it.
+> **A local, free, auditable memory layer for your AI agents.** It watches your work on-device, stores it privately, and lets Cursor, Claude Desktop, VS Code, or any MCP client search that memory. The desktop app captures, summarizes, and shows the timeline. There is no in-app chat.
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -19,42 +19,33 @@
 
 Clippy Vision is **infrastructure for personal context**: it watches your work, remembers it on-device, and answers from that memory.
 
-It passively observes active windows, clipboard, typing patterns, and screenshots, then builds a continuously updating store of what you actually did. You can use that memory in **two equal ways**:
+It passively observes active windows, clipboard, typing patterns, and screenshots, then builds a continuously updating store of what you actually did. A local model summarizes that activity on your machine. You ask questions through **MCP**: connect Cursor, Claude Desktop, VS Code, or any MCP client so that agent can search sessions, events, and long-term memory without you pasting context.
 
-1. **Local LLM chat (built into the app)** — open Clippy and ask it yourself. Answers come from a local model (Ollama, e.g. `qwen3:8b`) plus the same retrieval tools. No MCP setup required.
-2. **MCP for external agents** — connect Cursor, Claude Desktop, VS Code, or any MCP client so *those* agents can query Clippy's memory without you pasting context.
-
-MCP is an optional bridge. If you never connect a client, Clippy still captures, remembers, and chats locally.
+If you never connect a client, Clippy still captures and remembers. The timeline in the app is how you see what was stored.
 
 Everything runs on your machine. No API keys required for capture or memory. No cloud. No data leaving your device.
 
 ---
 
-## Two ways to talk to the same memory
+## Asking from an agent you already use
 
-Claude, Cursor, and ChatGPT are strong at **reasoning**. They are weak at **knowing what was on your screen** unless you paste it in. Clippy fills that gap: it watches across apps and distills activity into searchable sessions and long-term facts. That store is shared — the path you use to query it is up to you.
+Claude, Cursor, and ChatGPT are strong at **reasoning**. They are weak at **knowing what was on your screen** unless you paste it in. Clippy fills that gap: it watches across apps and distills activity into searchable sessions and long-term facts.
 
-### 1. Local LLM chat (no MCP needed)
-
-Open the Clippy desktop app and chat. A local model runs on your machine, routes your question, and retrieves from sessions / events / long-term memory. This is the default experience after install: capture runs in the background, you ask when you want answers. Examples:
+Connect once from the app. The agent calls Clippy's tools (`search_sessions`, `search_events`, memory recall, notes) over stdio MCP and pulls that history. Questions are not classified by an in-app router. The agent chooses the tool. Examples:
 
 - "What was I debugging before lunch?"
 - "Which paper URLs did I open while researching X?"
 - "What did I copy from Slack about the deploy?"
 
-### 2. MCP for agents you already use (optional)
-
-Prefer Cursor, Claude Desktop, or another MCP client? Connect once from the app. Those agents call Clippy's tools (`search_sessions`, `search_events`, memory recall, notes) over stdio MCP and pull the same history — still local, still no paste ritual. Skip this entirely if you only want Clippy's own chat.
-
 | | Per-app history | Cloud chat alone | Clippy Vision |
 |--|--|--|--|
 | Sees | Names and timestamps, one app at a time | Whatever you paste or upload | Screen content across every app |
-| Who queries it | You, manually | You, by pasting | You (local LLM chat) and/or your agents (MCP) |
+| Who queries it | You, manually | You, by pasting | Your agent, through MCP |
 | Needs you to reconstruct context | Yes | Yes | No — already saw it |
 | Runs where | Local | Cloud | 100% on your machine |
-| Best for | "Which tab did I open?" | "Help me solve / write / explain this" | "Get my real work history back — in Clippy or in my agent" |
+| Best for | "Which tab did I open?" | "Help me solve / write / explain this" | "Get my real work history back into my agent" |
 
-Clippy does not replace Claude or ChatGPT. It either answers you locally, or feeds those tools the personal activity history they cannot see on their own.
+Clippy does not replace Claude or ChatGPT. It feeds those tools the personal activity history they cannot see on their own.
 
 <p align="center">
   <img src="assets/demo-product.png" alt="Clippy Vision reconstructing research across apps and files" width="720" />
@@ -142,24 +133,21 @@ The app will open the setup wizard on first launch and walk you through dependen
 
 ## Features
 
-- **Local LLM chat** - talk to Clippy in the desktop app; a local model answers from your captured memory (works with zero MCP setup)
-- **MCP memory server (optional)** - connect Cursor, Claude Desktop, or VS Code so *those* agents can search the same sessions, events, and long-term memory
+- **MCP memory server** - connect Cursor, Claude Desktop, or VS Code so those agents can search sessions, events, and long-term memory
 - **Passive screen awareness** - captures foreground windows, clipboard, typing bursts, and screenshots in the background
 - **Hierarchical memory** - events → session summaries → distilled long-term facts; memory never resets
 - **Privacy-first redaction** - Clippy Vision's own window is blacked out in every screenshot before the AI ever sees it
 - **Three-tier event classification** - rule-based → feature-based → LLM fallback, so only meaningful events are stored
 - **Low-cost screen text** - accessibility/UI text first with RapidOCR fallback; no vision model in capture
-- **ReAct agent** - structured reasoning with tools: SQL generation, memory recall, fact saving
-- **Conversation memory** - rolling summaries + semantic search over past conversations
 - **Timeline view** - browse captured sessions in the app and drill into exactly what was recorded
 - **Toggle capture** - start/stop data capture from the tray icon or the in-app button, with a desktop notification on change
-- **Per-app redaction (in progress)** - backend rules exist for WhatsApp, Telegram, incognito windows, and similar targets; reliable matching outside Clippy's own window is still being improved, so capture on/off is the dependable privacy switch today
+- **Per-app redaction** - Instagram, WhatsApp, Telegram, Signal, Slack, Discord, and private windows can be blacked out in captures from Settings. Turn capture off when you want nothing stored.
 
 ---
 
 ## Where this is going
 
-Clippy's bet is to be a **local memory layer** you can query two ways: built-in local LLM chat, and optional MCP for external agents. The MCP server now ships with the packaged app (one-click config for Cursor / Claude Desktop / VS Code) and a timeline view lets you audit what was captured. Next priorities: stronger per-app privacy controls (reliable incognito/private-window redaction) and optional cloud model providers for users who prefer API speed over full locality. Proactive skills come after trust and access are solid.
+Clippy's bet is to be a **local memory layer** that agents query through MCP. The server ships with the packaged app (one-click config for Cursor / Claude Desktop / VS Code) and a timeline view lets you audit what was captured. Next priorities: stronger per-app privacy controls (reliable incognito/private-window redaction) and optional cloud model providers for users who prefer API speed over full locality. Proactive skills come after trust and access are solid.
 
 No dates attached to any of it. [PROJECT_VISION.md](PROJECT_VISION.md) has the current thinking, the priority order, and an honest list of what does not work yet. If you want to shape any of it, the [open issues](https://github.com/protocorn/clippy-vision/issues) are the place to start.
 
@@ -275,7 +263,11 @@ FTS5 virtual tables on `events` and `sessions` enable full-text search across al
 - All processing is local. Nothing leaves your machine.
 - Clippy Vision's own window is blacked out in screenshots before any AI model sees them.
 - You can toggle data capture on/off at any time from the tray icon.
-- Per-app redaction is in progress for WhatsApp, Telegram, Signal, incognito windows, and similar targets. Matching is not reliable enough yet outside Clippy's own window, so capture on/off is the dependable privacy switch today.
+- Per-app redaction blacks out windows you choose in Settings, including Instagram, WhatsApp, Telegram, Signal, Slack, Discord, and private browsing. Capture on/off is still the switch when you want nothing stored.
+
+<p align="center">
+  <img src="assets/instagram-redaction.jpg" alt="Instagram login with the private area blacked out in a Clippy capture" width="720" />
+</p>
 - Captured data has TTLs: raw events expire after 7 days, session summaries after 90 days. Screenshots default to 1 day; high-signal frames (interesting flag, interest score, URL present, clipboard/paste) can live up to `screenshot_retention_max_days` (default 7). OCR text on events remains after the JPEG is purged.
 - The local API binds to `127.0.0.1` on a port chosen at launch, so it is never reachable from your network.
 
