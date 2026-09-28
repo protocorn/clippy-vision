@@ -10,7 +10,7 @@ This doc exists so contributors know what we're optimizing for, where we stand t
 - **Transparency:** Openly share the current limitations of the system rather than hiding them.
 
 # Current Limitations
-- Sensitive info like passwords or card numbers can still be captured today. Manual pause/resume of capture is the current workaround while automatic redaction for this is being built.
+- A privacy layer now tries to redact passwords and other sensitive data before they are stored: password fields are painted out of screenshots, and secret-shaped text (keys, tokens, and similar) is stripped. It is an effort, not a guarantee. Pause capture when you need to be sure nothing is saved.
 - Per-app redaction is best-effort. The rules live in `core/privacy_settings.py` and are exposed in Settings → Privacy & access, but matching is title-based and brittle outside Clippy Vision's own window (e.g. an Incognito window stops matching once you navigate, see GitHub #41). Stopping capture is the dependable privacy switch until this is fixed.
 - Capture no longer needs a vision model or a dedicated GPU. The remaining hardware cost is the chat model (`qwen3:8b` by default): minimum is 8 GB RAM, recommended 16 GB. A smaller chat model can be picked in setup. Do not put a vision-language model back on the default capture path.
 
@@ -49,6 +49,7 @@ No fixed timeline, ordered by priority rather than by date.
 **Version 1.3.1 (Current)**
 - [x] Runtime LLM calls respect the chat model chosen in setup (`CLIPPY_CHAT_MODEL` / `llm_config.json`) instead of always requesting hardcoded `qwen3:8b`, which caused Ollama to auto-pull qwen3 even when another model was already configured.
 - [x] Questions go through MCP tools (`search_sessions`, `search_events`, `recall_memory`). The query router and the old prefetch strategies (specific recall, time anchor, topic search) are archived. Semantic memory search stays in `agent/prefetch/memory_query.py`.
+- [x] Privacy layer: an effort to redact passwords and other sensitive data before they are stored. Password fields are painted out of screenshots, and secret-shaped text is stripped. Not a guarantee.
 
 **Planned next, ordered by priority**
 

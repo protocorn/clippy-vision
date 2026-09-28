@@ -136,7 +136,7 @@ The app will open the setup wizard on first launch and walk you through dependen
 - **MCP memory server** - connect Cursor, Claude Desktop, or VS Code so those agents can search sessions, events, and long-term memory
 - **Passive screen awareness** - captures foreground windows, clipboard, typing bursts, and screenshots in the background
 - **Hierarchical memory** - events → session summaries → distilled long-term facts; memory never resets
-- **Privacy-first redaction** - Clippy Vision's own window is blacked out in every screenshot before the AI ever sees it
+- **Privacy layer** - before text or a screenshot is stored, Clippy tries to redact passwords and other sensitive data: password fields are painted out, and keys, tokens, and secret-shaped text are stripped. Clippy's own window is blacked out in every screenshot. This is an effort, not a guarantee.
 - **Three-tier event classification** - rule-based → feature-based → LLM fallback, so only meaningful events are stored
 - **Low-cost screen text** - accessibility/UI text first with RapidOCR fallback; no vision model in capture
 - **Timeline view** - browse captured sessions in the app and drill into exactly what was recorded
@@ -261,9 +261,9 @@ FTS5 virtual tables on `events` and `sessions` enable full-text search across al
 ## Privacy
 
 - All processing is local. Nothing leaves your machine.
-- Clippy Vision's own window is blacked out in screenshots before any AI model sees them.
+- A privacy layer runs before capture is saved. It tries to redact passwords and other sensitive data: password fields are painted black on the screenshot, and API keys, tokens, private keys, and other secret-shaped text are removed from what gets stored. Clippy's own window is blacked out in every screenshot. This is a best effort. Something can still slip through, so capture on/off remains the sure switch.
 - You can toggle data capture on/off at any time from the tray icon.
-- Per-app redaction blacks out windows you choose in Settings, including Instagram, WhatsApp, Telegram, Signal, Slack, Discord, and private browsing. Capture on/off is still the switch when you want nothing stored.
+- Per-app redaction blacks out windows you choose in Settings, including Instagram, WhatsApp, Telegram, Signal, Slack, Discord, and private browsing.
 
 <p align="center">
   <img src="assets/instagram-redaction.jpg" alt="Instagram login with the password field blacked out in a Clippy capture" width="720" />
