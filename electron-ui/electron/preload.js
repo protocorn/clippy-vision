@@ -85,59 +85,6 @@ contextBridge.exposeInMainWorld('clippy', {
         }
     },
 
-    getInsightHome: async (limit = 14) => {
-        const params = new URLSearchParams({ limit: String(limit) })
-        const response = await fetch(await apiUrl(`/insight/home?${params}`))
-        if (!response.ok) throw new Error(await getErrorMessage(response))
-        return response.json()
-    },
-
-    getInsightDay: async (day, generate = false) => {
-        const params = new URLSearchParams()
-        if (generate) params.set('generate', 'true')
-        const q = params.toString()
-        const response = await fetch(
-            await apiUrl(`/insight/day/${encodeURIComponent(day)}${q ? `?${q}` : ''}`)
-        )
-        if (!response.ok) throw new Error(await getErrorMessage(response))
-        return response.json()
-    },
-
-    generateInsightDay: async (day, force = false) => {
-        const response = await fetch(
-            await apiUrl(`/insight/day/${encodeURIComponent(day)}/generate`),
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ force: Boolean(force) }),
-            }
-        )
-        if (!response.ok) throw new Error(await getErrorMessage(response))
-        return response.json()
-    },
-
-    getInsightThreads: async (lookbackDays = 7, generate = false) => {
-        const params = new URLSearchParams({ lookback_days: String(lookbackDays) })
-        if (generate) params.set('generate', 'true')
-        const response = await fetch(await apiUrl(`/insight/threads?${params}`))
-        if (!response.ok) throw new Error(await getErrorMessage(response))
-        return response.json()
-    },
-
-    generateInsightThreads: async ({ lookback_days = 7, force = false, dates = null } = {}) => {
-        const response = await fetch(await apiUrl('/insight/threads/generate'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                lookback_days,
-                force: Boolean(force),
-                dates,
-            }),
-        })
-        if (!response.ok) throw new Error(await getErrorMessage(response))
-        return response.json()
-    },
-
     getName: async () => {
         const response = await fetch(await apiUrl('/user/name'))
         if (!response.ok) throw new Error(await getErrorMessage(response))

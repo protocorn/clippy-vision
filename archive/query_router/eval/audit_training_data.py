@@ -10,9 +10,9 @@ from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent.parent
-FILES = [ROOT / "core" / "data" / "router_seed.jsonl",
-         ROOT / "core" / "data" / "router_generated.jsonl"]
+ARCHIVE = Path(__file__).resolve().parents[1]
+FILES = [ARCHIVE / "router_seed.jsonl",
+         ARCHIVE / "router_generated.jsonl"]
 
 rows = []
 for f in FILES:

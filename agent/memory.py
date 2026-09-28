@@ -3,7 +3,7 @@ import math
 import time
 from typing import Optional
 
-from core.distil import save_note_to_memory
+from core.distil import ingest_conversation, save_note_to_memory
 from core.local_embeddings import embed_text
 from core.memory_store import (
     get_all_clusters,
@@ -302,6 +302,39 @@ def save_identity(field: str, value: str = "", op: str = "set", items: list[str]
 
 def save_note(note: str) -> str:
     return save_note_to_memory(note)
+
+def remember_turn(user_message: str) -> str:
+    """Pull durable facts from the user's own words and store them locally.
+
+    The cloud model's reply is not an argument and is not stored. A message
+    that is only a secret is refused. A message with no personal fact is
+    dropped.
+    """
+    text = " ".join((user_message or "").split()).strip()
+    if not text:
+        return "No message to remember."
+    from core.secret_patterns import redact_secrets
+
+    cleaned = " ".join(redact_secrets(text).split()).strip()
+    remainder = cleaned.replace("[secret]", "").strip()
+    if cleaned != text and len(remainder) < 8:
+        return "That message looks like a secret, so it was not stored."
+    result = ingest_conversation(cleaned, "")
+    if not isinstance(result, dict):
+        return "No personal facts in that message."
+    if result.get("error"):
+        return f"Could not store that turn: {result['error']}"
+    facts = [str(fact).strip() for fact in result.get("facts") or [] if str(fact).strip()]
+    profile = [str(field).strip() for field in result.get("profile") or [] if str(field).strip()]
+    if not facts and not profile:
+        return "No personal facts in that message."
+    lines = []
+    if profile:
+        lines.append("Profile updated: " + ", ".join(profile))
+    if facts:
+        lines.append("Remembered:")
+        lines.extend(f"- {fact}" for fact in facts)
+    return "\n".join(lines)
 
 def delete_note(note_text: str) -> str:
     """Suppress a memory fact whose text matches note_text (case-insensitive substring).

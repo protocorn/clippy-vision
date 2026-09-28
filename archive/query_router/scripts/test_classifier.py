@@ -2,9 +2,9 @@
 Interactive test for the fine-tuned MiniLM router classifier.
 
 Usage:
-    python scripts/test_classifier.py
-    python scripts/test_classifier.py --threshold 0.20
-    python scripts/test_classifier.py --query "what did I do yesterday?"
+    python archive/query_router/scripts/test_classifier.py
+    python archive/query_router/scripts/test_classifier.py --threshold 0.20
+    python archive/query_router/scripts/test_classifier.py --query "what did I do yesterday?"
 """
 
 import argparse
@@ -12,14 +12,15 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT))
+ARCHIVE = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO))
 
 import torch
 from transformers import AutoTokenizer
 
 # ── Config ──────────────────────────────────────────────────
-CHECKPOINT   = ROOT / "models" / "router_classifier" / "best"
+CHECKPOINT   = ARCHIVE / "models" / "router_classifier" / "best"
 BASE_MODEL   = "sentence-transformers/paraphrase-MiniLM-L3-v2"
 MAX_LEN      = 128
 CATEGORIES   = [
@@ -60,7 +61,7 @@ class RouterClassifier(nn.Module):
 def load_model(checkpoint: Path, device):
     if not checkpoint.exists():
         print(f"[error] No checkpoint at {checkpoint}")
-        print("        Run: python scripts/train_router.py")
+        print("        Run: python archive/query_router/scripts/train_router.py")
         sys.exit(1)
 
     tokenizer = AutoTokenizer.from_pretrained(str(checkpoint))

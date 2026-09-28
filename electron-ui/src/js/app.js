@@ -1,11 +1,10 @@
 import {
   nameInput, nameSubmit, nameError, nameView, loadingView, loadingSub,
-  appBrand, settingsBtn, captureBtn, captureLabel, timelineBtn, timelineLoadMore,
+  appBrand, homeBtn, homeMenuBtn, settingsBtn, captureBtn, captureLabel, timelineLoadMore,
   timelineDetailBack, updateBanner, updateBannerText, updateBannerLink,
   updateBannerDismiss, identityAddBtn, identityNewKey, identityNewVal,
   settingsName, settingsIntro, updateCheckToggle, mcpCopyBtn,
   workspaceRootAddBtn, workspaceRootInput, navMore, navMoreBtn, navMoreMenu, store,
-  insightsView,
 } from './dom.js'
 import { showView } from './utils.js'
 import { submitName } from './onboarding.js'
@@ -15,7 +14,6 @@ import {
 } from './settings.js'
 import { openTimeline, loadTimelineSessions, closeTimelineDetail } from './timeline.js'
 import { setCaptureUI } from './capture-ui.js'
-import { openInsights, wireInsights } from './insights.js'
 
 function on(el, event, handler) {
   if (!el) return
@@ -66,7 +64,12 @@ function wireUi() {
     if (e.key === 'Enter') submitName()
   })
 
-  on(appBrand, 'click', () => openInsights())
+  on(homeBtn, 'click', () => openTimeline())
+  on(homeMenuBtn, 'click', () => {
+    setNavMoreOpen(false)
+    openTimeline()
+  })
+  on(appBrand, 'click', () => openTimeline())
 
   function setNavMoreOpen(open) {
     if (!navMore || !navMoreBtn || !navMoreMenu) return
@@ -79,7 +82,7 @@ function wireUi() {
     e.stopPropagation()
     setNavMoreOpen(navMoreMenu?.hidden !== false)
   })
-  for (const item of [timelineBtn, settingsBtn]) {
+  for (const item of [homeMenuBtn, settingsBtn]) {
     on(item, 'click', () => setNavMoreOpen(false))
   }
   document.addEventListener('click', (e) => {
@@ -108,11 +111,8 @@ function wireUi() {
     if (e.key === 'Enter') addWorkspaceRootFromInput()
   })
 
-  on(timelineBtn, 'click', openTimeline)
   on(timelineLoadMore, 'click', () => loadTimelineSessions({ reset: false }))
   on(timelineDetailBack, 'click', closeTimelineDetail)
-
-  wireInsights()
 }
 
 export async function init() {
@@ -199,10 +199,9 @@ export async function init() {
   try {
     const { name } = await window.clippy.getName()
     if (name && name.trim()) {
-      showView(insightsView)
       const active = await window.clippy.getCaptureStatus()
       setCaptureUI(active)
-      openInsights()
+      openTimeline()
     } else {
       showView(nameView)
       nameInput?.focus()

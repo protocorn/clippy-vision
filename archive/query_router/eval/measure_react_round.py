@@ -9,8 +9,8 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(ROOT))
+REPO = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO))
 
 from agent.tools import TOOL_SCHEMAS
 from core.llm_gateway import Priority, gateway
@@ -25,7 +25,7 @@ QUERIES = [
     "what did I do yesterday?",
     "how many hours did I code this week?",
     "what was the link I copied about React?",
-    "what have I been working on for Clippy Vision?",
+    "what have I been working on for the notes app?",
     "what did I work on this morning?",
 ]
 

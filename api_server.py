@@ -58,14 +58,15 @@ from core.storage import (
 from core.workspace_roots import list_roots, remember_root, remove_root
 
 # Soft cap for any leftover composer text.
-# ARCHIVED UI: in-app chat shell moved to archive/in_app_chat/ — home is insight cards.
-# These /chat stubs remain so old clients / restore paths do not 404.
+# ARCHIVED UI: in-app chat shell moved to archive/in_app_chat/.
+# Home is the captured-session timeline. These /chat stubs remain so old
+# clients / restore paths do not 404.
 USER_MESSAGE_MAX_CHARS = 4000
 
 MCP_CHAT_GUIDANCE = (
     "Clippy Vision captures what you do on this PC and keeps that history local.\n\n"
     "In-app chat with a small local agent has been removed. "
-    "The home screen shows Day Cards and Threads instead.\n\n"
+    "This app keeps capture, the session timeline, and settings.\n\n"
     "Ask about your activity from Cursor, Claude Desktop, or any MCP client:\n\n"
     "1. Open Settings → Connect apps\n"
     "2. Copy the MCP launch config into your client\n"
@@ -217,90 +218,7 @@ def chat_stream(req: QueryRequest):
     )
 
 
-# --- Insight cards (default home surface) ---
-
-class InsightDayRequest(BaseModel):
-    force: bool = False
-
-
-class InsightThreadsRequest(BaseModel):
-    lookback_days: int = 7
-    force: bool = False
-    dates: list[str] | None = None
-
-
-@app.get("/insight/home")
-def insight_home(limit: int = Query(14, ge=1, le=60)):
-    from agent.insight_cards import list_insight_home
-
-    return list_insight_home(limit=limit)
-
-
-@app.get("/insight/day/{day}")
-def insight_day_get(day: str, generate: bool = Query(False)):
-    from agent.insight_cards import get_or_generate_day_card, load_day_card
-
-    try:
-        if generate:
-            return get_or_generate_day_card(day, force=False)
-        card = load_day_card(day)
-        if not card:
-            raise HTTPException(status_code=404, detail="Day card not generated yet")
-        return card
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@app.post("/insight/day/{day}/generate")
-def insight_day_generate(day: str, req: InsightDayRequest = InsightDayRequest()):
-    from agent.insight_cards import get_or_generate_day_card
-
-    try:
-        return get_or_generate_day_card(day, force=bool(req.force))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@app.get("/insight/threads")
-def insight_threads_get(
-    lookback_days: int = Query(7, ge=2, le=30),
-    generate: bool = Query(False),
-):
-    from agent.insight_cards import generate_threads_card, list_recent_days, load_threads_card
-
-    days = list(reversed(list_recent_days(lookback_days)))
-    key = f"{days[0]}_{days[-1]}" if days else "empty"
-    try:
-        if generate:
-            return generate_threads_card(lookback_days=lookback_days, force=False)
-        card = load_threads_card(key)
-        if not card:
-            raise HTTPException(status_code=404, detail="Threads card not generated yet")
-        return card
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@app.post("/insight/threads/generate")
-def insight_threads_generate(req: InsightThreadsRequest = InsightThreadsRequest()):
-    from agent.insight_cards import generate_threads_card
-
-    try:
-        return generate_threads_card(
-            req.dates,
-            lookback_days=int(req.lookback_days or 7),
-            force=bool(req.force),
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+# --- User profile ---
 
 
 @app.get("/user/name")

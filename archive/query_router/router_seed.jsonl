@@ -1,0 +1,124 @@
+{"text": "what did I do yesterday, write in points?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "yesterday"}
+{"text": "what was I working on this morning?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "this morning"}
+{"text": "show me what I did last Tuesday and Thursday", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "last Tuesday"}
+{"text": "what have I been up to this week, I need to log it for my manager?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "this week"}
+{"text": "what did I work on 3 days ago?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "3 days ago"}
+{"text": "what was I doing last night?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "last night"}
+{"text": "waht did i do yesteday", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "yesterday"}
+{"text": "what was I upto last monday?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "last monday"}
+{"text": "did i do anything useful this afternoon?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "this afternoon"}
+{"text": "what apps did I use yesterday?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "yesterday"}
+{"text": "recap my this weeks activity", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "this week"}
+{"text": "what did I work on the day before yesterday?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "day before yesterday"}
+{"text": "hey, I want to know what I was doing 2 hours ago", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "2 hours ago"}
+{"text": "what tasks did I complete last week?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "last week"}
+{"text": "what did I work on this week so far?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "this week"}
+{"text": "what have I been working on for the AI agent?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what is my current status with the ML project?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what have I been researching about LLMs lately?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what notes do I have about database design?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what have I done related to the backend API?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what have I been reading about recently?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "whats my progress on automation project?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "have I worked on anything related to React?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what do I know about Kubernetes from my work?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what features have I been adding to my project?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what articles have I been reading about AI?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what is the latest thing I have been building?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "have I done anything related to data pipelines?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what is the current state of the dashboard feature?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what have I been coding lately?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what URL was I on when working on the project?", "context": "", "primary": "specific_recall", "secondary": [], "temporal_hint": null}
+{"text": "what did I paste from clipboard an hour ago?", "context": "", "primary": "specific_recall", "secondary": ["time_anchored"], "temporal_hint": "an hour ago"}
+{"text": "what article was I reading this morning?", "context": "", "primary": "specific_recall", "secondary": ["time_anchored"], "temporal_hint": "this morning"}
+{"text": "what was the error message I got in the terminal?", "context": "", "primary": "specific_recall", "secondary": [], "temporal_hint": null}
+{"text": "what was the GitHub repo link I visited?", "context": "", "primary": "specific_recall", "secondary": [], "temporal_hint": null}
+{"text": "what was that command I ran in the terminal?", "context": "", "primary": "specific_recall", "secondary": [], "temporal_hint": null}
+{"text": "what was the name of the npm package I installed?", "context": "", "primary": "specific_recall", "secondary": [], "temporal_hint": null}
+{"text": "what link did I copy from the browser?", "context": "", "primary": "specific_recall", "secondary": [], "temporal_hint": null}
+{"text": "what was the text I had copied before?", "context": "", "primary": "specific_recall", "secondary": [], "temporal_hint": null}
+{"text": "what stackoverflow answer was I looking at?", "context": "", "primary": "specific_recall", "secondary": [], "temporal_hint": null}
+{"text": "waht was the website i was on?", "context": "", "primary": "specific_recall", "secondary": [], "temporal_hint": null}
+{"text": "what was the file I was editing an hour ago?", "context": "", "primary": "specific_recall", "secondary": ["time_anchored"], "temporal_hint": "an hour ago"}
+{"text": "what was the exact error I kept seeing?", "context": "", "primary": "specific_recall", "secondary": [], "temporal_hint": null}
+{"text": "what was the YouTube video I was watching?", "context": "", "primary": "specific_recall", "secondary": [], "temporal_hint": null}
+{"text": "what was the Discord message I copied?", "context": "", "primary": "specific_recall", "secondary": [], "temporal_hint": null}
+{"text": "what do you know about me?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "what are my hobbies?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "where do I work?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "what programming languages have I told you I know?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "what is my job title?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "what projects have I mentioned to you?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "do you remember my name?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "what skills have I told you about?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "what are my interests according to what I've shared?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "what do you know about my work setup?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "have I told you about my side projects?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "what preferences have I expressed to you?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "what is my educational background that I shared?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "do you know what tools I prefer to use?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "what personal goals have I mentioned?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "what is 2+2?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "explain how neural networks work", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "write me a haiku about programming", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "what is the capital of France?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "can you recommend a good Python book?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "what do you think about TypeScript vs JavaScript?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "tell me a joke", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "how do I reverse a string in Python?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "what is the difference between REST and GraphQL?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "can you help me write an email?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "what are some good practices for code review?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "explain docker containers to me", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "whats a good way to structure a React app?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "translate this to French: hello world", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "is Python or JavaScript better for beginners?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "how many bones are in the human body?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "how many planets are in the solar system?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "how many calories does a banana have?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "how many liters of water should a person drink per day?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "how many countries are there in the world?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "when did world war 2 end?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "when did humans first land on the moon?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "when was the iPhone first released?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "when did the Roman empire fall?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "who invented the telephone?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "who wrote the harry potter series?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "who is the current CEO of Tesla?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "who sang bohemian rhapsody?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "why is the sky blue?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "why do leaves change color in autumn?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "what is the boiling point of water in celsius?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "what does HTTP stand for?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "whats the differnce between RAM and ROM", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "what did I research for my essay yesterday?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "yesterday"}
+{"text": "what was I doing in Figma this morning?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "this morning"}
+{"text": "what emails did I send last Tuesday?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "last Tuesday"}
+{"text": "what have I been reading about climate change?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what have I been looking up for my design project?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what articles have I been reading about nutrition?", "context": "", "primary": "topic_search", "secondary": [], "temporal_hint": null}
+{"text": "what was that recipe website I was on earlier?", "context": "", "primary": "specific_recall", "secondary": [], "temporal_hint": null}
+{"text": "what was the article I was reading about climate policy?", "context": "", "primary": "specific_recall", "secondary": [], "temporal_hint": null}
+{"text": "what was the YouTube video I watched this morning?", "context": "", "primary": "specific_recall", "secondary": ["time_anchored"], "temporal_hint": "this morning"}
+{"text": "what dietary preferences have I told you about?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "do you know what university I go to?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "what have I told you about my fitness goals?", "context": "", "primary": "memory_query", "secondary": [], "temporal_hint": null}
+{"text": "what is the best way to structure an essay introduction?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "can you suggest some color palettes for a minimalist design?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "what is the difference between a CV and a resume?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "what should I be doing this weekend?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "I hope you have a good weekend", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "what am I doing next monday?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "any plans for tomorrow?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "do you think I should work on the report this weekend?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "whats my plan for next week?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "will I have time to relax this weekend?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "have a great trip next week!", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "what should I work on tommorow?", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "hope tomorrow goes well for you", "context": "", "primary": "casual", "secondary": [], "temporal_hint": null}
+{"text": "this weekend was so boring", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "this weekend"}
+{"text": "I had a really productuve weekend", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "weekend"}
+{"text": "did I get anything done this weekend?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "this weekend"}
+{"text": "how was my monday?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "monday"}
+{"text": "what have I been up to today?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "today"}
+{"text": "was this weekend productive for me?", "context": "", "primary": "time_anchored", "secondary": [], "temporal_hint": "this weekend"}

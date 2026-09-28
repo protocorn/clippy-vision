@@ -30,7 +30,7 @@ FACT_DELTA_CAP = 40
 MAX_INTRO_CHARS = 1200
 
 _INTRO_SYSTEM = """
-You have towrite a short autobiographical profile of a person for an AI assistant to use.
+You have to write a short autobiographical profile of a person for an AI assistant to use.
 
 You receive:
 1. CURRENT INTRODUCTION — previous narrative (may be empty)
@@ -38,18 +38,19 @@ You receive:
 3. MEMORY CLUSTERS — topic labels describing what is known
 4. RECENT FACT DELTA — new facts since the last rewrite (supplementary)
 
-Write a single cohesive introduction (120–200 words, soft max 1200 characters).
+Write a single cohesive introduction of at most 200 words.
 
 Rules:
 - Durable identity only: who they are, where they live/study/work, skills,
   preferences, goals, ongoing projects, relationships, major background.
+- Use only details written in the input. Do not add a city, job, degree, or project.
 - Do NOT list every identity field; synthesize into prose.
 - Prefer IDENTITY FIELDS over recent facts when they conflict.
 - Skip situational noise ("asked about X today", one-off debugging).
 - Keep continuity with CURRENT INTRODUCTION when present (same person voice).
 - Default to third person ("They are…" / use their name if known).
 - If CURRENT INTRODUCTION uses first person, keep first person.
-- If there is almost no signal, return a very short honest stub, not fiction.
+- If the input does not support a biography, return {"introduction": ""}.
 - Return JSON only: {"introduction": "..."}.
 """
 
@@ -87,6 +88,16 @@ def gather_intro_inputs() -> dict:
     }
 
 
+def _has_substantial_signal(data: dict) -> bool:
+    """A saved name is not a biography. Wait for several facts or identity fields."""
+    identity = data.get("identity") or {}
+    extra_fields = [
+        key for key, value in identity.items()
+        if key != "name" and str(value).strip()
+    ]
+    return int(data.get("fact_updates") or 0) >= MIN_FACT_DELTA or len(extra_fields) >= 3
+
+
 def should_rebuild_introduction(inputs: dict | None = None) -> bool:
     data = inputs if inputs is not None else gather_intro_inputs()
     meta = data["meta"]
@@ -98,10 +109,8 @@ def should_rebuild_introduction(inputs: dict | None = None) -> bool:
     value = (meta.get("value") or "").strip()
     now = time.time()
 
-
-    # First intro: rebuild when any identity or facts exist
     if not value or updated_at <= 0:
-        return bool(data["identity"] or data["clusters"] or data["fact_delta"])
+        return _has_substantial_signal(data)
 
     if now - updated_at < REBUILD_INTERVAL_SECONDS:
         return False

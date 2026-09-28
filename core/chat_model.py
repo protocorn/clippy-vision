@@ -4,7 +4,7 @@ Electron writes the user's setup-wizard/settings choice to
 ``core/data/llm_config.json`` and passes it to every Python child process as
 the ``CLIPPY_CHAT_MODEL`` environment variable (see
 electron-ui/electron/lib/api-spawn.js). Every module that calls the chat/
-reasoning model (summarizer, distiller, ReAct agent, classifiers, router,
+reasoning model (summarizer, distiller, classifiers,
 residency warmup) must resolve the model through ``get_chat_model()`` here
 instead of hardcoding a name. Hardcoding causes Ollama to silently pull the
 hardcoded model even when the user picked something else in setup — see

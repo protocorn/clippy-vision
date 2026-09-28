@@ -32,7 +32,7 @@ entity, or technology — with NO explicit time anchor.
 The answer requires searching the activity log by subject across all time.
 
 Includes:
-- Project names (Clippy Vision, Launchway, my dashboard)
+- Project names (the notes app, a client dashboard, a class assignment)
 - Technologies (React, Python, Kubernetes, LLMs)
 - Open-ended activity questions with vague time ("lately", "recently", "before")
 - Habitual/pattern questions without aggregation keywords ("what do I usually work on?")
@@ -135,7 +135,7 @@ When in doubt: leave secondary empty [].
 **Do NOT add secondary:**
 - "what did I do yesterday?" → time_anchored, secondary: []
   (aggregation not required to answer "what did I do")
-- "what have I been working on for Clippy Vision?" → topic_search, secondary: []
+- "what have I been working on for the notes app?" → topic_search, secondary: []
   (no time anchor needed, no memory needed)
 - "what is 2+2?" → casual, secondary: []
   (nothing personal needed)
@@ -212,7 +212,7 @@ When generating data, ensure each batch includes:
 - At least 2 examples with spelling errors or typos
 - At least 2 vague/indirect phrasings
 - At least 1 multi-label example (secondary not empty)
-- Topics beyond Clippy Vision: use other project names, technologies, apps
+- Use a mix of project names, technologies, and apps. Do not reuse one product name across the batch.
 
 Reject batches where more than 50% of examples share the same sentence structure
 or opening phrase.

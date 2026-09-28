@@ -11,7 +11,9 @@ try:
         get_events_for_window,
         get_sessions_needing_refresh,
         get_unsummarized_events,
+        has_recent_content_hash,
         mark_session_vision_enriched,
+        record_summarizer_skip,
         store_summary,
     )
 except ImportError:
@@ -21,7 +23,9 @@ except ImportError:
         get_events_for_window,
         get_sessions_needing_refresh,
         get_unsummarized_events,
+        has_recent_content_hash,
         mark_session_vision_enriched,
+        record_summarizer_skip,
         store_summary,
     )
 from core.accessibility_text import is_useful_accessibility_text, strip_ui_chrome
@@ -41,6 +45,7 @@ SESSION_GAP_SECS = 600  # merge events across process UUIDs within 10 min gaps
 MAX_SESSION_DURATION_SECS = 30 * 60  # hard cap so backlog cannot form multi-hour sessions
 MAX_PROMPT_CHARS = 7000
 PER_EVENT_SCREEN_CHARS = 500
+DEDUP_LOOKBACK_SECS = 30 * 60
 # Vision-refresh hot-loop guard: timeouts must not re-queue the same session every tick.
 REFRESH_FAIL_MARK_AFTER = 3
 REFRESH_BACKOFF_BASE_SECS = 120
@@ -58,36 +63,86 @@ _WINDOW_TITLE_SUFFIXES = (
 SUMMARY_SCHEMA = {
     "type": "object",
     "properties": {
+        "skip": {"type": "boolean"},
         "summary": {"type": "string"},
         "active_task": {"type": "string"},
         "entities": {"type": "array", "items": {"type": "string"}},
     },
     "required": [
+        "skip",
         "summary",
         "active_task",
         "entities"
     ],
 }
 SYSTEM_PROMPT = """You summarize computer work sessions from content-bearing events only
-(pastes, clipboard copies, screen/OCR text, and app context that includes real screen text).
+(pastes, clipboard copies, screen text, and window titles that name a real file, page, or project).
+
+You are also a filter. If the events are not a real activity — an idle desktop, a lock screen, a status bar, a bookmark bar, a file dialog, or a picture of some other program — do not summarize them.
 
 Produce a JSON object with:
-- summary: 2-4 sentence plain English description of the actual work content
-- active_task: the single most likely concrete task (topic/file/decision), not "using Cursor" or "browsing"
-- entities: specific things from the content (file names, URLs, error messages, people, ticket IDs)
+- skip: true when this is not real work, otherwise false
+- summary: 2-4 sentence plain English description of the actual work when skip is false, otherwise ""
+- active_task: the concrete task when skip is false, otherwise ""
+- entities: specific things from the content (file names, URLs, error messages, people, ticket IDs), otherwise []
 
 Rules:
 - Use past tense. Be specific.
+- When a window title names the application and a file, project, or page, mention both. A file titled report.md in a Notes workspace, open in an editor, is the editor and Notes, not only Notes.
 - Never treat typing speed, word counts, revision ratios, or bare app switches as the work itself.
-- If the only signal is which app was focused, say the content was too thin to summarize meaningfully.
+- Never describe an idle screen. Set skip to true instead.
 Respond ONLY with valid JSON, no other text."""
+
+
+class SkipWindow:
+    """Span was rejected or deduped. Cover it so the queue moves on."""
+
+    def __init__(self, window_start: float, window_end: float, reason: str):
+        self.window_start = window_start
+        self.window_end = window_end
+        self.reason = reason
+
+
+def _window_title(event: dict) -> str:
+    return " ".join(str(event.get("window_title") or "").split()).strip()
+
+
+def _title_is_informative(title: str) -> bool:
+    return bool(" ".join(title.split()).strip())
+
+
+def _awaiting_screen_text(event: dict) -> bool:
+    """A real window whose OCR has not been written yet. Leave it in the queue."""
+    if str(event.get("event_type") or "") != "screenshot_analysis":
+        return False
+    return not str(event.get("vision_ocr_text") or "").strip()
+
+
+def _should_retire_without_summary(events: list[dict]) -> bool:
+    if not events or _contentful_events(events):
+        return False
+    if any(_awaiting_screen_text(event) for event in events):
+        return False
+    return True
+
+
+def _model_skipped(result: dict) -> bool:
+    flag = result.get("skip")
+    if isinstance(flag, str):
+        skipped = flag.strip().casefold() in {"true", "1", "yes"}
+    else:
+        skipped = bool(flag)
+    if skipped:
+        return True
+    text = " ".join(str(result.get("summary") or "").split()).strip()
+    return not text
 
 
 def _is_window_title_line(line: str) -> bool:
     low = line.casefold()
     if any(low.endswith(suffix) for suffix in _WINDOW_TITLE_SUFFIXES):
         return True
-    # Screenshot-tab titles like "1786722150920_processed.jpg - Clippy_Vision - Cursor"
+    # Screenshot-tab titles like "1786722150920_processed.jpg - Notes - Editor"
     if "_processed.jpg" in low or "_processed.png" in low:
         return True
     return False
@@ -134,14 +189,13 @@ def is_contentful_for_summary(event: dict) -> bool:
     screen = event.get("vision_ocr_text") or ""
     has_screen = is_useful_screen_text(screen)
     summary = " ".join(str(event.get("summary") or "").split()).strip()
-    activity = " ".join(str(event.get("vision_activity") or "").split()).strip()
 
     if et in {"paste", "clipboard_change"}:
         # Need real copied/pasted text, not an empty shell.
         return len(summary) >= 24 or has_screen
 
     if et == "screenshot_analysis":
-        return has_screen or len(activity) >= 8
+        return has_screen
 
     if et == "context_change":
         # App focus alone is noise; only keep switches that captured real screen text.
@@ -177,6 +231,9 @@ def _build_prompt(events: list[dict]) -> str:
 
     for event in selected:
         line = f"{event.get('summary') or ''}"
+        title = _window_title(event)
+        if _title_is_informative(title):
+            line = f"window: {title} | {line}"
         activity = event.get("vision_activity")
         if activity:
             line += f" | vision: {activity}"
@@ -233,14 +290,46 @@ def _clear_refresh_failure(summary_id: str) -> None:
     _refresh_failures.pop(summary_id, None)
 
 
-def summarize_window(events: list[dict], session_id: str) -> dict | None:
+def _activity_fingerprint(events: list[dict]) -> str:
+    """Hash of the work itself: titles, clipboard text, and useful screen text."""
+    parts: list[str] = []
+    for event in events:
+        if not is_contentful_for_summary(event):
+            continue
+        title = _window_title(event)
+        if _title_is_informative(title):
+            parts.append("title:" + title.casefold())
+        event_type = str(event.get("event_type") or "")
+        if event_type in {"paste", "clipboard_change"}:
+            clip = " ".join(str(event.get("summary") or "").split()).casefold()
+            if clip:
+                parts.append("clip:" + clip)
+        screen = event.get("vision_ocr_text") or ""
+        if is_useful_screen_text(screen):
+            parts.append("screen:" + " ".join(_strip_ui_chrome(screen).split()).casefold())
+    blob = "\n".join(parts)
+    if not blob:
+        return ""
+    return hashlib.sha1(blob.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _skip_span(events: list[dict], reason: str) -> SkipWindow:
+    selected = _select_events_for_prompt(events) or events
+    return SkipWindow(selected[0]["timestamp"], selected[-1]["timestamp"], reason)
+
+
+def summarize_window(events: list[dict], session_id: str) -> dict | SkipWindow | None:
     contentful = _contentful_events(events)
     if len(contentful) < MIN_EVENTS:
         return None
 
+    fingerprint = _activity_fingerprint(contentful)
+    if fingerprint and has_recent_content_hash(fingerprint, DEDUP_LOOKBACK_SECS):
+        return _skip_span(events, "duplicate activity")
+
     prompt = _build_prompt(events)
     if prompt.strip() == "Events:" or len(prompt) < 40:
-        return None
+        return _skip_span(events, "not real activity")
 
     body = gateway.chat(
         messages=[
@@ -254,6 +343,8 @@ def summarize_window(events: list[dict], session_id: str) -> dict | None:
 
     content = body["message"]["content"]
     result = json.loads(content) if isinstance(content, str) else content
+    if _model_skipped(result):
+        return _skip_span(events, "model skipped")
 
     now = time.time()
     summary_text = result.get("summary", "")
@@ -280,6 +371,7 @@ def summarize_window(events: list[dict], session_id: str) -> dict | None:
         "entities": result.get("entities", []),
         "event_count": len(selected),
         "embedding": embedding,
+        "content_hash": fingerprint or None,
     }
     return summary
 
@@ -352,7 +444,11 @@ def _refresh_vision_enriched_sessions():
                 )
             break  # one LLM failure per tick; leave gateway for chat / catch-up
 
-        if summary:
+        if isinstance(summary, SkipWindow):
+            mark_session_vision_enriched(summary_id)
+            _clear_refresh_failure(summary_id)
+            print(f"  [SUMMARIZER] Refresh skipped — {summary.reason}")
+        elif summary:
             summary["summary_id"] = summary_id  # overwrite in-place via INSERT OR REPLACE
             if should_distil():
                 distil()
@@ -381,8 +477,16 @@ def summarizer_loop():
                     continue
 
             events = get_unsummarized_events(time.time() - RAW_LOOKBACK_SECONDS)
+            groups = _group_events_by_time_window(events)
+            for group in groups:
+                if _should_retire_without_summary(group):
+                    record_summarizer_skip(
+                        group[0]["timestamp"],
+                        group[-1]["timestamp"],
+                        "not real activity",
+                    )
             ready = [
-                group for group in _group_events_by_time_window(events)
+                group for group in groups
                 if len(_contentful_events(group)) >= MIN_EVENTS
             ]
             ready.sort(key=lambda items: items[0]["timestamp"])
@@ -396,15 +500,20 @@ def summarizer_loop():
                     f"(window from {source_session_id[:8]}, {len(session_events)} raw)"
                 )
                 summary = summarize_window(session_events, source_session_id)
-                if summary:
+                if isinstance(summary, SkipWindow):
+                    record_summarizer_skip(
+                        summary.window_start, summary.window_end, summary.reason
+                    )
+                    print(f"  [SUMMARIZER] Skipped — {summary.reason}")
+                elif summary:
                     store_summary(summary, vision_enriched=False, embedding=summary.pop("embedding", None))
                     print(f"  [SUMMARIZER] Done — {summary['active_task']}")
                     print(f"               {summary['summary'][:120]}...")
 
             pending = sum(
                 len(group)
-                for group in _group_events_by_time_window(events)
-                if len(_contentful_events(group)) < MIN_EVENTS
+                for group in groups
+                if not _contentful_events(group) and not _should_retire_without_summary(group)
             )
             if pending:
                 print(

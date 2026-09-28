@@ -13,14 +13,14 @@ Training strategy:
 This gives the best of both worlds: clean primary learning + secondary hints at runtime.
 
 Usage:
-    python scripts/train_router.py
-    python scripts/train_router.py --epochs 10 --lr 2e-5
-    python scripts/train_router.py --eval-only
-    python scripts/train_router.py --threshold 0.35   # tune secondary threshold
+    python archive/query_router/scripts/train_router.py
+    python archive/query_router/scripts/train_router.py --epochs 10 --lr 2e-5
+    python archive/query_router/scripts/train_router.py --eval-only
+    python archive/query_router/scripts/train_router.py --threshold 0.35   # tune secondary threshold
 
 Output:
-    models/router_classifier/best/          checkpoint
-    models/router_classifier/best/eval.txt  per-label metrics
+    archive/query_router/models/router_classifier/best/          checkpoint
+    archive/query_router/models/router_classifier/best/eval.txt  per-label metrics
 """
 
 import argparse
@@ -30,8 +30,9 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT))
+ARCHIVE = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO))
 
 import numpy as np
 import torch
@@ -44,9 +45,9 @@ from torch.utils.data import DataLoader, Dataset
 # ─────────────────────────────────────────────────────────────
 
 BASE_MODEL     = "sentence-transformers/paraphrase-MiniLM-L3-v2"
-SEED_FILE      = ROOT / "core" / "data" / "router_seed.jsonl"
-GENERATED_FILE = ROOT / "core" / "data" / "router_generated.jsonl"
-OUTPUT_DIR     = ROOT / "models" / "router_classifier"
+SEED_FILE      = ARCHIVE / "router_seed.jsonl"
+GENERATED_FILE = ARCHIVE / "router_generated.jsonl"
+OUTPUT_DIR     = ARCHIVE / "models" / "router_classifier"
 
 CATEGORIES = [
     "time_anchored",

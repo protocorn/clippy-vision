@@ -152,12 +152,12 @@ TOOL_SCHEMAS = [
             "name": "find_files",
             "description": (
                 "Search the REAL filesystem under trusted workspace folders for a file/folder name. "
-                "USE THIS when the user asks to find a file by name (e.g. screenshot_processor.py) "
+                "USE THIS when the user asks to find a file by name (e.g. notes.md) "
                 "and you do not already have an absolute path. Returns absolute paths for the host "
                 "agent to open if needed — Clippy does not open files/URLs itself. "
                 "NOT a substitute for search_events (activity history). "
                 "If no trusted folders exist, call remember_workspace_root with a path the user gave "
-                "(e.g. C:\\Users\\proto or a project folder), then find_files again. "
+                "(e.g. C:\\Users\\Alex\\Projects\\notes or a project folder), then find_files again. "
                 "Optional under= restricts to a root label or path."
             ),
             "parameters": {
@@ -165,7 +165,7 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Filename or substring to find (e.g. screenshot_processor.py).",
+                        "description": "Filename or substring to find (e.g. notes.md).",
                     },
                     "under": {
                         "type": "string",
@@ -189,7 +189,7 @@ TOOL_SCHEMAS = [
             "name": "remember_workspace_root",
             "description": (
                 "Trust a folder for future find_files searches. "
-                "Call when the user gives a project/root path (e.g. C:\\Users\\proto\\Clippy_Vision) "
+                "Call when the user gives a project/root path (e.g. C:\\Users\\Alex\\Projects\\notes) "
                 "or says to remember where their projects live. "
                 "NOT for opening files (return paths via find_files; host opens them)."
             ),

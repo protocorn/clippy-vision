@@ -1,7 +1,7 @@
-import { nameInput, nameSubmit, nameError, nameView, insightsView } from './dom.js'
+import { nameInput, nameSubmit, nameError, nameView } from './dom.js'
 import { showView } from './utils.js'
 import { setCaptureUI } from './capture-ui.js'
-import { openInsights } from './insights.js'
+import { openTimeline } from './timeline.js'
 
 export async function submitName() {
   const name = nameInput.value.trim()
@@ -15,10 +15,9 @@ export async function submitName() {
 
   try {
     await window.clippy.setName(name)
-    showView(insightsView)
     const active = await window.clippy.getCaptureStatus()
     setCaptureUI(active)
-    openInsights()
+    openTimeline()
   } catch (error) {
     nameError.textContent = `Could not save name: ${error.message}`
   } finally {

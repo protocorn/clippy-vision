@@ -13,7 +13,7 @@ from pathlib import Path
 # process even when the classifier never actually loads. It's imported lazily
 # inside load_classifier() instead, only once we know we're really loading it.
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
   sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -43,7 +43,7 @@ MINILM_MODEL = "sentence-transformers/paraphrase-MiniLM-L3-v2"
 MINILM_CONFIDENCE_THRESHOLD = 0.50
 SECONDARY_THRESHOLD = 0.20
 
-CLASSIFIER_PATH = Path(__file__).parent.parent / "models" / "router_classifier" / "best"
+CLASSIFIER_PATH = Path(__file__).resolve().parent / "models" / "router_classifier" / "best"
 
 _PREFETCH_THRESHOLDS: dict[str, float] = {
     "memory_query":    0.55,
@@ -110,13 +110,6 @@ def load_classifier():
   with _classifier_lock:
     if _classification_model is not None:
       return _classification_model, _classification_tokenizer
-
-    try:
-      from core.model_download import ensure_router_model, router_ready
-      if not router_ready(CLASSIFIER_PATH):
-        ensure_router_model()
-    except Exception as e:
-      print(f"[router] Could not download classifier: {e}")
 
     if not CLASSIFIER_PATH.exists() or not (CLASSIFIER_PATH / "model.pt").is_file():
       print(f"[router] Classifier checkpoint not found at {CLASSIFIER_PATH}; using tool-driven retrieval")
@@ -255,7 +248,7 @@ INPUT FORMAT
 You receive the last 1-3 conversation turns followed by the current query. Example:
 
   User: what did I work on yesterday?
-  Clippy: You worked on Clippy Vision debugging.
+  Clippy: You worked on the notes app.
   User: what about the day before?
 
 Classify based on the CURRENT (last) query. Use prior turns only to resolve
@@ -314,7 +307,7 @@ PRIMARY - always exactly one. Use priority order below when ambiguous.
 
 SECONDARY - add ONLY when the query explicitly REQUIRES two distinct retrieval
 strategies to answer fully. When in doubt, leave [].
-  Correct:   "how many hours on Clippy Vision this week?" ==> aggregation + [time_anchored, topic_search]
+  Correct:   "how many hours on the notes app this week?" ==> aggregation + [time_anchored, topic_search]
   Incorrect: "what did I do yesterday?" ==> time_anchored + [aggregation]  (aggregation not required)
 
 TEMPORAL_HINT - populate whenever time_anchored appears in primary OR secondary.
@@ -330,7 +323,7 @@ CRITICAL BOUNDARIES
 
 memory_query vs topic_search:
   "what projects have I told you about?"    ==> memory_query  (user told the assistant)
-  "what have I been working on for Clippy?" ==> topic_search  (requires activity log)
+  "what have I been working on for the notes app?" ==> topic_search  (requires activity log)
   "what are my skills?"                     ==> memory_query  (stored identity fact)
   "what have I been doing with Python?"     ==> topic_search  (activity-based)
 
@@ -383,7 +376,7 @@ EXAMPLES (CORRECT)
 "what was the command I ran to set up the dev environment?"
 ==> primary: specific_recall, secondary: []
 
-"what have I been working on for Clippy Vision?"
+"what have I been working on for the notes app?"
 ==> primary: topic_search, secondary: []
 
 "what is the latest feature I was planning to add?"
@@ -403,7 +396,7 @@ EXAMPLES (CORRECT)
 "what about the day before?"
 ==> primary: follow_up_inherit, secondary: ["time_anchored"], temporal_hint: "day before"
 
-[Prior turn: "what was I planning for Clippy Vision?"]
+[Prior turn: "what was I planning for the notes app?"]
 "check it properly"
 ==> primary: follow_up_inherit, secondary: ["topic_search"]
 

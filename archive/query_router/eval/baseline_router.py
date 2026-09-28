@@ -1,7 +1,7 @@
 """
 Keyword/regex baseline router.
 
-Implements the labelling policy (docs/router_labelling_policy.md) as deterministic
+Implements the labelling policy (archive/query_router/router_labelling_policy.md) as deterministic
 rules. Zero ML, ~0ms latency. Used to answer: does the trained MiniLM classifier
 beat what a page of regexes gets for free?
 """

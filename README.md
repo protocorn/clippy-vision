@@ -149,7 +149,6 @@ The app will open the setup wizard on first launch and walk you through dependen
 - **Privacy-first redaction** - Clippy Vision's own window is blacked out in every screenshot before the AI ever sees it
 - **Three-tier event classification** - rule-based → feature-based → LLM fallback, so only meaningful events are stored
 - **Low-cost screen text** - accessibility/UI text first with RapidOCR fallback; no vision model in capture
-- **Smart query router** - a fine-tuned MiniLM classifier routes every question to the right retrieval strategy before the LLM is even called
 - **ReAct agent** - structured reasoning with tools: SQL generation, memory recall, fact saving
 - **Conversation memory** - rolling summaries + semantic search over past conversations
 - **Timeline view** - browse captured sessions in the app and drill into exactly what was recorded
@@ -176,7 +175,6 @@ No dates attached to any of it. [PROJECT_VISION.md](PROJECT_VISION.md) has the c
 | Main reasoning model | User-chosen Ollama model (suggested default `qwen3:8b`) |
 | Screenshot text | Accessibility APIs + RapidOCR fallback |
 | Embedding model | `all-MiniLM-L6-v2`, downloaded from Hugging Face on first run (event RAG is opt-in) |
-| Query classifier | Fine-tuned MiniLM, downloaded from Hugging Face on first run |
 | Database | SQLite (WAL mode) |
 | Screen capture | `mss`, `pywin32`, `pynput` |
 
@@ -231,23 +229,7 @@ Conflicting facts are preserved in `memory_conflicts` and surfaced to the agent 
 
 ---
 
-### Segment 4 - Query Router
-
-A fine-tuned **MiniLM-L3** classifier (`agent/router.py`) maps every incoming query to one of:
-
-| Category | What it covers |
-|----------|---------------|
-| `time_anchored` | "What was I doing yesterday at 3 PM?" |
-| `topic_search` | "What did I work on related to Clippy?" |
-| `specific_recall` | "What URL was I reading this morning?" |
-| `memory_query` | Questions about facts Clippy has memorized |
-| `casual` | General chat, no retrieval needed |
-
-Each category has a dedicated prefetch module. Context is retrieved in parallel before the LLM is called, so the agent already has relevant data in its prompt without needing to make tool calls reactively.
-
----
-
-### Segment 5 - Asking about your history (MCP)
+### Segment 4 - Asking about your history (MCP)
 
 Clippy Vision is the **capture + memory layer**. Conversational Q&A is meant to happen in a bigger model via **MCP** (Cursor, Claude Desktop, etc.):
 
@@ -262,13 +244,14 @@ Clippy Vision is the **capture + memory layer**. Conversational Q&A is meant to 
 | `list_screenshots_tool` / `get_screenshot_tool` | Frames when on disk; OCR backup after adaptive TTL |
 | `recall_memory_tool` / `fetch_cluster_tool` | Long-term memory (freshness-ranked; hides recovered junk by default) |
 | `save_identity_tool` / `save_note_tool` / `delete_note_tool` | Explicit memory writes |
+| `remember_turn_tool` | Local extractor stores facts from the user's own message |
 | `find_files_tool` / `list_workspace_roots_tool` | Trusted filesystem path recall (host opens files/URLs) |
 
 Connect under **Settings → Connect apps**. Timeline, privacy, and capture controls stay in this desktop app. There is no in-app ReAct chat agent.
 
 ---
 
-### Segment 6 - Database
+### Segment 5 - Database
 
 All data lives in a local SQLite database (`core/data/events.db`):
 

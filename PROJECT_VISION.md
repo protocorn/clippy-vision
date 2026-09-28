@@ -42,7 +42,7 @@ No fixed timeline, ordered by priority rather than by date.
 **Version 1.3.0 (Shipped)**
 - [x] MCP server ships with the packaged app: `mcp_server.py` and the `scripts/clippy-mcp` launchers are bundled, paths resolve when Claude Desktop / Cursor / VS Code spawn it with no Clippy environment, and Settings → Connect apps generates the per-client config.
 - [x] Capture efficiency: accessibility-tree walks moved off the capture hot path onto a background worker (`core/uia_worker.py`), backlog enrichment throttles under system load without starving old screenshots, and local performance metrics (`core/performance_metrics.py`) make the overhead measurable.
-- [x] Model weights are no longer bundled: MiniLM embeddings and the fine-tuned query router download from Hugging Face during setup or on first use (`core/model_download.py`), keeping the repo and installer small.
+- [x] Model weights are no longer bundled: MiniLM embeddings download from Hugging Face during setup or on first use (`core/model_download.py`), keeping the repo and installer small.
 - [x] Timeline view: browse captured sessions in the app and drill into what was recorded.
 - [x] Electron shell refactor: monolithic `main.js` and `index.html` split into focused main-process modules and ES modules.
 
@@ -67,7 +67,7 @@ The timeline shows what was captured; the missing half is deleting individual en
 Local transcription with faster-whisper or whisper.cpp, pinned to CPU so it does not compete with the reasoning model for RAM or VRAM. First version attributes speech by audio source rather than by voice: microphone is the user, system output loopback is everyone else, which needs no enrollment and no extra model. Voiceprint matching (a one-time voice sample, then embedding similarity per segment) is a later addition for in-person conversations where every voice arrives through the mic. No meeting-platform APIs or bots, loopback capture works the same across Zoom, Meet and Teams. macOS system audio is the hard part and will need ScreenCaptureKit audio or a virtual device.
 
 *Memory → action agent (Plan B — product north star for capabilities)*
-Clippy already perceives and remembers. The next capability bet is general actions on top of that memory: retrieve what the user saw/did, then open paths/URLs, focus apps, and later use a11y-first GUI primitives — always **tools/OS first, pixel-click last**, and **not** a pile of per-app integrations. Observe → retrieve → reason → act → verify. Design: `docs/computer_use_agent.md`. Proactive stuck-detection (`docs/stuck_detector.md`) becomes a later policy layer that can *offer* these same actions at the right time.
+Clippy already perceives and remembers. The next capability bet is general actions on top of that memory: retrieve what the user saw/did, then open paths/URLs, focus apps, and later use a11y-first GUI primitives — always **tools/OS first, pixel-click last**, and **not** a pile of per-app integrations. Observe → retrieve → reason → act → verify.
 
 *Mouse and idle signals (capture reliability — Phase A enough before Plan B v0)*
 Mouse/HID exists first to make **capture reliable**: OS last-input / idle age, and idle that **stretches** background screenshot gaps (does not hard-skip — on-screen automation can continue while the user is away). Short polls so returning from idle resets quickly. Do **not** store raw click/scroll streams. Bounded mouse aggregates and proactive `need_for_help` scoring are deferred while Plan B v0 (open-from-memory) is built. Full mouse-kinematics baselines remain optional later work.

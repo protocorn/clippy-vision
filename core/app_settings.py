@@ -15,10 +15,10 @@ _DEFAULTS: dict[str, Any] = {
     "ocr_enabled": True,
     # PARKED — contributor feature; default off. Ask the contributor whether to
     # keep CLIP image embeddings and why. Clippy's spine is text (a11y/OCR +
-    # router/prefetch); CLIP only helps "search by look" and costs RAM/Torch.
+    # session search and memory); CLIP only helps "search by look" and costs RAM/Torch.
     "image_embeddings_enabled": False,
     # PARKED — contributor feature; default off. Ask the contributor whether to
-    # keep event-level RAG and why. Router + prefetch already handle most chat
+    # keep event-level RAG and why. Session search and memory already handle most chat
     # recall; this only adds MiniLM vectors on raw events for fuzzy
     # search_events / empty-session topic_search fallbacks.
     "rag_enabled": False,

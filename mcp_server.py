@@ -21,6 +21,7 @@ with redirect_stdout(sys.stderr):
         recall_memory,
         save_identity,
         save_note,
+        remember_turn,
     )
     from agent.mcp_query import (
         activity_coverage,
@@ -211,6 +212,17 @@ def save_identity_tool(field: str, op: str, value: str = "", items: list[str] = 
     op='override' only when the user explicitly corrects a previous fact.
     op='remove_items' with items=[] to remove from a list."""
     return _call_tool(save_identity, field=field, value=value, op=op, items=items)
+
+
+@mcp.tool()
+def remember_turn_tool(user_message: str) -> str:
+    """Store durable facts from the user's own words.
+    Call after the user tells you something about themselves, their preferences,
+    relationships, plans, or anything they would want recalled later.
+    Pass only the user's message, not your reply.
+    Skip for activity questions, file search, and one-off tasks.
+    Secrets, passwords, and API keys are not stored."""
+    return _call_tool(remember_turn, user_message)
 
 
 @mcp.tool()

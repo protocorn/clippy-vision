@@ -615,6 +615,321 @@ def extract_accessibility_text(hwnd: int | None = None) -> str:
     return ""
 
 
+_EDIT_CONTROL_TYPES = {"EditControl", "SpinnerControl"}
+_FIELD_NAME_MAX = 48
+_MAX_SECRET_LOOKUPS = 12
+
+
+def _edit_value(control) -> str:
+    """Current field contents. Password controls still report empty while masked."""
+    if _is_password(control):
+        return ""
+    try:
+        pattern = control.GetValuePattern()
+        value = "" if pattern is None else str(pattern.Value or "")
+    except Exception:
+        return ""
+    return value.strip()[:200]
+
+
+def _pattern_source_text(control) -> str:
+    """Raw TextPattern buffer for the control that actually holds the text.
+
+    The .env case is this buffer: the focused editor's DocumentRange, which
+    is what gets written to the accessibility sidecar. FindText needs those
+    characters unchanged, so this does not normalize or drop lines.
+    """
+    if control is None:
+        return ""
+    try:
+        pattern = control.GetTextPattern()
+        document = None if pattern is None else pattern.DocumentRange
+        if document is None:
+            return ""
+        return str(document.GetText(MAX_TEXT_CHARS) or "")
+    except Exception:
+        return ""
+
+
+def _rects_for_values(control, values: list[str]) -> tuple[list[tuple[int, int, int, int]], bool]:
+    """Visible line rectangles for secret strings, and whether every value was located.
+
+    IUIAutomationTextRange.FindText returns the first hit. The search range
+    then starts at that hit's end so a repeated secret is not left on screen.
+    ``complete`` is false when any value has no rectangle; the caller paints
+    the whole control instead of leaving that span visible.
+    """
+    try:
+        pattern = control.GetTextPattern()
+        document = None if pattern is None else pattern.DocumentRange
+    except Exception:
+        return [], False
+    if document is None:
+        return [], False
+    try:
+        import uiautomation as auto
+
+        start = auto.TextPatternRangeEndpoint.Start
+        end = auto.TextPatternRangeEndpoint.End
+    except Exception:
+        return [], False
+
+    rects: list[tuple[int, int, int, int]] = []
+    complete = len(values) <= _MAX_SECRET_LOOKUPS
+    for value in values[:_MAX_SECRET_LOOKUPS]:
+        try:
+            search = document.Clone()
+        except Exception:
+            return rects, False
+        located = False
+        for _hit in range(4):
+            try:
+                found = search.FindText(value, False, False)
+            except Exception:
+                found = None
+            if found is None:
+                break
+            try:
+                for rect in found.GetBoundingRectangles():
+                    if rect.width() >= 4 and rect.height() >= 4:
+                        rects.append(
+                            (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
+                        )
+                        located = True
+            except Exception:
+                pass
+            try:
+                if not search.MoveEndpointByRange(start, found, end, waitTime=0):
+                    break
+            except Exception:
+                break
+        if not located:
+            complete = False
+    return rects, complete
+
+
+def _focused_editor(auto):
+    """Focused Edit or Document. That is the control whose buffer was stored for Cursor."""
+    try:
+        focused = auto.GetFocusedControl()
+    except Exception:
+        return None
+    if focused is None or _control_type_name(focused) not in {"EditControl", "DocumentControl"}:
+        return None
+    return focused
+
+
+def _own_label(control) -> str:
+    """Text that belongs to this control, not the document underneath it."""
+    try:
+        name = str(getattr(control, "Name", "") or "").strip()
+    except Exception:
+        return ""
+    if not name or len(name) > 180 or "\n" in name:
+        return ""
+    return name
+
+
+def _note_edit(control, edit_rects: list, edit_values: list, seen: set) -> None:
+    try:
+        from core.secret_fields import should_redact_edit
+    except ImportError:
+        from secret_fields import should_redact_edit
+
+    bounds = _control_bounds(control)
+    if bounds is None or bounds in seen:
+        return
+    is_password = _is_password(control)
+    name = ""
+    try:
+        name = str(getattr(control, "Name", "") or "")
+    except Exception:
+        name = ""
+    height = bounds[3] - bounds[1]
+    if not is_password and not should_redact_edit(name, height):
+        return
+    seen.add(bounds)
+    edit_rects.append(bounds)
+    edit_values.append(_edit_value(control))
+
+
+def collect_redaction(hwnd: int | None = None) -> dict | None:
+    """Fields and secret spans to remove before a screenshot is stored.
+
+    Single-line edits are collected from the page document, not the window
+    root. A browser toolbar otherwise spends the node budget before the
+    login fields are reached. Secret strings are taken from that document
+    and from the focused editor, because a .env buffer is the focused
+    editor's text, not a single-line field. Returns None when the walk
+    cannot run, so the caller can drop the frame.
+    """
+    try:
+        from core.secret_patterns import (
+            is_secret_name,
+            paired_row_secrets,
+            redact_field_values,
+            redact_secrets,
+            secret_values,
+        )
+    except ImportError:
+        from secret_patterns import (
+            is_secret_name,
+            paired_row_secrets,
+            redact_field_values,
+            redact_secrets,
+            secret_values,
+        )
+
+    if not IS_WINDOWS:
+        return {"edit_rects": [], "secret_rects": [], "redacted_text": ""}
+    try:
+        import uiautomation as auto
+        import win32gui
+
+        target = hwnd or win32gui.GetForegroundWindow()
+        if not target:
+            return None
+        root = auto.ControlFromHandle(target)
+        if root is None:
+            return None
+    except Exception:
+        return None
+
+    document = _find_best_document(root)
+    focused = _focused_editor(auto)
+    if document is not None:
+        edit_scope = document
+    elif focused is not None:
+        try:
+            edit_scope = focused.GetParentControl() or focused
+        except Exception:
+            edit_scope = focused
+    else:
+        edit_scope = root
+
+    edit_rects: list[tuple[int, int, int, int]] = []
+    edit_values: list[str] = []
+    seen_edits: set[tuple[int, int, int, int]] = set()
+    row_nodes: list[dict] = []
+    queue = deque([(edit_scope, 0)])
+    visited = 0
+    while queue and visited < MAX_UI_NODES:
+        control, depth = queue.popleft()
+        visited += 1
+        try:
+            ctype = _control_type_name(control)
+            bounds = _control_bounds(control)
+            is_password = _is_password(control)
+            if ctype in _EDIT_CONTROL_TYPES or is_password:
+                _note_edit(control, edit_rects, edit_values, seen_edits)
+            label = _own_label(control)
+            if label and bounds is not None:
+                row_nodes.append({"text": label, "bounds": bounds})
+                if is_secret_name(label):
+                    value = _edit_value(control)
+                    if value and value != label:
+                        row_nodes.append({"text": value, "bounds": bounds})
+            if depth < MAX_UI_DEPTH and ctype not in _CHROME_CONTROL_TYPES:
+                queue.extend((child, depth + 1) for child in control.GetChildren())
+        except Exception:
+            continue
+    if focused is not None:
+        _note_edit(focused, edit_rects, edit_values, seen_edits)
+
+    chunks: list[str] = []
+    secret_rects: list[tuple[int, int, int, int]] = []
+    seen_controls = set()
+    for control in (focused, document):
+        if control is None or id(control) in seen_controls:
+            continue
+        seen_controls.add(id(control))
+        raw = _pattern_source_text(control)
+        if not raw.strip():
+            continue
+        chunks.append(raw)
+        values = secret_values(raw)
+        if not values:
+            continue
+        located, complete = _rects_for_values(control, values)
+        secret_rects.extend(located)
+        if not complete:
+            bounds = _control_bounds(control)
+            if bounds is not None:
+                secret_rects.append(bounds)
+    paired = paired_row_secrets(row_nodes)
+    secret_rects.extend(item["bounds"] for item in paired)
+    value_tokens = edit_values + [item["text"] for item in paired]
+    redacted = redact_secrets(redact_field_values("\n".join(chunks), value_tokens))
+    return {
+        "edit_rects": edit_rects,
+        "secret_rects": secret_rects,
+        "redacted_text": normalize_accessibility_text(redacted),
+    }
+
+
+def collect_edit_snapshots(hwnd: int | None = None) -> list[dict] | None:
+    """Edit boxes and nearby captions for secret-field memory.
+
+    Returns None when the walk could not run, so the caller keeps the
+    previous fingerprint. Returns [] when the window truly has no edits.
+    Values are not read. Names longer than a caption are dropped so a
+    document body cannot become part of the fingerprint.
+    """
+    if not IS_WINDOWS:
+        return []
+    try:
+        import uiautomation as auto
+        import win32gui
+
+        target = hwnd or win32gui.GetForegroundWindow()
+        if not target:
+            return None
+        root = auto.ControlFromHandle(target)
+        if root is None:
+            return None
+    except Exception:
+        return None
+
+    nodes: list[dict] = []
+    queue = deque([(root, 0)])
+    visited = 0
+    while queue and visited < MAX_UI_NODES:
+        control, depth = queue.popleft()
+        visited += 1
+        try:
+            ctype = _control_type_name(control)
+            bounds = _control_bounds(control)
+            is_password = _is_password(control)
+            name = ""
+            try:
+                name = str(getattr(control, "Name", "") or "")
+            except Exception:
+                name = ""
+            if not name:
+                try:
+                    name = str(getattr(control, "AutomationId", "") or "")
+                except Exception:
+                    name = ""
+            name = " ".join(name.split())
+            if len(name) > _FIELD_NAME_MAX:
+                name = ""
+            is_edit = ctype in _EDIT_CONTROL_TYPES or is_password
+            if bounds is not None and (is_edit or name):
+                nodes.append(
+                    {
+                        "name": name,
+                        "bounds": bounds,
+                        "is_password": is_password,
+                        "is_edit": is_edit,
+                    }
+                )
+            if depth < MAX_UI_DEPTH:
+                queue.extend((child, depth + 1) for child in control.GetChildren())
+        except Exception:
+            continue
+    return nodes
+
+
 def _run_with_timeout(func, timeout: float, *args, **kwargs):
     """Run ``func`` on a helper thread and abandon it past ``timeout``.
     UIA COM calls can hang indefinitely against certain apps. Python cannot
@@ -643,3 +958,15 @@ def foreground_content_bounds_safe(
 def extract_accessibility_text_safe(hwnd: int | None = None, timeout: float = 1.5) -> str:
     """Timeout-guarded wrapper — the one background workers should call."""
     return _run_with_timeout(extract_accessibility_text, timeout, hwnd) or ""
+
+
+def collect_edit_snapshots_safe(
+    hwnd: int | None = None, timeout: float = 1.5
+) -> list[dict] | None:
+    """Timeout-guarded field walk. None means keep the previous fingerprint."""
+    return _run_with_timeout(collect_edit_snapshots, timeout, hwnd)
+
+
+def collect_redaction_safe(hwnd: int | None = None, timeout: float = 1.5) -> dict | None:
+    """Timeout-guarded redaction targets. None means the walk did not finish."""
+    return _run_with_timeout(collect_redaction, timeout, hwnd)

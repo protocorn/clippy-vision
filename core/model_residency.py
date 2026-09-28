@@ -242,7 +242,7 @@ def text_unavailable_reason() -> str:
 
 
 def can_load_light(available: int | None = None) -> bool:
-    """True if a small torch model (MiniLM router, CLIP) can load."""
+    """True if a small torch model (MiniLM embeddings, CLIP) can load."""
     free = _available() if available is None else available
     return free >= _LIGHT_FLOOR and not _under_pressure()
 

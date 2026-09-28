@@ -1,5 +1,5 @@
 ﻿import {
- settingsView, insightsView, settingsName, settingsIntro,
+ settingsView, settingsName, settingsIntro,
  identityFields, identityNewKey, identityNewVal, identityAddBtn, profileStatus,
  updateCheckToggle, updatesStatus, aboutVersion, aboutPlatform, aboutModel, aboutMemory,
  aboutBadge, privacyList, privacyStatus, privacyCount, workspaceRootsList, workspaceRootInput,
@@ -9,7 +9,7 @@
  store, updateBanner,
 } from './dom.js'
 import { showView, setStatus } from './utils.js'
-import { openInsights } from './insights.js'
+import { openTimeline } from './timeline.js'
 
 let profileSaveInFlight = false
 
@@ -445,7 +445,7 @@ export async function openSettings() {
 }
 
 export function closeSettings() {
- openInsights()
+ openTimeline()
 }
 
 export async function saveUpdateCheck() {

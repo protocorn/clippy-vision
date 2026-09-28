@@ -23,7 +23,7 @@ jobs:
     steps:
       # Checkout the ref the workflow was triggered on (tag push or dispatch branch),
       # not the release tag input — so workflow_dispatch from main builds current packaging.
-      # lfs: true pulls model weights (e.g. router_classifier/best/model.pt) tracked via Git LFS.
+      # lfs: true pulls any remaining Git LFS objects. Model weights are downloaded, not committed.
       - name: Checkout
         uses: actions/checkout@v4
         with:

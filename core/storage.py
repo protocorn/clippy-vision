@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import threading
 import time
 
 from core.events import Event
@@ -18,9 +19,60 @@ SUMMARIZER_EVENT_TYPES = (
 )
 
 _DB_PATH = str(get_db_path())
-conn = sqlite3.connect(_DB_PATH, check_same_thread=False, timeout=30)
-conn.execute("PRAGMA journal_mode=WAL")
-conn.commit()
+_thread_local = threading.local()
+
+
+def _new_connection() -> sqlite3.Connection:
+    # One connection per thread. A shared Connection with check_same_thread=False
+    # races inside pysqlite and raises sqlite3.InterfaceError ("bad parameter
+    # or other API misuse") from screenshot timers, clipboard, and workers.
+    connection = sqlite3.connect(_DB_PATH, timeout=30)
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA busy_timeout=30000")
+    connection.commit()
+    return connection
+
+
+def get_connection() -> sqlite3.Connection:
+    connection = getattr(_thread_local, "conn", None)
+    if connection is None:
+        connection = _new_connection()
+        _thread_local.conn = connection
+    return connection
+
+
+class _ThreadLocalConnection:
+    """Drop-in for the old module-level ``conn``; forwards to this thread's db."""
+
+    def execute(self, *args, **kwargs):
+        return get_connection().execute(*args, **kwargs)
+
+    def executemany(self, *args, **kwargs):
+        return get_connection().executemany(*args, **kwargs)
+
+    def executescript(self, sql):
+        return get_connection().executescript(sql)
+
+    def commit(self):
+        return get_connection().commit()
+
+    def rollback(self):
+        return get_connection().rollback()
+
+    def close(self):
+        connection = getattr(_thread_local, "conn", None)
+        if connection is not None:
+            connection.close()
+            _thread_local.conn = None
+
+    def cursor(self, *args, **kwargs):
+        return get_connection().cursor(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(get_connection(), name)
+
+
+conn = _ThreadLocalConnection()
 
 
 def _table_columns(table: str) -> set[str]:
@@ -172,6 +224,7 @@ CREATE TABLE IF NOT EXISTS sessions(
 conn.commit()
 
 _ensure_column("sessions", "summary_embedding", "TEXT")
+_ensure_column("sessions", "content_hash", "TEXT")
 
 conn.execute("""
 CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts
@@ -212,6 +265,21 @@ for _fts_table in ("events_fts", "sessions_fts"):
 conn.commit()
 
 _ensure_column("sessions", "vision_enriched", "INTEGER DEFAULT 0")
+
+conn.execute("""
+CREATE TABLE IF NOT EXISTS summarizer_skips (
+    skip_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    window_start REAL NOT NULL,
+    window_end   REAL NOT NULL,
+    reason       TEXT,
+    created_at   REAL NOT NULL
+)
+""")
+conn.execute(
+    "CREATE INDEX IF NOT EXISTS idx_summarizer_skips_window "
+    "ON summarizer_skips(window_start, window_end)"
+)
+conn.commit()
 
 
 
@@ -438,8 +506,9 @@ def store_summary(summary: dict, vision_enriched: bool = False, embedding: list 
             session_id, summary_id, created_at,
             window_start, window_end,
             summary, active_task, entities,
-            event_count, expires_at, vision_enriched, summary_embedding
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            event_count, expires_at, vision_enriched, summary_embedding,
+            content_hash
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             summary["session_id"],
             summary["summary_id"],
@@ -453,7 +522,34 @@ def store_summary(summary: dict, vision_enriched: bool = False, embedding: list 
             summary["created_at"] + (TTL_SUMMARY_DAYS * 24 * 60 * 60),
             1 if vision_enriched else 0,
             json.dumps(embedding) if embedding else None,
+            summary.get("content_hash"),
         )
+    )
+    conn.commit()
+
+
+def has_recent_content_hash(content_hash: str, within_secs: float) -> bool:
+    """True when the same activity fingerprint was stored recently."""
+    if not content_hash:
+        return False
+    cutoff = time.time() - within_secs
+    row = conn.execute(
+        """SELECT 1 FROM sessions
+           WHERE content_hash = ? AND created_at >= ?
+           LIMIT 1""",
+        (content_hash, cutoff),
+    ).fetchone()
+    return row is not None
+
+
+def record_summarizer_skip(window_start: float, window_end: float, reason: str) -> None:
+    """Mark a span as reviewed and not worth a summary, so it leaves the queue."""
+    if window_end < window_start:
+        window_end = window_start
+    conn.execute(
+        """INSERT INTO summarizer_skips (window_start, window_end, reason, created_at)
+           VALUES (?, ?, ?, ?)""",
+        (window_start, window_end, reason, time.time()),
     )
     conn.commit()
 
@@ -556,6 +652,11 @@ def get_unsummarized_events(since: float) -> list[dict]:
                SELECT 1 FROM sessions s
                WHERE events.timestamp >= s.window_start
                  AND events.timestamp <= s.window_end
+           )
+           AND NOT EXISTS (
+               SELECT 1 FROM summarizer_skips k
+               WHERE events.timestamp >= k.window_start
+                 AND events.timestamp <= k.window_end
            )
            ORDER BY timestamp ASC""",
         (since, *SUMMARIZER_EVENT_TYPES),

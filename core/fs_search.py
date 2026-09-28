@@ -114,7 +114,7 @@ def _resolve_search_roots(
         if not trusted:
             return [], (
                 "No trusted workspace folders. Ask the user for a project root "
-                "(e.g. C:\\Users\\proto\\Clippy_Vision) and call remember_workspace_root, "
+                "(e.g. C:\\Users\\Alex\\Projects\\notes) and call remember_workspace_root, "
                 "or pass under= with that path once."
             )
         paths = [Path(r["path"]) for r in trusted]
@@ -202,7 +202,7 @@ def find_files(
     if not query:
         return {
             "ok": False,
-            "error": "name is required (filename or substring, e.g. screenshot_processor.py)",
+            "error": "name is required (filename or substring, e.g. notes.md)",
             "matches": [],
             "roots_searched": [],
         }

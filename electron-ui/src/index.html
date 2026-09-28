@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;600;700&display=swap"
     rel="stylesheet" />
   <link rel="stylesheet" href="styles/app.css" />
 </head>
@@ -38,7 +38,11 @@
     <header id="app-header" style="display:flex; justify-content:space-between; align-items:center;">
       <div class="header-actions">
         <!-- ARCHIVED: Chats drawer + New Chat — see archive/in_app_chat/ -->
-        <button type="button" id="app-brand" class="app-brand" title="Day cards home">Clippy Vision</button>
+        <button type="button" id="home-btn" class="header-btn icon-label-btn" title="Sessions">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+          <span>Sessions</span>
+        </button>
+        <button type="button" id="app-brand" class="app-brand" title="Sessions">Clippy Vision</button>
       </div>
       <div class="header-actions">
         <div class="nav-more" id="nav-more">
@@ -47,7 +51,7 @@
             <svg class="nav-more-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
           <div class="nav-more-menu" id="nav-more-menu" hidden role="menu">
-            <button type="button" id="timeline-btn" class="nav-more-item" role="menuitem" data-nav="timeline">Timeline</button>
+            <button type="button" id="home-menu-btn" class="nav-more-item" role="menuitem" data-nav="home">Sessions</button>
             <button type="button" id="settings-btn" class="nav-more-item" role="menuitem" data-nav="settings">Settings</button>
           </div>
         </div>
@@ -67,41 +71,6 @@
     </div>
 
     <div id="app-panels">
-      <!-- Insight cards home (in-app chat archived → archive/in_app_chat/) -->
-      <div id="insights-view" class="app-panel active">
-        <div class="insights-shell">
-          <div class="insights-toolbar">
-            <div class="insights-day-nav">
-              <button type="button" id="insights-prev-day" class="header-btn" title="Previous day">←</button>
-              <h1 id="insights-date-label" class="insights-date-label">Today</h1>
-              <button type="button" id="insights-next-day" class="header-btn" title="Next day">→</button>
-            </div>
-            <div class="insights-toolbar-actions">
-              <button type="button" id="insights-threads-btn" class="header-btn" aria-expanded="false">
-                Threads in motion
-              </button>
-              <button type="button" id="insights-refresh-btn" class="header-btn" title="Regenerate day card">
-                Refresh
-              </button>
-            </div>
-          </div>
-          <p id="insights-status" class="insights-status" aria-live="polite"></p>
-          <div class="insights-scroll">
-            <article id="insights-day-body" class="insights-card-body message-body md"></article>
-            <section id="insights-threads-panel" class="insights-threads-panel" hidden>
-              <div class="insights-threads-head">
-                <h2>Threads in motion</h2>
-                <button type="button" id="insights-threads-refresh" class="header-btn">Refresh threads</button>
-              </div>
-              <div id="insights-threads-body" class="insights-card-body message-body md"></div>
-            </section>
-            <p class="insights-footnote">
-              Ask deeper questions by connecting via MCP (Settings → Connect apps).
-            </p>
-          </div>
-        </div>
-      </div>
-
       <!-- Settings panel -->
       <div id="settings-view" class="app-panel">
         <div class="settings-shell">
@@ -302,7 +271,7 @@
       </div>
 
       <!-- Timeline panel -->
-      <div id="timeline-view" class="app-panel">
+      <div id="timeline-view" class="app-panel active">
         <div id="timeline-body">
           <div id="timeline-list-wrap">
             <div id="timeline-list-scroll">

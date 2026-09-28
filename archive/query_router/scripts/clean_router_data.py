@@ -1,5 +1,5 @@
 """
-Clean the router training data, per testing/router_eval/FINDINGS.md.
+Clean the router training data before a retrain.
 
 Steps (in order):
   1. Strip the multi-turn "User:/Clippy:" format from NON-follow_up_inherit rows —
@@ -15,8 +15,8 @@ Writes the cleaned rows back to router_generated.jsonl (backup saved first).
 router_seed.jsonl is never modified.
 
 Usage:
-    python scripts/clean_router_data.py --dry-run
-    python scripts/clean_router_data.py --cap 250
+    python archive/query_router/scripts/clean_router_data.py --dry-run
+    python archive/query_router/scripts/clean_router_data.py --cap 250
 """
 
 import argparse
@@ -28,10 +28,10 @@ from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent
-SEED_FILE = ROOT / "core" / "data" / "router_seed.jsonl"
-GENERATED_FILE = ROOT / "core" / "data" / "router_generated.jsonl"
-GOLDEN_FILE = ROOT / "testing" / "router_eval" / "golden_set.jsonl"
+ARCHIVE = Path(__file__).resolve().parents[1]
+SEED_FILE = ARCHIVE / "router_seed.jsonl"
+GENERATED_FILE = ARCHIVE / "router_generated.jsonl"
+GOLDEN_FILE = ARCHIVE / "eval" / "golden_set.jsonl"
 
 SEED = 42
 NEAR_DUP_RATIO = 0.85

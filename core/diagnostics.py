@@ -21,7 +21,6 @@ _REQUIRED_IMPORTS = {
     "onnxruntime": "OCR inference",
     "transformers": "local MiniLM embeddings",
     "torch": "local MiniLM embeddings",
-    "sklearn": "router classifier",
 }
 
 

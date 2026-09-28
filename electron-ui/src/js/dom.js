@@ -1,7 +1,6 @@
 export const nameView = document.getElementById('name-view')
 export const appShell = document.getElementById('app-shell')
 // ARCHIVED: chatView / composer / drawer — see archive/in_app_chat/
-export const insightsView = document.getElementById('insights-view')
 export const settingsView = document.getElementById('settings-view')
 export const timelineView = document.getElementById('timeline-view')
 export const nameInput = document.getElementById('name-input')
@@ -9,6 +8,8 @@ export const nameSubmit = document.getElementById('name-submit')
 export const nameError = document.getElementById('name-error')
 
 export const appBrand = document.getElementById('app-brand')
+export const homeBtn = document.getElementById('home-btn')
+export const homeMenuBtn = document.getElementById('home-menu-btn')
 export const settingsBtn = document.getElementById('settings-btn')
 export const navMore = document.getElementById('nav-more')
 export const navMoreBtn = document.getElementById('nav-more-btn')
@@ -16,18 +17,6 @@ export const navMoreMenu = document.getElementById('nav-more-menu')
 export const captureBtn = document.getElementById('capture-btn')
 export const captureLabel = document.getElementById('capture-label')
 
-export const insightsDateLabel = document.getElementById('insights-date-label')
-export const insightsPrevDay = document.getElementById('insights-prev-day')
-export const insightsNextDay = document.getElementById('insights-next-day')
-export const insightsRefreshBtn = document.getElementById('insights-refresh-btn')
-export const insightsThreadsBtn = document.getElementById('insights-threads-btn')
-export const insightsStatus = document.getElementById('insights-status')
-export const insightsDayBody = document.getElementById('insights-day-body')
-export const insightsThreadsPanel = document.getElementById('insights-threads-panel')
-export const insightsThreadsBody = document.getElementById('insights-threads-body')
-export const insightsThreadsRefresh = document.getElementById('insights-threads-refresh')
-
-export const timelineBtn = document.getElementById('timeline-btn')
 export const timelineBody = document.getElementById('timeline-body')
 export const timelineList = document.getElementById('timeline-list')
 export const timelineLoadMore = document.getElementById('timeline-load-more')
@@ -80,7 +69,7 @@ export const updateBannerDismiss = document.getElementById('update-banner-dismis
 
 export const wideLayoutMq = window.matchMedia('(min-width: 800px)')
 
-export const APP_PANELS = [insightsView, settingsView, timelineView]
+export const APP_PANELS = [settingsView, timelineView]
 
 export const store = {
  searchTimer: null,
@@ -97,9 +86,6 @@ export const store = {
  timelineOffset: 0,
  timelineLoading: false,
  timelineSelectedId: null,
- insightDay: null,
- insightsBusy: false,
- insightsThreadsOpen: false,
 }
 
 export const EVENT_TYPE_LABELS = {

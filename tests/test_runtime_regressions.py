@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from datetime import datetime
@@ -27,7 +28,6 @@ from agent.prefetch.specific_recall import (
     specific_recall,
 )
 from agent.prefetch.topic_search import topic_search
-from agent.router import _deterministic_route, classify_query
 from classifier.tier_two_classifier import VERDICT_SCHEMA
 from classifier.worker import apply_verdict, apply_vision_verdict
 from core import rag
@@ -195,7 +195,6 @@ class RuntimeRegressionTests(unittest.TestCase):
         package = json.loads(package_path.read_text())
         filters = package["build"]["extraResources"][0]["filter"]
         self.assertNotIn("models/embeddings/all-MiniLM-L6-v2/**/*", filters)
-        self.assertNotIn("models/router_classifier/best/**/*", filters)
 
     def test_clear_events_removes_activity_derived_memory_but_preserves_chat_memory(self):
         stamp = time.time()
@@ -238,20 +237,6 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertNotIn("inferred_skill", profile)
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM memory_facts").fetchone()[0], 0)
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM memory_clusters").fetchone()[0], 0)
-
-    def test_only_artifact_queries_bypass_the_classifier(self):
-        screenshot_decision, screenshot_confidence = classify_query(
-            "What was I doing in the screenshot from 8/4/2026, 1:12:29 PM?"
-        )
-        self.assertEqual(screenshot_decision.primary, "specific_recall")
-        self.assertIn("time_anchored", screenshot_decision.secondary)
-        self.assertEqual(screenshot_confidence, 1.0)
-
-        artifact = _deterministic_route("what was the link I copied?")
-        self.assertEqual(artifact.primary, "specific_recall")
-        self.assertIsNone(_deterministic_route("what do you know about me right now?"))
-        self.assertIsNone(_deterministic_route("show me last Tuesday"))
-        self.assertIsNone(_deterministic_route("what was I working on?"))
 
     def test_memory_prefetch_does_not_duplicate_the_profile(self):
         with patch(
@@ -413,6 +398,32 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertIn("facts", exported["memory"])
         match = next(item for item in exported["events"] if item["event_id"] == event["event_id"])
         self.assertEqual(match["screenshot_filename"], "export-frame.jpg")
+
+    def test_sqlite_connections_are_isolated_per_thread(self):
+        from core.storage import get_connection
+
+        errors: list[str] = []
+        connection_ids: dict[int, int] = {}
+
+        def worker(index: int) -> None:
+            try:
+                connection_ids[index] = id(get_connection())
+                for n in range(30):
+                    settings = get_capture_settings()
+                    if "capture_screenshots" not in settings:
+                        raise AssertionError("settings missing capture_screenshots")
+                    if n % 8 == 0:
+                        store_event(make_event(f"thread-conn-{index}-{n}"))
+            except Exception as exc:
+                errors.append(f"{index}: {type(exc).__name__}: {exc}")
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(len(set(connection_ids.values())), 8)
 
     def test_storage_size_includes_sqlite_wal_and_shared_memory_files(self):
         expected = 0
@@ -611,12 +622,13 @@ class RuntimeRegressionTests(unittest.TestCase):
     def test_old_group_batch_is_empty_when_no_backlog(self):
         self.assertEqual(_select_old_group_batch([], depth=0), [])
 
-    def test_accessibility_text_skips_ocr_when_ui_text_is_useful(self):
+    def test_accessibility_text_is_kept_when_it_covers_the_screen(self):
         path = get_screenshots_dir() / "accessibility-first.jpg"
         Image.new("RGB", (4, 4), "white").save(path, format="JPEG")
         self.addCleanup(path.unlink, missing_ok=True)
+        visible = "Configure local capture and privacy controls for this project today"
         ui_text = normalize_accessibility_text(
-            "Project settings\nConfigure local capture and privacy controls"
+            visible + "\nThe rest of the document sits above the viewport and is still in the accessibility tree"
         )
         self.assertTrue(is_useful_accessibility_text(ui_text))
         remember_accessibility_text(path, ui_text)
@@ -624,10 +636,10 @@ class RuntimeRegressionTests(unittest.TestCase):
         with patch(
             "core.screenshot_enrichment.get_capture_settings",
             return_value={"ocr_enabled": True, "image_embeddings_enabled": False},
-        ), patch("core.screenshot_enrichment.extract_text") as extract_ocr:
+        ), patch("core.screenshot_enrichment.extract_text", return_value=visible) as extract_ocr:
             captured_text, image_embedding, image_model = enrich_screenshot(path)
 
-        extract_ocr.assert_not_called()
+        extract_ocr.assert_called()
         self.assertEqual(captured_text, ui_text)
         self.assertIsNone(image_embedding)
         self.assertIsNone(image_model)
@@ -674,6 +686,39 @@ class RuntimeRegressionTests(unittest.TestCase):
         a11y = "\n".join(["Pin conversation", "Open conversation options"] * 8)
         ocr = "Crafting Interview Introduction. Write a strong opening paragraph about your goals."
         self.assertEqual(choose_screen_text(a11y, ocr), ocr)
+
+    def test_choose_screen_text_keeps_a11y_when_it_contains_the_screen_and_more(self):
+        from core.screenshot_enrichment import choose_screen_text
+
+        visible = "Configure local capture and privacy controls for this project today"
+        a11y = visible + "\nThe rest of the document sits above the viewport and remains available"
+        self.assertEqual(choose_screen_text(a11y, visible), a11y)
+
+    def test_choose_screen_text_keeps_ocr_when_a11y_misses_the_screen(self):
+        from core.screenshot_enrichment import choose_screen_text
+
+        ocr = "Crafting Interview Introduction. Write a strong opening paragraph about your goals."
+        a11y = "A long accessibility dump about menus toolbars and unrelated settings panels " * 4
+        self.assertEqual(choose_screen_text(a11y, ocr), ocr)
+
+    def test_typing_continuation_drops_the_earlier_frame_on_the_same_tab(self):
+        from pathlib import Path
+
+        from core.screenshot_scheduler import is_text_continuation, same_typing_surface, superseded_typing_paths
+
+        earlier = "hello there friend this is the draft"
+        later = earlier + " and the rest of the paragraph"
+        self.assertTrue(is_text_continuation(earlier, later))
+        self.assertFalse(is_text_continuation(earlier, "goodbye this is a different note about cats and dogs"))
+        tab = "chrome.exe\x1fInbox\x1fhttps://mail.example/inbox"
+        frames = [
+            {"path": Path("a.jpg"), "window_key": tab, "text": earlier},
+            {"path": Path("b.jpg"), "window_key": tab, "text": later},
+        ]
+        self.assertEqual(superseded_typing_paths(frames), [Path("a.jpg")])
+        frames[1] = {"path": Path("b.jpg"), "window_key": "chrome.exe\x1fOther\x1fhttps://mail.example/other", "text": later}
+        self.assertEqual(superseded_typing_paths(frames), [])
+        self.assertTrue(same_typing_surface(tab, "chrome.exe\x1fInbox - Google Chrome\x1fhttps://mail.example/inbox"))
 
     def test_capture_models_and_event_rag_are_opt_in(self):
         settings = normalize_capture_settings({})

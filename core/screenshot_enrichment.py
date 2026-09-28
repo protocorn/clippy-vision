@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 import tempfile
 from pathlib import Path
@@ -36,23 +37,55 @@ def merge_ocr_text(*values: str | None) -> str:
     return "\n".join(lines)[:_MAX_SCREEN_CHARS]
 
 
+_WORD_RE = re.compile(r"[a-z0-9']+")
+_OCR_COVERAGE = 0.75
+_A11Y_EXTRA = 1.15
+
+
+def _significant_words(text: str) -> list[str]:
+    return [word for word in _WORD_RE.findall((text or "").casefold()) if len(word) >= 4]
+
+
+def ocr_coverage_in_accessibility(ocr_text: str, accessibility_text: str) -> float:
+    """Share of on-screen words that also appear in the accessibility text."""
+    words = _significant_words(ocr_text)
+    if not words:
+        return 0.0
+    haystack = set(_significant_words(accessibility_text))
+    return sum(1 for word in words if word in haystack) / len(words)
+
+
 def choose_screen_text(accessibility_text: str = "", ocr_text: str = "") -> str:
-    """
-    One best source for vision_ocr_text:
-      1) useful OCR → OCR only (a11y is crop geometry, not the stored text)
-      2) else useful a11y → a11y fallback when OCR is empty/junk
-      3) else a11y crumbs, then OCR crumbs
+    """Pick the stored screen text.
+
+    OCR is what was visible. Accessibility text is kept when it still contains
+    that visible text and is materially longer, so off-screen editor or page
+    text is not thrown away. A tie, or an accessibility tree that missed the
+    screen, stays with OCR.
     """
     a11y = normalize_accessibility_text(accessibility_text)
     ocr = merge_ocr_text(ocr_text)
+    ocr_useful = is_useful_accessibility_text(ocr)
+    a11y_useful = is_useful_accessibility_text(a11y)
+    coverage = ocr_coverage_in_accessibility(ocr, a11y)
+    a11y_covers_screen = (
+        ocr_useful
+        and a11y_useful
+        and len(_significant_words(ocr)) >= 4
+        and coverage >= _OCR_COVERAGE
+        and len(a11y) > len(ocr) * _A11Y_EXTRA
+    )
+    if a11y_covers_screen:
+        chosen = a11y
+    elif ocr_useful:
+        chosen = ocr
+    elif a11y.strip():
+        chosen = a11y
+    else:
+        chosen = ocr
+    from core.secret_patterns import redact_secrets
 
-    if is_useful_accessibility_text(ocr):
-        return ocr[:_MAX_SCREEN_CHARS]
-    if is_useful_accessibility_text(a11y):
-        return a11y[:_MAX_SCREEN_CHARS]
-    if a11y.strip():
-        return a11y[:_MAX_SCREEN_CHARS]
-    return ocr[:_MAX_SCREEN_CHARS]
+    return redact_secrets(chosen)[:_MAX_SCREEN_CHARS]
 
 
 def remember_accessibility_text(path: Path, text: str) -> None:

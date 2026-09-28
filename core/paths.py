@@ -5,8 +5,8 @@ Packaged:       set CLIPPY_DATA_DIR to %APPDATA%/Clippy Vision/data
                 (Electron main.js sets this when spawning Python).
 
 Safety net: if some test module is imported under pytest without setting
-CLIPPY_DATA_DIR (e.g. a stray bench/test_*.py collected by a bare `pytest`
-invocation, or a forgotten isolation guard in a future test file), silently
+CLIPPY_DATA_DIR (a stray module outside tests/, or a forgotten isolation
+guard in a future test file), silently
 falling back to the real dev data dir would let destructive test code
 (DELETE FROM events/sessions, synthetic event inserts, etc.) mutate the
 user's real activity history. This has happened before — see

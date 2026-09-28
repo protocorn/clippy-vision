@@ -1,6 +1,6 @@
 /**
  * ARCHIVED — conversation history drawer.
- * Live home is insight cards. Restore notes: archive/in_app_chat/README.md
+ * Live home is the session timeline. Restore notes: archive/in_app_chat/README.md
  * Original path: electron-ui/src/js/conversations.js
  */
 import { drawer, drawerBackdrop, convList, convSearch, convSearchHint, chatView, messages, wideLayoutMq, store } from './dom.js'

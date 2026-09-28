@@ -3,6 +3,7 @@
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from uuid import uuid4
@@ -10,7 +11,13 @@ from uuid import uuid4
 os.environ.setdefault("CLIPPY_DATA_DIR", tempfile.mkdtemp(prefix="clippy-tests-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core.storage import conn, get_unsummarized_events, store_summary
+from core.storage import (
+    conn,
+    get_unsummarized_events,
+    has_recent_content_hash,
+    record_summarizer_skip,
+    store_summary,
+)
 from core.summarizer import _group_events_by_time_window
 
 
@@ -23,6 +30,7 @@ class SummarizerDedupTests(unittest.TestCase):
     def tearDown(self):
         conn.execute("DELETE FROM events WHERE event_id LIKE ?", (f"{self.prefix}%",))
         conn.execute("DELETE FROM sessions WHERE summary_id LIKE ?", (f"{self.prefix}%",))
+        conn.execute("DELETE FROM summarizer_skips WHERE reason LIKE ?", (f"{self.prefix}%",))
         conn.commit()
 
     def _insert_event(self, label: str, session_id: str, timestamp: float) -> None:
@@ -86,6 +94,36 @@ class SummarizerDedupTests(unittest.TestCase):
         ).fetchall()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0], first["summary_id"])
+
+    def test_recent_content_hash_collapses_a_repeat(self):
+        base = time.time()
+        digest = f"{self.prefix}-hash"
+        store_summary(
+            {
+                "session_id": self.capture_sid,
+                "summary_id": f"{self.prefix}-hashed",
+                "created_at": base,
+                "window_start": base,
+                "window_end": base + 5,
+                "summary": "Edited the one pager",
+                "active_task": "one pager",
+                "event_count": 1,
+                "content_hash": digest,
+            },
+            vision_enriched=True,
+        )
+        self.assertTrue(has_recent_content_hash(digest, 30 * 60))
+        self.assertFalse(has_recent_content_hash(digest + "-other", 30 * 60))
+
+    def test_skip_span_leaves_the_summarizer_queue(self):
+        base = 7_000_000.0
+        self._insert_event("idle", self.capture_sid, base)
+        record_summarizer_skip(base, base, f"{self.prefix}-idle")
+        unsummarized = get_unsummarized_events(base - 1)
+        self.assertEqual(
+            [event["event_id"] for event in unsummarized if event["event_id"].startswith(self.prefix)],
+            [],
+        )
 
     def test_group_events_by_time_window_merges_process_session_ids(self):
         base = 3_000_000.0

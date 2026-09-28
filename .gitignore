@@ -9,15 +9,13 @@ core/data/events.db*
 core/data/screenshots/
 
 # All generated/runtime data under core/data
-# (router_generated.jsonl, router_augmented.jsonl, baseline.json, etc.)
-# Exception: router_seed.jsonl is intentional source data and IS committed.
+# (baseline.json, capture status, events db, etc.)
 core/data/
-!core/data/router_seed.jsonl
 
 # ============================================================
 # MODEL WEIGHTS  (downloaded from Hugging Face on first run)
 # Embeddings: sentence-transformers/all-MiniLM-L6-v2
-# Router:     sahil2412/clippy-vision-router
+# Query-router weights live under archive/query_router/models/ and stay local.
 # ============================================================
 *.pt
 *.bin
@@ -25,6 +23,8 @@ core/data/
 models/router_classifier/
 models/embeddings/
 models/**/.cache/
+archive/query_router/models/
+archive/query_router/router_generated.jsonl
 
 # ============================================================
 # BUILD / PACKAGING ARTIFACTS
@@ -60,8 +60,7 @@ ENV/
 # TEST & BENCH OUTPUT FILES  (run-generated results)
 # ============================================================
 tests/results/
-testing/router_eval/results/
-bench/results/
+archive/query_router/eval/results/
 
 # ============================================================
 # SCRATCH / TEMP FILES

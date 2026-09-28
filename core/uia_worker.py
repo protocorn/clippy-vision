@@ -20,7 +20,11 @@ import queue
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from core.accessibility_text import extract_accessibility_text_safe, foreground_content_bounds_safe
+from core.accessibility_text import (
+    collect_redaction_safe,
+    foreground_content_bounds_safe,
+)
+from core.secret_patterns import auth_page_label
 from core.app_settings import get_capture_settings
 from core.ocr_crop import save_crop_metadata
 from core.performance_metrics import increment, set_gauge, timed
@@ -38,6 +42,7 @@ class UiaJob:
     image_width: int
     image_height: int
     monitor: dict
+    redacted_text: str = ""
 
 _queue: "queue.Queue[UiaJob]" = queue.Queue(maxsize=_MAX_QUEUE)
 _started = False
@@ -74,15 +79,26 @@ def submit_uia_job(
     image_width: int,
     image_height: int,
     monitor: dict,
+    redacted_text: str = "",
 ) -> None:
     """Enqueue UIA work for a just-captured screenshot. Never blocks the caller.
     ``expected_window_key`` should be window_key(metadata) for the window
     that was foreground *at capture time* — the worker uses it to confirm
     the target hasn't changed to something else (or something sensitive)
     before it runs, on every platform.
+    ``redacted_text`` is the buffer already scrubbed during capture. The
+    worker stores that string instead of reading the live editor again.
     """
 
-    job = UiaJob(screenshot_path, hwnd, expected_window_key, image_width, image_height, monitor)
+    job = UiaJob(
+        screenshot_path,
+        hwnd,
+        expected_window_key,
+        image_width,
+        image_height,
+        monitor,
+        redacted_text,
+    )
 
     try:
         _queue.put_nowait(job)
@@ -116,6 +132,14 @@ def _target_still_safe(job: UiaJob) -> bool:
 
 def _process_job(job: UiaJob, timeout: float) -> None:
     with timed("uia_worker.job_total"):
+        parts = (job.expected_window_key or "").split("\x1f")
+        page_label = auth_page_label(parts[2] if len(parts) > 2 else "")
+        # Text captured with the frame is already scrubbed. Write it even if
+        # focus has moved; a later read would be a different window.
+        if page_label:
+            _write_accessibility_text(job.screenshot_path, page_label)
+        elif (job.redacted_text or "").strip():
+            _write_accessibility_text(job.screenshot_path, job.redacted_text)
         if not _target_still_safe(job):
             increment("uia_worker.target_changed")
             return
@@ -131,11 +155,15 @@ def _process_job(job: UiaJob, timeout: float) -> None:
             )
         else:
             increment("uia_worker.bounds_timeout_or_empty")
-        with timed("uia_worker.text"):
-            text = extract_accessibility_text_safe(job.hwnd, timeout=timeout)
-        # Re-check after extraction too: on a slow call the user may have
-        # switched windows (or navigated within the same one) while it ran.
-        if not text.strip() or not _target_still_safe(job):
+        if page_label or (job.redacted_text or "").strip():
+            return
+        if not _target_still_safe(job):
+            increment("uia_worker.text_empty_or_target_changed")
+            return
+        with timed("uia_worker.fields"):
+            redaction = collect_redaction_safe(job.hwnd, timeout=timeout)
+        text = (redaction or {}).get("redacted_text") or ""
+        if not text.strip():
             increment("uia_worker.text_empty_or_target_changed")
             return
         _write_accessibility_text(job.screenshot_path, text)

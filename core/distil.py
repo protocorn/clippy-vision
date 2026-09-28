@@ -490,26 +490,31 @@ def _update_profile_from_message(user_message: str) -> None:
 
     if saved:
         print(f"\n  [DISTIL/profile] updated: {', '.join(saved)}")
+    return saved
 
 
-def ingest_conversation(user_message: str, agent_reply: str) -> None:
+def ingest_conversation(user_message: str, agent_reply: str) -> dict:
     """Extract facts from a completed agent turn and route them into memory clusters.
     Also extracts structured biographical fields and saves them to identity memory
     (always-injected) so they are reliably available without semantic retrieval.
     Only the user message is used as the fact source — the agent reply is output,
     not ground truth about the user.
-    Designed to run in a background thread — all LLM calls use Priority.BACKGROUND."""
+    Designed to run in a background thread — all LLM calls use Priority.BACKGROUND.
+    Returns {"facts": [...], "profile": [...]} and may include "error"."""
     try:
-        _ingest_conversation(user_message, agent_reply)
+        return _ingest_conversation(user_message, agent_reply)
     except OSError as exc:
         # Soft defer (RAM/CPU gates) must never crash the chat turn's background thread.
         print(f"  [DISTIL/agent] deferred: {exc}")
+        return {"facts": [], "profile": [], "error": str(exc)}
     except Exception as exc:
         print(f"  [DISTIL/agent] ingest failed: {exc}")
+        return {"facts": [], "profile": [], "error": str(exc)}
 
 
-def _ingest_conversation(user_message: str, agent_reply: str) -> None:
+def _ingest_conversation(user_message: str, agent_reply: str) -> dict:
     turn_text = f"USER: {user_message}"
+    # agent_reply is accepted so older callers can pass the turn, and is not stored.
 
 
     # Gate: skip turns with no personal content
@@ -523,13 +528,11 @@ def _ingest_conversation(user_message: str, agent_reply: str) -> None:
     gate_content = gate_body["message"]["content"]
     gate = json.loads(gate_content) if isinstance(gate_content, str) else gate_content
     if not gate.get("contains_facts"):
-        return
-
-
+        return {"facts": [], "profile": []}
 
     # Always try to update the long-term user profile with any biographical info.
     # Runs regardless of whether atomic facts are also found.
-    _update_profile_from_message(user_message)
+    profile = _update_profile_from_message(user_message) or []
 
 
     # Extract atomic facts and route into semantic clusters
@@ -545,7 +548,7 @@ def _ingest_conversation(user_message: str, agent_reply: str) -> None:
     facts = extracted.get("facts", [])
 
     if not facts:
-        return
+        return {"facts": [], "profile": profile}
 
     print(f"\n  [DISTIL/agent] {len(facts)} fact(s) from conversation turn")
 
@@ -571,6 +574,7 @@ def _ingest_conversation(user_message: str, agent_reply: str) -> None:
                 _merge_into_cluster(target, fact, emb, source="agent")
             else:
                 target = _create_cluster(fact, emb, source="agent")
+    return {"facts": list(facts), "profile": profile}
 
 
 _LABEL_SYS = (

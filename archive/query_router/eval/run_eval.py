@@ -2,7 +2,7 @@
 Router evaluation harness.
 
 Compares three routing strategies on an independent hand-labeled golden set
-(testing/router_eval/golden_set.jsonl — written separately from the training data):
+(archive/query_router/eval/golden_set.jsonl — written separately from the training data):
 
   1. minilm   - the fine-tuned MiniLM classifier (agent/router.py)
   2. baseline - keyword/regex rules implementing the labelling policy (0 ML)
@@ -17,8 +17,8 @@ Reports:
   - latency per query
 
 Usage (from repo root):
-    python testing/router_eval/run_eval.py
-    python testing/router_eval/run_eval.py --with-llm
+    python archive/query_router/eval/run_eval.py
+    python archive/query_router/eval/run_eval.py --with-llm
 """
 
 import argparse
@@ -28,8 +28,10 @@ import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(ROOT))
+REPO = Path(__file__).resolve().parents[3]
+ARCHIVE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(ARCHIVE))
 sys.path.insert(0, str(Path(__file__).parent))
 
 GOLDEN = Path(__file__).parent / "golden_set.jsonl"
@@ -76,7 +78,7 @@ def load_golden() -> list[dict]:
 # ─────────────────────────────────────────────────────────────
 
 def make_minilm_router():
-    from agent.router import classify_query
+    from router import classify_query
 
     def run(text: str):
         t0 = time.perf_counter()
@@ -105,7 +107,7 @@ def make_llm_router():
 
     from core.llm_gateway import Priority, gateway
 
-    src = (ROOT / "agent" / "router.py").read_text(encoding="utf-8")
+    src = (ARCHIVE / "router.py").read_text(encoding="utf-8")
     m = _re.search(r'SYSTEM_PROMPT = ```\n(.*?)```', src, _re.DOTALL)
     system_prompt = m.group(1)
 

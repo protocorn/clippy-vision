@@ -3,7 +3,7 @@
 PARKED / under review with the contributor who added this. Default is off
 (``rag_enabled``). Decide keep-or-remove with them and document the reason.
 
-This is NOT the primary chat retrieval path. Router + prefetch already cover
+This is NOT the primary chat retrieval path. Session search and memory already cover
 most recall via session summaries, time windows, artifact SQL/FTS, and memory
 facts. When enabled it only adds fuzzy semantic search over raw events
 (OCR/titles/payloads) for:

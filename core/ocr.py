@@ -64,9 +64,17 @@ def _get_engine():
     return _engine
 
 
+def _unwrap_ocr_result(result):
+    """RapidOCR has returned (boxes, texts, scores), objects, and (output, elapsed)."""
+    if isinstance(result, tuple) and len(result) == 2 and not isinstance(result[0], (list, tuple)):
+        return result[0]
+    return result
+
+
 def _parts(result):
     # RapidOCR has returned tuples, lists, objects, and dictionaries across
     # releases. Normalize those shapes before confidence filtering.
+    result = _unwrap_ocr_result(result)
     if result is None:
         return [], []
     if isinstance(result, tuple) and len(result) >= 3:
@@ -82,9 +90,57 @@ def _parts(result):
     return [], []
 
 
+def _boxes(result):
+    result = _unwrap_ocr_result(result)
+    if result is None:
+        return []
+    if isinstance(result, tuple) and result and isinstance(result[0], (list, tuple)):
+        return list(result[0] or [])
+    if isinstance(result, list) and result and isinstance(result[0], (list, tuple)):
+        return list(result[0] or [])
+    boxes = getattr(result, "boxes", None)
+    if boxes is not None:
+        return list(boxes)
+    if isinstance(result, dict):
+        return list(result.get("boxes") or [])
+    return []
+
+
 def _clean_text(value: object) -> str:
     text = _space_re.sub(" ", str(value or "")).strip()
     return text if len(text) >= 2 else ""
+
+
+def ocr_line_boxes(image) -> list[dict]:
+    """OCR an in-memory image and return line text with quadrilateral boxes.
+
+    Used to black out secrets before the JPEG is written. Returns [] when
+    the engine is unavailable. Boxes are in image pixels.
+    """
+    engine = _get_engine()
+    if engine is None:
+        return []
+    try:
+        import numpy as np
+
+        array = np.asarray(image.convert("RGB")) if hasattr(image, "convert") else image
+        result = engine(array)
+    except Exception as exc:
+        print(f"[ocr] in-memory secret pass failed: {exc}")
+        return []
+    texts, scores = _parts(result)
+    boxes = _boxes(result)
+    lines: list[dict] = []
+    for index, value in enumerate(texts):
+        text = _clean_text(value)
+        if not text:
+            continue
+        score = float(scores[index]) if index < len(scores) else 1.0
+        if score < OCR_MIN_CONFIDENCE:
+            continue
+        box = boxes[index] if index < len(boxes) else None
+        lines.append({"text": text, "box": box, "score": score})
+    return lines
 
 
 def extract_text(path: Path) -> str:

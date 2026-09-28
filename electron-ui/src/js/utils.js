@@ -1,6 +1,6 @@
 import {
-  nameView, insightsView, loadingView, settingsView, timelineView, appShell,
-  APP_PANELS, timelineBtn, settingsBtn, navMoreBtn, wideLayoutMq,
+  nameView, timelineView, loadingView, settingsView, appShell,
+  APP_PANELS, settingsBtn, navMoreBtn, homeBtn, homeMenuBtn, wideLayoutMq,
 } from './dom.js'
 
 export function setStatus(el, text, kind) {
@@ -11,11 +11,12 @@ export function setStatus(el, text, kind) {
 }
 
 function syncNavActive(panel) {
-  const onTimeline = panel === timelineView
+  const onSessions = panel === timelineView
   const onSettings = panel === settingsView
-  if (timelineBtn) timelineBtn.classList.toggle('is-nav-active', onTimeline)
+  if (homeBtn) homeBtn.classList.toggle('is-nav-active', onSessions)
+  if (homeMenuBtn) homeMenuBtn.classList.toggle('is-nav-active', onSessions)
   if (settingsBtn) settingsBtn.classList.toggle('is-nav-active', onSettings)
-  if (navMoreBtn) navMoreBtn.classList.toggle('is-nav-active', onTimeline || onSettings)
+  if (navMoreBtn) navMoreBtn.classList.toggle('is-nav-active', onSettings)
 }
 
 export function showView(view) {
@@ -34,7 +35,7 @@ export function showView(view) {
 
   // Insights / Settings / Timeline share the persistent top navbar.
   if (appShell) appShell.classList.add('active')
-  const panel = APP_PANELS.includes(view) ? view : insightsView
+  const panel = APP_PANELS.includes(view) ? view : timelineView
   if (panel) panel.classList.add('active')
   syncNavActive(panel)
 }

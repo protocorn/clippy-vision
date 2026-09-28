@@ -30,7 +30,7 @@
 {"text": "wht was i dong last weke", "primary": "time_anchored", "tag": "typo"}
 {"text": "what have I been working on lately?", "primary": "topic_search", "tag": "boundary"}
 {"text": "what was I doing before sleeping?", "primary": "topic_search", "tag": "boundary"}
-{"text": "show me everything related to the Launchway project", "primary": "topic_search", "tag": "easy"}
+{"text": "show me everything related to the notes app", "primary": "topic_search", "tag": "easy"}
 {"text": "what have I been doing with Docker?", "primary": "topic_search", "tag": "easy"}
 {"text": "what did I research about vector databases?", "primary": "topic_search", "tag": "easy"}
 {"text": "have I done anything with the landing page redesign?", "primary": "topic_search", "tag": "easy"}

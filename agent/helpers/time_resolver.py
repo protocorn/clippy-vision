@@ -1,10 +1,8 @@
-"""Deterministic time-anchor resolution for router pre-fetch.
+"""Resolve time phrases in a question into an absolute [start, end) epoch range.
 
-Given a query already classified as time_anchored (agent/router.py), resolve
-the time expression it contains into an absolute [start, end) epoch range
-anchored to "now". Returns None when nothing can be confidently resolved —
-callers fall back to the existing LLM SQL path. This module only adds a fast
-path; it never replaces the fallback.
+Used by search in agent/retrieval.py. Returns None when nothing can be
+confidently resolved — callers fall back to the LLM SQL path. This module
+only adds a fast path; it never replaces the fallback.
 
 parsedatetime is unmaintained (last release May 2020), so its known gaps are
 patched here permanently:
@@ -29,8 +27,6 @@ me what I did yesterday?" is not mistaken for future intent. Typo correction
 covers the cue words too (capped at 1 edit — see _INTENT_VOCAB). "This
 weekend" asked on a weekday with no past-tense evidence means the UPCOMING
 weekend and is rejected; asked during the weekend it means the current one.
-This is a second, independent layer on top of the router classifier's own
-training on this same distinction (see docs/router_labelling_policy.md).
 """
 
 import re

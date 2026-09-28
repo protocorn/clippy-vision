@@ -2,7 +2,7 @@
 
 PARKED / under review with the contributor who added this. Default is off
 (``image_embeddings_enabled``). Ask them whether to keep CLIP and why —
-Clippy today retrieves by text (a11y/OCR, titles, sessions, router/prefetch),
+Clippy today retrieves by text (a11y/OCR, titles, sessions, memory),
 not by visual similarity. Enabling this loads Torch/CLIP (or falls back to a
 non-text-searchable pixel signature) and adds per-frame RAM/CPU cost.
 

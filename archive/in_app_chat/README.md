@@ -1,8 +1,8 @@
 # Archived: in-app chat UI
 
 The default Clippy Vision shell no longer shows chat. Capture + MCP (Cursor /
-Claude / etc.) remain the way to ask questions about activity. Insight cards
-(Day Card + Threads) are the home surface instead.
+Claude / etc.) remain the way to ask questions about activity. The home
+surface is the captured-session timeline.
 
 ## Why archived (not deleted)
 

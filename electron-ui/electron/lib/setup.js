@@ -353,16 +353,16 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
     }
 
     async function stepPullModels() {
-        // Download MiniLM + router from Hugging Face, then pull the user's local AI model
+        // Download MiniLM embeddings from Hugging Face, then pull the user's local AI model
         // from Ollama. Capture uses accessibility + OCR (no vision model).
-        stepUpdate('models', 'running', 'Downloading local ML models (MiniLM + router)...')
+        stepUpdate('models', 'running', 'Downloading local ML models (MiniLM)...')
         log('> python -m core.model_download', 'dim')
         try {
             const { code, stdout, stderr } = await runCommand(PYTHON_COMMAND, ['-m', 'core.model_download'], { cwd: ROOT })
             if (stdout) log(stdout, 'dim')
             if (stderr) log(stderr, code === 0 ? 'dim' : 'err')
             if (code !== 0) {
-                log('HF model download failed — embeddings/router will retry on first use.', 'err')
+                log('HF model download failed — embeddings will retry on first use.', 'err')
             } else {
                 log('Local ML models ready.', 'ok')
             }
@@ -591,7 +591,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         // Import checks are a cheap proxy for the full capture dependency set.
         const pkgCheck = await runCommand(PYTHON_COMMAND, [
             '-c',
-            'import fastapi, uvicorn, pynput, mss, PIL, psutil, imagehash, transformers, torch, sklearn',
+            'import fastapi, uvicorn, pynput, mss, PIL, psutil, imagehash, transformers, torch',
         ])
         if (pkgCheck.code !== 0) {
             return describePreflightFailure('packages', 'One or more Python packages are missing.')

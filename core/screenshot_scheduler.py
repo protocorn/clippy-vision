@@ -1,4 +1,5 @@
 import io
+import re
 import threading
 import time
 from pathlib import Path
@@ -63,20 +64,113 @@ except ImportError:
     # Redaction rules (Clippy window + user privacy toggles) live in privacy_settings.
     from privacy_settings import is_clippy_window, should_redact_window
 try:
-    from core.accessibility_text import extract_accessibility_text
+    from core.secret_fields import paint_screen_rects
+    from core.secret_patterns import auth_page_label, paint_secret_text
+except ImportError:
+    from secret_fields import paint_screen_rects
+    from secret_patterns import auth_page_label, paint_secret_text
+try:
+    from core.accessibility_text import collect_redaction_safe, extract_accessibility_text
     from core.app_settings import get_capture_settings
     from core.ocr_crop import save_crop_metadata
     from core.uia_worker import submit_uia_job
 except ImportError:
-    from accessibility_text import extract_accessibility_text
+    from accessibility_text import collect_redaction_safe, extract_accessibility_text
     from app_settings import get_capture_settings
     from ocr_crop import save_crop_metadata
     from uia_worker import submit_uia_job
 
 _lock = threading.Lock()
+_typing_lock = threading.Lock()
 _last_capture_ms = 0
 _last_capture_hash = None
 _activity_timer: threading.Timer | None = None
+_typing_active = False
+_typing_frames: list[dict] = []
+_TITLE_NOISE = re.compile(r"(\s+[-–—*].*|\s+\*)$")
+
+
+def _title_stem(title: str) -> str:
+    return _TITLE_NOISE.sub("", (title or "").casefold()).strip()
+
+
+def _surface_parts(key: str) -> tuple[str, str, str]:
+    parts = (key or "").split("\x1f")
+    while len(parts) < 3:
+        parts.append("")
+    return parts[0], parts[1], parts[2]
+
+
+def same_typing_surface(earlier_key: str, later_key: str) -> bool:
+    """Same app and tab. A browser tab is its URL; a desktop doc is its title."""
+    if not earlier_key or not later_key or earlier_key == "unknown" or later_key == "unknown":
+        return False
+    process_a, title_a, url_a = _surface_parts(earlier_key)
+    process_b, title_b, url_b = _surface_parts(later_key)
+    if process_a != process_b or url_a != url_b:
+        return False
+    if url_a:
+        return True
+    stem_a = _title_stem(title_a)
+    stem_b = _title_stem(title_b)
+    return bool(stem_a) and (stem_a == stem_b or stem_a.startswith(stem_b) or stem_b.startswith(stem_a))
+
+
+def is_text_continuation(earlier: str, later: str) -> bool:
+    """True when the later screen text still contains the earlier draft."""
+    old = " ".join((earlier or "").split()).casefold()
+    new = " ".join((later or "").split()).casefold()
+    if not old:
+        return True
+    if not new:
+        return False
+    if old in new:
+        return True
+    limit = min(len(old), len(new))
+    shared = 0
+    while shared < limit and old[shared] == new[shared]:
+        shared += 1
+    return shared >= max(12, int(len(old) * 0.8))
+
+
+def superseded_typing_paths(frames: list[dict]) -> list[Path]:
+    """Earlier frames fully covered by the latest shot on the same tab."""
+    if len(frames) < 2:
+        return []
+    latest = frames[-1]
+    if not str(latest.get("text") or "").strip():
+        return []
+    drop: list[Path] = []
+    for earlier in frames[:-1]:
+        if same_typing_surface(str(earlier.get("window_key") or ""), str(latest.get("window_key") or "")) and is_text_continuation(
+            str(earlier.get("text") or ""), str(latest.get("text") or "")
+        ):
+            path = earlier.get("path")
+            if path is not None:
+                drop.append(Path(path))
+    return drop
+
+
+def _delete_screenshot(path: Path) -> None:
+    path.unlink(missing_ok=True)
+    path.with_name(path.stem + "_processed.jpg").unlink(missing_ok=True)
+    path.with_suffix(".a11y.txt").unlink(missing_ok=True)
+    path.with_suffix(".ocr-crop.json").unlink(missing_ok=True)
+    path.with_suffix(".tmp").unlink(missing_ok=True)
+
+
+def _discard_superseded_typing_frames() -> None:
+    drop = superseded_typing_paths(_typing_frames)
+    for path in drop:
+        _delete_screenshot(path)
+        increment("screenshots.typing_superseded")
+        print(f"[capture] discarded superseded typing frame {path.name}")
+
+
+def _remember_typing_frame(path: Path, key: str, text: str) -> None:
+    if not _typing_active:
+        return
+    _typing_frames.append({"path": path, "window_key": key, "text": text})
 
 
 def _foreground_accessibility_text() -> str:
@@ -202,7 +296,7 @@ def _foreground_hwnd() -> int | None:
         return None
 
 
-def capture_screenshot(timestamp_ms: int) -> Path | None:
+def capture_screenshot(timestamp_ms: int, *, ignore_dedup: bool = False) -> Path | None:
     settings = get_capture_settings()
     if not settings["capture_screenshots"]:
         return None
@@ -217,8 +311,49 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
                     screenshot = sct.grab(monitor)
                     img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
 
+            hwnd = _foreground_hwnd()
+            metadata = get_window_metadata()
+            page_label = auth_page_label((metadata or {}).get("active_url") or "")
+            redacted_text = ""
             with timed("screenshot.redaction"):
                 _redact_clippy_windows(img, monitor)
+                if page_label:
+                    # The address is the auth page. Black that window from
+                    # Win32 bounds. Query strings are not consulted. If the
+                    # window rectangle is unknown, drop the frame.
+                    rect = None
+                    if hwnd and IS_WINDOWS:
+                        import win32gui
+
+                        try:
+                            rect = win32gui.GetWindowRect(hwnd)
+                        except Exception:
+                            rect = None
+                    if not rect:
+                        increment("screenshots.secret_scan_timeout")
+                        print("[capture] skipped frame; auth window bounds unknown")
+                        return None
+                    paint_screen_rects(img, monitor, [rect], allow_large=True)
+                    redacted_text = page_label
+                else:
+                    with timed("screenshot.secret_fields"):
+                        redaction = collect_redaction_safe(
+                            hwnd, timeout=settings["uia_timeout_seconds"]
+                        )
+                    if redaction is None:
+                        increment("screenshots.secret_scan_timeout")
+                        print("[capture] skipped frame; field scan did not finish")
+                        return None
+                    paint_screen_rects(img, monitor, redaction.get("edit_rects") or [])
+                    paint_screen_rects(
+                        img,
+                        monitor,
+                        redaction.get("secret_rects") or [],
+                        allow_large=True,
+                    )
+                    redacted_text = redaction.get("redacted_text") or ""
+                with timed("screenshot.secret_text"):
+                    paint_secret_text(img)
 
             # Hash after redaction so privacy changes are reflected in the
             # duplicate-frame decision. Near-identical frames are not persisted.
@@ -226,7 +361,11 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
                 digest = imagehash.phash(img)
             global _last_capture_hash
             with _lock:
-                if _last_capture_hash is not None and (digest - _last_capture_hash) <= 2:
+                if (
+                    not ignore_dedup
+                    and _last_capture_hash is not None
+                    and (digest - _last_capture_hash) <= 2
+                ):
                     increment("screenshots.deduplicated")
                     return None
 
@@ -235,12 +374,8 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
                 buf = io.BytesIO()
                 img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
                 path.write_bytes(buf.getvalue())
-            # UIA bounds/text are no longer computed here — walking a live UIA
-            # tree (or, on macOS, an AppleScript query) is exactly the cost this
-            # was meant to remove from the capture hot path. Save an instant
-            # heuristic crop so OCR always has *something* to work with, then
-            # hand off to the async worker with just enough identity to target
-            # the right window safely later.
+            # Secret text was already removed above. The worker only refreshes
+            # the crop rectangle, then stores the scrubbed buffer from this frame.
             with timed("screenshot.crop_metadata"):
                 save_crop_metadata(
                     path,
@@ -249,9 +384,6 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
                     monitor=monitor,
                     a11y_bounds=None,
                 )
-            with timed("screenshot.window_snapshot"):
-                hwnd = _foreground_hwnd()
-                metadata = get_window_metadata()
             if metadata:
                 process_name = metadata.get("process_name", "")
                 title = metadata.get("current_window_title", "")
@@ -264,9 +396,11 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
                             image_width=img.width,
                             image_height=img.height,
                             monitor=monitor,
+                            redacted_text=redacted_text,
                         )
             with _lock:
                 _last_capture_hash = digest
+                _remember_typing_frame(path, window_key(metadata) if metadata else "unknown", redacted_text)
             increment("screenshots.captured")
             return path
     except Exception as e:
@@ -290,6 +424,45 @@ def _capture_if_not_recent() -> None:
 
 
     capture_screenshot(now_ms)
+
+def _capture_typing_frame() -> Path | None:
+    """A typing frame ignores the idle gap and the near-duplicate check.
+
+    Five new characters often do not move the image hash, and the closing
+    frame has to be stored before the opening one can be judged redundant.
+    """
+    global _last_capture_ms
+    settings = get_capture_settings()
+    if not settings["capture_screenshots"]:
+        return None
+    with _lock:
+        now_ms = int(time.time() * 1000)
+        _last_capture_ms = now_ms
+    return capture_screenshot(now_ms, ignore_dedup=True)
+
+
+def begin_typing_capture(still_current=None) -> None:
+    """Save the screen once a burst has enough typed characters to matter."""
+    global _typing_active
+    with _typing_lock:
+        if still_current is not None and not still_current():
+            return
+        if _typing_active:
+            return
+        _typing_active = True
+        _capture_typing_frame()
+
+
+def finish_typing_capture() -> None:
+    """Save the screen when the burst ends, then drop frames the latest one covers."""
+    global _typing_active
+    with _typing_lock:
+        saved = _capture_typing_frame()
+        if saved is not None:
+            _discard_superseded_typing_frames()
+        _typing_active = False
+        _typing_frames.clear()
+
 
 def purge_expired_screenshots() -> None:
     # Filenames begin with epoch milliseconds. Base retention is short; frames

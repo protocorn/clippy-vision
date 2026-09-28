@@ -5,10 +5,10 @@ Generates diverse labeled examples per category using qwen3:8b, auto-labels them
 via classify_query(), flags mismatches, and appends to router_generated.jsonl.
 
 Usage:
-    python scripts/generate_router_data.py                  # 20 examples per category
-    python scripts/generate_router_data.py --per-category 30
-    python scripts/generate_router_data.py --categories time_anchored topic_search
-    python scripts/generate_router_data.py --review-flagged  # show flagged rows only
+    python archive/query_router/scripts/generate_router_data.py
+    python archive/query_router/scripts/generate_router_data.py --per-category 30
+    python archive/query_router/scripts/generate_router_data.py --categories time_anchored topic_search
+    python archive/query_router/scripts/generate_router_data.py --review-flagged
 """
 
 import argparse
@@ -20,18 +20,18 @@ import uuid
 from pathlib import Path
 
 # --- Path setup ---
-ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "agent"))
-sys.path.insert(0, str(ROOT / "core"))
+ARCHIVE = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(ARCHIVE))
 
-from agent.router import OLLAMA_MODEL, classify_query
+from router import OLLAMA_MODEL, classify_query
 from core.llm_gateway import Priority, gateway
 
 # --- Paths ---
-SEED_FILE      = ROOT / "core" / "data" / "router_seed.jsonl"
-OUTPUT_FILE    = ROOT / "core" / "data" / "router_generated.jsonl"
-POLICY_FILE    = ROOT / "docs" / "router_labelling_policy.md"
+SEED_FILE      = ARCHIVE / "router_seed.jsonl"
+OUTPUT_FILE    = ARCHIVE / "router_generated.jsonl"
+POLICY_FILE    = ARCHIVE / "router_labelling_policy.md"
 
 # --- Config ---
 CATEGORIES = [

@@ -20,12 +20,22 @@ try:
     from core.baseline import compute_deviation, update_baseline
     from core.events import Event, WindowMetadata, generate_summary, get_session_id
     from core.storage import purge_expired, store_event
-    from core.screenshot_scheduler import on_activity_event, start_screenshot_daemon
+    from core.screenshot_scheduler import (
+        begin_typing_capture,
+        finish_typing_capture,
+        on_activity_event,
+        start_screenshot_daemon,
+    )
 except ImportError:
     from baseline import compute_deviation, update_baseline
     from events import Event, WindowMetadata, generate_summary, get_session_id
     from storage import purge_expired, store_event
-    from screenshot_scheduler import on_activity_event, start_screenshot_daemon
+    from screenshot_scheduler import (
+        begin_typing_capture,
+        finish_typing_capture,
+        on_activity_event,
+        start_screenshot_daemon,
+    )
 import uuid
 from datetime import datetime
 
@@ -96,6 +106,7 @@ start_screenshot_daemon()
 # useful without writing one event per key press.
 BURST_PAUSE_THRESHOLD_MS = 2000
 MIN_KEYS_FOR_BURST = 3
+TYPING_SNAPSHOT_CHARS = 5
 WINDOW_POLL_INTERVAL_SECONDS = 2.0
 
 class TypingEvent(TypedDict):
@@ -155,6 +166,8 @@ class BurstDetection:
         self._on_paste_event = on_paste_event
         self.window_metadata: WindowMetadata | None = None
         self._modifiers: set[str] = set()
+        self._start_taken = False
+        self._generation = 0
 
     @staticmethod
     def _key_string(key) -> str:
@@ -169,23 +182,35 @@ class BurstDetection:
         return None
 
     def on_key_press(self, key):
+        paste_job = None
+        need_start = False
+        generation = 0
         with self._lock:
             key_str = self._key_string(key)
             modifier = self._modifier_name(key_str)
             if modifier:
                 self._modifiers.add(modifier)
-
-
-
             is_paste = key_str == "\x16" or (
                 key_str.lower() == "v" and bool(self._modifiers & {"cmd", "ctrl"})
             )
             if is_paste:
-                self.flush_events()
-                self._on_paste_event(PasteEvent(timestamp=time.time(), window_context=self.window_metadata))
-                return
-            self._events.append(TypingEvent(timestamp=time.time(), event_type="key_press", key=key_str))
-            self._reset_timer()
+                paste_job = self._take_flush_job()
+            else:
+                self._events.append(TypingEvent(timestamp=time.time(), event_type="key_press", key=key_str))
+                generation = self._generation
+                need_start = (
+                    not self._start_taken
+                    and _printable_chars(self._events) >= TYPING_SNAPSHOT_CHARS
+                )
+                if need_start:
+                    self._start_taken = True
+                self._reset_timer()
+        if paste_job is not None:
+            self._run_flush_job(paste_job)
+            self._on_paste_event(PasteEvent(timestamp=time.time(), window_context=self.window_metadata))
+            return
+        if need_start:
+            begin_typing_capture(lambda: generation == self._generation)
 
     def on_key_release(self, key):
         with self._lock:
@@ -212,25 +237,41 @@ class BurstDetection:
             if self._timer:
                 self._timer.cancel()
                 self._timer = None
-            self.flush_events()
+            job = self._take_flush_job()
+        self._run_flush_job(job)
 
     def _flush(self):
         with self._lock:
-            self.flush_events()
+            job = self._take_flush_job()
+        self._run_flush_job(job)
 
-    def flush_events(self):
-        # Copy before clearing so the callback can safely store metrics without
-        # holding the detector's mutable event list.
+    def _take_flush_job(self) -> tuple[list[TypingEvent], bool]:
+        if self._timer:
+            self._timer.cancel()
+            self._timer = None
         events = self._events[:]
         self._events.clear()
+        had_start = self._start_taken
+        self._start_taken = False
+        self._generation += 1
+        return events, had_start
 
-        press_count = sum(1 for e in events if e['event_type'] == 'key_press')
+    def _run_flush_job(self, job: tuple[list[TypingEvent], bool]) -> None:
+        events, had_start = job
+        if had_start:
+            finish_typing_capture()
+        press_count = sum(1 for event in events if event["event_type"] == "key_press")
         if press_count < MIN_KEYS_FOR_BURST:
             return
-
         metrics = compute_burst_metrics(events, self.window_metadata)
         if metrics:
-            self._on_burst_completed(metrics)
+            self._on_burst_completed(metrics, skip_screenshot=had_start)
+
+    def flush_events(self):
+        # Kept for callers that already hold no timer. Prefer _run_flush_job.
+        with self._lock:
+            job = self._take_flush_job()
+        self._run_flush_job(job)
 
 
 
@@ -462,7 +503,18 @@ def is_meaningful_typing(metrics: TypingBurstMetrics) -> bool:
     meaningful_ratio = metrics["character_count"] / metrics["key_down_count"]
     return meaningful_ratio >= 0.30
 
-def on_burst_completed(metrics: TypingBurstMetrics):
+def _printable_chars(events: list[TypingEvent]) -> int:
+    return sum(
+        1
+        for event in events
+        if event["event_type"] == "key_press"
+        and len(event["key"] or "") == 1
+        and (event["key"] or "").isprintable()
+        and event["key"] not in (" ",)
+    )
+
+
+def on_burst_completed(metrics: TypingBurstMetrics, skip_screenshot: bool = False):
     window_context = _safe_window_metadata(metrics.get("window_context"))
     metrics["window_context"] = window_context
     context_key = window_context["process_name"]
@@ -490,7 +542,8 @@ def on_burst_completed(metrics: TypingBurstMetrics):
     event["summary"] = generate_summary(event)
     store_event(event)
     print_event(event)
-    on_activity_event()
+    if not skip_screenshot:
+        on_activity_event()
 
     if deviation:
         event_2 = Event(
@@ -510,7 +563,8 @@ def on_burst_completed(metrics: TypingBurstMetrics):
         event_2["summary"] = generate_summary(event_2)
         store_event(event_2)
         print_event(event_2)
-        on_activity_event()
+        if not skip_screenshot:
+            on_activity_event()
 
 
 burst_detector = BurstDetection(on_burst_completed=on_burst_completed, on_paste_event=on_paste_event)

@@ -644,30 +644,6 @@ def search_sessions(question: str) -> str:
             return f"search_sessions: SQL error — {e}\n→ Try search_events instead."
 
     if not _rows_are_useful(rows):
-        # The exact time window came back empty even though the table has real
-        # summaries somewhere (checked at the top of this function) — same class
-        # of failure as the events widen-retry above: a single LLM-guessed date
-        # boundary is not trustworthy enough to declare "no data" on its own.
-        # Widen once to "most recent sessions, any window" before giving up.
-        if where_fragment:
-            try:
-                widened_rows, widened_total = _run_sql(
-                    "SELECT summary, active_task, entities, "
-                    "datetime(window_start,'unixepoch','localtime') as time "
-                    "FROM sessions WHERE summary IS NOT NULL AND summary != '' "
-                    "ORDER BY window_start DESC LIMIT 20"
-                )
-            except Exception as e:
-                widened_rows, widened_total = [], 0
-                print(f"[sql:sessions] widen retry failed: {e}")
-            if _rows_are_useful(widened_rows):
-                header = (
-                    f"search_sessions: nothing matched the exact requested window — "
-                    f"showing the {len(widened_rows)} most recent sessions instead "
-                    "(tell the user this is outside the timeframe they asked about):"
-                )
-                return _truncate_result(header + "\n\n" + "\n---\n".join(widened_rows))
-
         return (
             "search_sessions: no matching session summaries found.\n"
             "Sessions store broad topic summaries — if you need specific "
