@@ -5,7 +5,6 @@ import time
 from pathlib import Path
 from typing import Optional
 
-import imagehash
 import mss
 from PIL import Image, ImageDraw
 from core.performance_metrics import increment, timed
@@ -71,12 +70,12 @@ except ImportError:
     from secret_patterns import auth_page_label, paint_secret_text
 try:
     from core.accessibility_text import collect_redaction_safe, extract_accessibility_text
-    from core.app_settings import get_capture_settings
+    from core.app_settings import get_capture_settings, should_watch_process
     from core.ocr_crop import save_crop_metadata
     from core.uia_worker import submit_uia_job
 except ImportError:
     from accessibility_text import collect_redaction_safe, extract_accessibility_text
-    from app_settings import get_capture_settings
+    from app_settings import get_capture_settings, should_watch_process
     from ocr_crop import save_crop_metadata
     from uia_worker import submit_uia_job
 
@@ -84,6 +83,12 @@ _lock = threading.Lock()
 _typing_lock = threading.Lock()
 _last_capture_ms = 0
 _last_capture_hash = None
+_last_capture_path: Path | None = None
+_last_redaction_key = ""
+_last_redaction: dict | None = None
+_last_redaction_at = 0.0
+# Same window: paint the rects we already found instead of walking UIA again.
+_REDACTION_REUSE_SECS = 30.0
 _activity_timer: threading.Timer | None = None
 _typing_active = False
 _typing_frames: list[dict] = []
@@ -152,11 +157,50 @@ def superseded_typing_paths(frames: list[dict]) -> list[Path]:
 
 
 def _delete_screenshot(path: Path) -> None:
-    path.unlink(missing_ok=True)
-    path.with_name(path.stem + "_processed.jpg").unlink(missing_ok=True)
-    path.with_suffix(".a11y.txt").unlink(missing_ok=True)
-    path.with_suffix(".ocr-crop.json").unlink(missing_ok=True)
-    path.with_suffix(".tmp").unlink(missing_ok=True)
+    from core.screenshot_files import delete_screenshot_files
+
+    delete_screenshot_files(path, include_text=False)
+
+
+def _forget_typing_frame(path: Path) -> None:
+    global _typing_frames
+    _typing_frames = [frame for frame in _typing_frames if Path(frame.get("path")) != path]
+
+
+def _replace_similar_screenshot(previous: Path, path: Path) -> Path:
+    """Drop the older lookalike and keep ``path``.
+
+    If the older frame was already stored on an event, point that event at the
+    new image and mark the new file processed so it does not become a second event.
+    """
+    global _last_capture_path
+    from core.screenshot_files import (
+        capture_stem,
+        delete_screenshot_files,
+        retarget_screenshot_filename,
+    )
+
+    stem = capture_stem(previous)
+    was_processed = (previous.parent / f"{stem}_processed.jpg").is_file()
+    old_names = [f"{stem}.jpg", f"{stem}_processed.jpg"]
+    delete_screenshot_files(previous, include_text=False)
+    _forget_typing_frame(previous)
+    increment("screenshots.deduplicated")
+    kept = path
+    if was_processed:
+        kept = path.with_name(f"{path.stem}_processed.jpg")
+        try:
+            path.replace(kept)
+        except OSError:
+            kept = path
+        retarget_screenshot_filename(old_names, kept.name)
+        for frame in _typing_frames:
+            if Path(frame.get("path")) == path:
+                frame["path"] = kept
+    with _lock:
+        _last_capture_path = kept
+    print(f"[capture] replaced similar screenshot {previous.name} with {kept.name}")
+    return kept
 
 
 def _discard_superseded_typing_frames() -> None:
@@ -181,6 +225,10 @@ def _foreground_accessibility_text() -> str:
     process_name = metadata.get("process_name", "")
     title = metadata.get("current_window_title", "")
     if is_clippy_window(process_name, title) or should_redact_window(process_name, title):
+        return ""
+    from core.private_windows import window_is_private
+
+    if window_is_private(_foreground_hwnd(), process_name):
         return ""
     captured_text = extract_accessibility_text()
     current = get_window_metadata()
@@ -231,12 +279,15 @@ def _redact_clippy_windows(img: Image.Image, monitor: dict) -> None:
             except Exception:
                 return
 
+            from core.private_windows import window_is_private
+
+            private_window = window_is_private(hwnd, name)
             if is_clippy_window(name, title):
                 # Only obscure Clippy when the user is actually looking at it
                 # A hidden or minimized window does not occupy the saved pixels.
                 if hwnd != foreground_hwnd:
                     return
-            elif not should_redact_window(name, title):
+            elif not private_window and not should_redact_window(name, title):
                 return
 
             left, top, right, bottom = win32gui.GetWindowRect(hwnd)
@@ -251,33 +302,42 @@ def _redact_clippy_windows(img: Image.Image, monitor: dict) -> None:
         return
 
     if IS_MACOS:
-        # Accessibility permission is required for precise bounds. If it is
-        # unavailable, fail closed and redact the whole frame.
-        metadata = get_window_metadata()
-        if not metadata:
+        # Same rule as Windows: privacy-listed windows are painted wherever
+        # they are visible. Clippy is painted only while it is in front.
+        # If Accessibility cannot be queried, hide the whole frame.
+        try:
+            from core.mac_ui import list_visible_windows
+        except ImportError:
+            from mac_ui import list_visible_windows
+
+        windows = list_visible_windows()
+        if windows is None:
             draw.rectangle([0, 0, img.width, img.height], fill=(0, 0, 0))
             return
-        process_name = metadata.get("process_name", "")
-        title = metadata.get("current_window_title", "")
-        if not (is_clippy_window(process_name, title) or should_redact_window(process_name, title)):
-            return
+        from core.private_windows import bounds_overlap, mac_private_bounds
+        from core.process_names import process_key
 
-        bounds = get_foreground_window_bounds()
-        if not bounds:
-            draw.rectangle([0, 0, img.width, img.height], fill=(0, 0, 0))
-            return
-
-        monitor_left = float(monitor.get("left", 0))
-        monitor_top = float(monitor.get("top", 0))
-        monitor_width = float(monitor.get("width") or img.width)
-        monitor_height = float(monitor.get("height") or img.height)
-        left, top, right, bottom = bounds
-        x0 = max(0, int((left - monitor_left) * img.width / monitor_width))
-        y0 = max(0, int((top - monitor_top) * img.height / monitor_height))
-        x1 = min(img.width, int((right - monitor_left) * img.width / monitor_width))
-        y1 = min(img.height, int((bottom - monitor_top) * img.height / monitor_height))
-        if x1 > x0 and y1 > y0:
-            draw.rectangle([x0, y0, x1, y1], fill=(0, 0, 0))
+        foreground = get_window_metadata() or {}
+        front_process = str(foreground.get("process_name") or "")
+        private_rects: dict[str, list] = {}
+        for item in windows:
+            process_name = str(item.get("process_name") or "")
+            title = str(item.get("title") or "")
+            bounds = item.get("bounds")
+            key = process_key(process_name)
+            if key not in private_rects and key in {"chrome", "edge", "brave"}:
+                private_rects[key] = mac_private_bounds(process_name)
+            private_hit = bool(bounds) and any(
+                bounds_overlap(tuple(bounds), rect) for rect in private_rects.get(key, [])
+            )
+            if is_clippy_window(process_name, title):
+                if process_name.casefold() != front_process.casefold():
+                    continue
+            elif not private_hit and not should_redact_window(process_name, title):
+                continue
+            if not bounds:
+                continue
+            paint_screen_rects(img, monitor, [tuple(bounds)], allow_large=True)
 
 
 def _foreground_hwnd() -> int | None:
@@ -296,9 +356,64 @@ def _foreground_hwnd() -> int | None:
         return None
 
 
+def _field_redaction(hwnd: int | None, frame_window_key: str, timeout: float) -> dict:
+    """Rects to black out before the JPEG is saved.
+
+    The same window reuses the last finished walk for a short while. A walk
+    that does not finish still returns a dict, so the frame is kept.
+    """
+    global _last_redaction_key, _last_redaction, _last_redaction_at
+    now = time.time()
+    with _lock:
+        if (
+            frame_window_key
+            and frame_window_key == _last_redaction_key
+            and _last_redaction is not None
+            and (now - _last_redaction_at) < _REDACTION_REUSE_SECS
+        ):
+            increment("screenshots.redaction_reused")
+            return _last_redaction
+
+    redaction = collect_redaction_safe(hwnd, timeout=timeout)
+    if redaction is None:
+        increment("screenshots.secret_scan_timeout")
+        print("[capture] field scan did not finish; keeping frame")
+        with _lock:
+            if (
+                frame_window_key
+                and frame_window_key == _last_redaction_key
+                and _last_redaction is not None
+            ):
+                redaction = _last_redaction
+            else:
+                redaction = {"edit_rects": [], "secret_rects": [], "redacted_text": ""}
+            if frame_window_key:
+                _last_redaction_key = frame_window_key
+                _last_redaction = redaction
+                _last_redaction_at = time.time()
+        return redaction
+
+    with _lock:
+        if frame_window_key:
+            _last_redaction_key = frame_window_key
+            _last_redaction = redaction
+            _last_redaction_at = time.time()
+    return redaction
+
+
 def capture_screenshot(timestamp_ms: int, *, ignore_dedup: bool = False) -> Path | None:
+    """Save a frame. A similar frame from the last few minutes is replaced by this one.
+
+    Typing captures pass ``ignore_dedup`` so a burst is not dropped entirely.
+    Those frames still collapse: the newest lookalike replaces the previous one.
+    """
+    del ignore_dedup
     settings = get_capture_settings()
     if not settings["capture_screenshots"]:
+        return None
+    foreground = get_window_metadata()
+    process_name = (foreground or {}).get("process_name") or ""
+    if process_name and not should_watch_process(process_name):
         return None
     try:
         with timed("screenshot.total"):
@@ -313,14 +428,23 @@ def capture_screenshot(timestamp_ms: int, *, ignore_dedup: bool = False) -> Path
 
             hwnd = _foreground_hwnd()
             metadata = get_window_metadata()
+            from core.private_windows import window_is_private
+
+            foreground_private = window_is_private(
+                hwnd, (metadata or {}).get("process_name") or ""
+            )
             page_label = auth_page_label((metadata or {}).get("active_url") or "")
             redacted_text = ""
+            content_bounds = None
             with timed("screenshot.redaction"):
                 _redact_clippy_windows(img, monitor)
-                if page_label:
-                    # The address is the auth page. Black that window from
-                    # Win32 bounds. Query strings are not consulted. If the
-                    # window rectangle is unknown, drop the frame.
+                if foreground_private:
+                    # The window is already black. Do not read its page.
+                    redacted_text = ""
+                elif page_label:
+                    # The address is the auth page. Black that window.
+                    # Query strings are not consulted. If the window
+                    # rectangle is unknown, drop the frame.
                     rect = None
                     if hwnd and IS_WINDOWS:
                         import win32gui
@@ -329,6 +453,8 @@ def capture_screenshot(timestamp_ms: int, *, ignore_dedup: bool = False) -> Path
                             rect = win32gui.GetWindowRect(hwnd)
                         except Exception:
                             rect = None
+                    elif IS_MACOS:
+                        rect = get_foreground_window_bounds()
                     if not rect:
                         increment("screenshots.secret_scan_timeout")
                         print("[capture] skipped frame; auth window bounds unknown")
@@ -337,13 +463,11 @@ def capture_screenshot(timestamp_ms: int, *, ignore_dedup: bool = False) -> Path
                     redacted_text = page_label
                 else:
                     with timed("screenshot.secret_fields"):
-                        redaction = collect_redaction_safe(
-                            hwnd, timeout=settings["uia_timeout_seconds"]
+                        redaction = _field_redaction(
+                            hwnd,
+                            window_key(metadata) if metadata else "",
+                            float(settings["uia_timeout_seconds"]),
                         )
-                    if redaction is None:
-                        increment("screenshots.secret_scan_timeout")
-                        print("[capture] skipped frame; field scan did not finish")
-                        return None
                     paint_screen_rects(img, monitor, redaction.get("edit_rects") or [])
                     paint_screen_rects(
                         img,
@@ -352,42 +476,57 @@ def capture_screenshot(timestamp_ms: int, *, ignore_dedup: bool = False) -> Path
                         allow_large=True,
                     )
                     redacted_text = redaction.get("redacted_text") or ""
-                with timed("screenshot.secret_text"):
-                    paint_secret_text(img)
+                    content_bounds = redaction.get("content_bounds")
+                if not foreground_private:
+                    with timed("screenshot.secret_text"):
+                        paint_secret_text(img, redacted_text)
 
             # Hash after redaction so privacy changes are reflected in the
-            # duplicate-frame decision. Near-identical frames are not persisted.
+            # duplicate-frame decision. A similar recent frame is replaced by
+            # this one so the newest image is the one that stays.
             with timed("screenshot.hash"):
-                digest = imagehash.phash(img)
-            global _last_capture_hash
+                from core.screenshot_files import (
+                    PHASH_SIMILAR_DISTANCE,
+                    SIMILAR_FRAME_WINDOW_MS,
+                    perceptual_hash,
+                    screenshot_stamp_ms,
+                )
+
+                digest = perceptual_hash(img)
+            global _last_capture_hash, _last_capture_path
+
             with _lock:
-                if (
-                    not ignore_dedup
+                previous = _last_capture_path
+                previous_ms = screenshot_stamp_ms(previous) if previous is not None else None
+                similar = (
+                    previous is not None
+                    and previous_ms is not None
+                    and abs(timestamp_ms - previous_ms) <= SIMILAR_FRAME_WINDOW_MS
                     and _last_capture_hash is not None
-                    and (digest - _last_capture_hash) <= 2
-                ):
-                    increment("screenshots.deduplicated")
-                    return None
+                    and (digest - _last_capture_hash) <= PHASH_SIMILAR_DISTANCE
+                )
 
             path = _SCREENSHORT_DIR / f"{timestamp_ms}.jpg"
             with timed("screenshot.jpeg_write"):
                 buf = io.BytesIO()
                 img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
                 path.write_bytes(buf.getvalue())
-            # Secret text was already removed above. The worker only refreshes
-            # the crop rectangle, then stores the scrubbed buffer from this frame.
+            # Secret text was already removed above. The active tile found
+            # during that walk is the OCR crop; the worker stores the text.
             with timed("screenshot.crop_metadata"):
                 save_crop_metadata(
                     path,
                     image_width=img.width,
                     image_height=img.height,
                     monitor=monitor,
-                    a11y_bounds=None,
+                    a11y_bounds=content_bounds,
                 )
             if metadata:
                 process_name = metadata.get("process_name", "")
                 title = metadata.get("current_window_title", "")
-                if not (is_clippy_window(process_name, title) or should_redact_window(process_name, title)):
+                if not foreground_private and not (
+                    is_clippy_window(process_name, title) or should_redact_window(process_name, title)
+                ):
                     with timed("screenshot.uia_submit"):
                         submit_uia_job(
                             path,
@@ -397,10 +536,14 @@ def capture_screenshot(timestamp_ms: int, *, ignore_dedup: bool = False) -> Path
                             image_height=img.height,
                             monitor=monitor,
                             redacted_text=redacted_text,
+                            content_bounds=content_bounds,
                         )
             with _lock:
                 _last_capture_hash = digest
+                _last_capture_path = path
                 _remember_typing_frame(path, window_key(metadata) if metadata else "unknown", redacted_text)
+            if similar and previous is not None:
+                path = _replace_similar_screenshot(previous, path)
             increment("screenshots.captured")
             return path
     except Exception as e:
@@ -474,22 +617,30 @@ def purge_expired_screenshots() -> None:
     now_ms = int(time.time() * 1000)
     base_days = settings["screenshot_retention_days"]
     flat_cutoff_ms = now_ms - int(base_days * 86400 * 1000)
+    from core.screenshot_files import capture_stem, delete_screenshot_files, sweep_screenshot_sidecars
+
+    seen: set[str] = set()
     for path in _SCREENSHORT_DIR.glob("*.jpg"):
         try:
-            ts_part = path.stem.split("_")[0]
-            ts_ms = int(ts_part)
+            stem = capture_stem(path)
+            if stem in seen:
+                continue
+            seen.add(stem)
+            ts_ms = int(stem.split("_", 1)[0])
             # Still inside the base window — always keep.
             if ts_ms >= flat_cutoff_ms:
                 continue
             if not should_purge_screenshot(path, settings=settings, now_ms=now_ms):
                 continue
-            path.unlink()
-            path.with_suffix(".ocr-crop.json").unlink(missing_ok=True)
-            path.with_suffix(".a11y.txt").unlink(missing_ok=True)
+            delete_screenshot_files(path, include_text=False)
         except ValueError:
             continue
         except Exception as e:
             print(f"Error purging expired screenshots: {e}")
+    try:
+        sweep_screenshot_sidecars(_SCREENSHORT_DIR)
+    except Exception as e:
+        print(f"Error sweeping screenshot sidecars: {e}")
 
 def _capture_after_activity() -> None:
     global _activity_timer

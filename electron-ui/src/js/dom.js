@@ -16,6 +16,13 @@ export const navMoreBtn = document.getElementById('nav-more-btn')
 export const navMoreMenu = document.getElementById('nav-more-menu')
 export const captureBtn = document.getElementById('capture-btn')
 export const captureLabel = document.getElementById('capture-label')
+export const pauseBtn = document.getElementById('pause-btn')
+export const pauseMenu = document.getElementById('pause-menu')
+export const pauseMenuPanel = document.getElementById('pause-menu-panel')
+export const connectBtn = document.getElementById('connect-btn')
+export const timelineSearch = document.getElementById('timeline-search')
+export const timelineHint = document.getElementById('timeline-hint')
+export const timelineHintDismiss = document.getElementById('timeline-hint-dismiss')
 
 export const timelineBody = document.getElementById('timeline-body')
 export const timelineList = document.getElementById('timeline-list')
@@ -35,6 +42,7 @@ export const identityFields = document.getElementById('identity-fields')
 export const identityNewKey = document.getElementById('identity-new-key')
 export const identityNewVal = document.getElementById('identity-new-val')
 export const identityAddBtn = document.getElementById('identity-add-btn')
+export const memoryFacts = document.getElementById('memory-facts')
 export const profileStatus = document.getElementById('profile-status')
 export const updateCheckToggle = document.getElementById('update-check-toggle')
 export const updatesStatus = document.getElementById('updates-status')
@@ -49,6 +57,7 @@ export const privacyCount = document.getElementById('privacy-count')
 export const workspaceRootsList = document.getElementById('workspace-roots-list')
 export const workspaceRootInput = document.getElementById('workspace-root-input')
 export const workspaceRootAddBtn = document.getElementById('workspace-root-add-btn')
+export const workspaceRootBrowseBtn = document.getElementById('workspace-root-browse-btn')
 export const workspaceRootsStatus = document.getElementById('workspace-roots-status')
 export const settingsUserLabel = document.getElementById('settings-user-label')
 export const settingsRuntimeLabel = document.getElementById('settings-runtime-label')
@@ -86,6 +95,7 @@ export const store = {
  timelineOffset: 0,
  timelineLoading: false,
  timelineSelectedId: null,
+ timelineQuery: '',
 }
 
 export const EVENT_TYPE_LABELS = {
@@ -105,7 +115,6 @@ export const MCP_CLIENT_ICONS = {
 }
 
 export const PRIVACY_TARGET_ICONS = {
- incognito: '../assets/private_window.png',
  whatsapp: '../assets/whatsapp_icon.png',
  instagram: '../assets/instagram_icon.png',
  telegram: '../assets/telegram_icon.png',

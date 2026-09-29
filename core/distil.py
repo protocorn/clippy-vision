@@ -18,6 +18,18 @@ SESSION_MAX_SUMMARIES  = 20  # change to 20 for production
 MODEL                  = get_chat_model()
 
 
+def _session_marked_wrong(summary_id: str) -> bool:
+    """A user correction means that summary should not become a stored fact."""
+    try:
+        row = conn.execute(
+            "SELECT user_correction FROM sessions WHERE summary_id = ?",
+            (summary_id,),
+        ).fetchone()
+    except Exception:
+        return False
+    return bool(row and str(row[0] or "").strip())
+
+
 def count_sessions_since_last_distil() -> int:
 
     last_distilled_at = _get_meta("last_distilled_at", 0)
@@ -84,7 +96,10 @@ def distil() -> None:
         return
 
     last_distilled_at = _get_meta("last_distilled_at", 0)
-    summaries = get_summaries(last_distilled_at)
+    summaries = [
+        summary for summary in get_summaries(last_distilled_at)
+        if not _session_marked_wrong(summary["summary_id"])
+    ]
 
     if not summaries:
         return

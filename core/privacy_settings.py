@@ -22,19 +22,6 @@ _META_KEY = "settings.privacy_redact"
 # Match by process name and/or case-insensitive window title substrings.
 PRIVACY_TARGETS: list[dict] = [
     {
-        "id": "incognito",
-        "label": "Incognito / Private windows",
-        "description": "Black out private browsing windows (Chrome, Edge, Firefox, etc.)",
-        "processes": [],
-        "title_patterns": [
-            "incognito",
-            "inprivate",
-            "private browsing",
-            "private window",
-            "pivate tab"
-        ],
-    },
-    {
         "id": "whatsapp",
         "label": "WhatsApp",
         "description": "Black out WhatsApp Desktop and browser tabs",
@@ -83,6 +70,17 @@ PRIVACY_TARGETS: list[dict] = [
         "processes": ["yourphone.exe", "phonelink.exe", "messages", "message"],
         "title_patterns": ["phone link", "your phone", "messages"],
     },
+    {
+        "id": "private_browsing",
+        "label": "Private browsing",
+        "description": (
+            "On by default. Blacks out private windows in Google Chrome, "
+            "Microsoft Edge, and Brave, on Windows and macOS."
+        ),
+        "processes": [],
+        "title_patterns": [],
+        "default": True,
+    },
 ]
 
 _TARGET_IDS = {t["id"] for t in PRIVACY_TARGETS}
@@ -100,7 +98,7 @@ ALWAYS_REDACT_TITLE_PATTERNS = ("clippy vision",)
 
 
 def _default_enabled() -> dict[str, bool]:
-    return {t["id"]: False for t in PRIVACY_TARGETS}
+    return {t["id"]: bool(t.get("default", False)) for t in PRIVACY_TARGETS}
 
 
 def get_privacy_enabled() -> dict[str, bool]:
@@ -187,7 +185,11 @@ def get_active_redact_rules() -> dict:
             seen.add(t)
             unique_titles.append(t)
 
-    return {"processes": processes, "title_patterns": tuple(unique_titles)}
+    return {
+        "processes": processes,
+        "title_patterns": tuple(unique_titles),
+        "private_browsing": bool(enabled.get("private_browsing", True)),
+    }
 
 
 
@@ -207,11 +209,25 @@ def get_active_redact_rules_cached() -> dict:
     return _cache_rules
 
 
+def _process_matches(process_name: str, saved_names: set[str]) -> bool:
+    from core.process_names import process_key
+
+    key = process_key(process_name)
+    if not key:
+        return False
+    return any(process_key(name) == key for name in saved_names)
+
+
+def private_browsing_redaction_enabled() -> bool:
+    """True unless the user turned off the private-browsing toggle."""
+    rules = get_active_redact_rules_cached()
+    return bool(rules.get("private_browsing", True))
+
+
 def is_clippy_window(process_name: str, window_title: str) -> bool:
     """True if this is the Clippy Vision app window (always-redact target)."""
-    name = (process_name or "").lower()
     title = (window_title or "").lower()
-    if name in ALWAYS_REDACT_PROCESSES:
+    if _process_matches(process_name, set(ALWAYS_REDACT_PROCESSES)):
         return True
     return any(pat in title for pat in ALWAYS_REDACT_TITLE_PATTERNS if pat)
 
@@ -221,11 +237,11 @@ def should_redact_window(process_name: str, window_title: str) -> bool:
 
     Clippy Vision itself is included here; callers that need foreground-only
     behavior for Clippy should use is_clippy_window() separately.
+    A Windows file name and the macOS application name match as the same app.
     """
     rules = get_active_redact_rules_cached()
-    name = (process_name or "").lower()
     title = (window_title or "").lower()
-    if name in rules["processes"]:
+    if _process_matches(process_name, rules["processes"]):
         return True
     for pat in rules["title_patterns"]:
         if pat and pat in title:

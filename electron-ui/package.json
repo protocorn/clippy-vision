@@ -4,7 +4,7 @@
   "version": "1.3.1",
   "description": "Local AI desktop companion with screen awareness",
   "author": "Clippy Vision",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
@@ -86,7 +86,11 @@
         }
       ],
       "category": "public.app-category.productivity",
-      "artifactName": "ClippyVision-macOS-${arch}-${version}.${ext}"
+      "artifactName": "ClippyVision-macOS-${arch}-${version}.${ext}",
+      "extendInfo": {
+        "NSScreenCaptureUsageDescription": "Clippy Vision captures the screen to keep a local memory of your work.",
+        "NSAccessibilityUsageDescription": "Clippy Vision reads the front window so it can remember your work and cover passwords before a screenshot is saved."
+      }
     },
     "nsis": {
       "oneClick": false,

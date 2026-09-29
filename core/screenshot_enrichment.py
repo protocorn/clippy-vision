@@ -21,6 +21,9 @@ _accessibility_cache: dict[str, tuple[int, int, str]] = {}
 _cache_lock = threading.Lock()
 _cache_limit = 512
 _MAX_SCREEN_CHARS = 4000
+# A crop this large is the screen. OCR it once; a second full-image pass
+# repeats the same work.
+_CROP_FULL_FRAME = 0.85
 
 
 def merge_ocr_text(*values: str | None) -> str:
@@ -115,10 +118,23 @@ def _captured_accessibility_text(path: Path, stat) -> str:
     return ""
 
 
+def _crop_covers_frame(crop: dict) -> bool:
+    box = crop.get("box") or []
+    size = crop.get("image_size") or []
+    if len(box) != 4 or len(size) != 2:
+        return False
+    width, height = float(size[0] or 0), float(size[1] or 0)
+    if width <= 0 or height <= 0:
+        return False
+    area = max(0.0, float(box[2]) - float(box[0])) * max(0.0, float(box[3]) - float(box[1]))
+    return area / (width * height) >= _CROP_FULL_FRAME
+
+
 def extract_screenshot_ocr(path: Path) -> str:
     """
-    OCR the a11y-guided/heuristic content crop first. If it is sparse or
-    wrong, retry the full screenshot once so a bad crop never loses all text.
+    OCR the content crop once. A second full-image pass runs only when the
+    crop is a small slice and its text is present but not actually useful.
+    A near-full crop, or a crop that produced no text, is not run again.
     """
     with tempfile.TemporaryDirectory(prefix="clippy_ocr_crop_") as tmp:
         cropped_path = Path(tmp) / "content.jpg"
@@ -127,8 +143,9 @@ def extract_screenshot_ocr(path: Path) -> str:
         if crop:
             with timed("ocr.crop_inference"):
                 cropped_text = extract_text(cropped_path)
-            if is_useful_accessibility_text(cropped_text):
-                increment("ocr.crop_accepted")
+            useful = is_useful_accessibility_text(cropped_text)
+            if useful or _crop_covers_frame(crop) or not str(cropped_text or "").strip():
+                increment("ocr.crop_accepted" if useful else "ocr.skipped_second_pass")
                 return cropped_text
     increment("ocr.full_fallback")
     with timed("ocr.full_inference"):
@@ -161,7 +178,10 @@ def enrich_screenshot(
 
     with timed("enrichment.total"):
         accessibility_text = _captured_accessibility_text(path, stat)
-        should_run_ocr = settings["ocr_enabled"]
+        a11y_useful = is_useful_accessibility_text(accessibility_text)
+        should_run_ocr = settings["ocr_enabled"] and not a11y_useful
+        if settings["ocr_enabled"] and a11y_useful:
+            increment("ocr.skipped_accessibility")
         ocr_text = extract_screenshot_ocr(path) if should_run_ocr else ""
         captured_text = choose_screen_text(accessibility_text, ocr_text)
         # CLIP/image embeddings: gated by image_embeddings_enabled (default off;

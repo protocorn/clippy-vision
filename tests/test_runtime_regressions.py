@@ -504,25 +504,27 @@ class RuntimeRegressionTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row, (1, 9.0, "important typing", "project alpha"))
 
-    def test_phash_group_keeps_each_frames_captured_text(self):
+    def test_phash_group_keeps_latest_frame_and_drops_older(self):
         group = [Path("1000.jpg"), Path("2000.jpg")]
         events = [
             {"event_id": "new", "event_type": "screenshot_analysis", "process_name": "App", "window_context": {}, "summary": "new"},
-            {"event_id": "old", "event_type": "screenshot_analysis", "process_name": "App", "window_context": {}, "summary": "old"},
         ]
         with patch("core.screenshot_processor._get_nearest_event", side_effect=events), patch(
             "core.screenshot_processor.enrich_screenshot",
-            side_effect=[("new frame text", [1.0], "clip:test"), ("old frame text", None, None)],
+            return_value=("new frame text", [1.0], "clip:test"),
         ) as enrich, patch("core.screenshot_processor.apply_vision_verdict", return_value=True) as apply, patch(
             "core.screenshot_processor._mark_as_processed", return_value=True
-        ):
+        ), patch("core.screenshot_processor.delete_screenshot_files") as delete, patch(
+            "core.screenshot_processor.release_text_sidecars"
+        ) as release:
             self.assertTrue(_process_group(group))
-        self.assertEqual(enrich.call_count, 2)
+        self.assertEqual(enrich.call_count, 1)
         self.assertEqual(apply.call_args_list[0].args[1]["ocr_text"], "new frame text")
-        self.assertEqual(apply.call_args_list[1].args[1]["ocr_text"], "old frame text")
+        delete.assert_called_once_with(group[0], include_text=False)
+        release.assert_called_once_with(group[-1])
 
     def test_phash_bursts_do_not_chain_past_the_time_window(self):
-        paths = [Path("1000.jpg"), Path("21000.jpg"), Path("41000.jpg")]
+        paths = [Path("1000.jpg"), Path("21000.jpg"), Path("250000.jpg")]
         digest = imagehash.hex_to_hash("0" * 16)
         groups = _group_by_similarity(paths, {path.stem: digest for path in paths})
         self.assertEqual(sorted(len(group) for group in groups), [1, 2])
@@ -576,7 +578,7 @@ class RuntimeRegressionTests(unittest.TestCase):
         ), patch("core.screenshot_enrichment.extract_text", return_value=visible) as extract_ocr:
             captured_text, image_embedding, image_model = enrich_screenshot(path)
 
-        extract_ocr.assert_called()
+        extract_ocr.assert_not_called()
         self.assertEqual(captured_text, ui_text)
         self.assertIsNone(image_embedding)
         self.assertIsNone(image_model)

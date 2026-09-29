@@ -172,9 +172,23 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         return null
     }
 
+    async function installWithBrew(formula) {
+        if (process.platform === 'win32') return false
+        const brew = await runCommand('brew', ['--prefix'])
+        if (brew.code !== 0) return false
+        log(`> brew install ${formula}`, 'dim')
+        const install = await runCommand('brew', ['install', formula])
+        if (install.stdout) log(install.stdout, 'dim')
+        if (install.code !== 0) {
+            log(install.stderr || 'brew install failed', 'err')
+            return false
+        }
+        return true
+    }
+
     async function stepCheckPython() {
-        // macOS and Linux require a user-managed Python installation. Windows can
-        // offer the same setup flow through winget when Python is missing.
+        // Windows installs a missing Python with winget. macOS uses Homebrew
+        // when Homebrew is already installed. Linux stays a manual install.
         stepUpdate('python', 'running', 'Checking for Python 3.9+...')
         log('> python --version', 'dim')
 
@@ -188,6 +202,18 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         }
 
         if (process.platform !== 'win32') {
+            log('Python not found. Trying Homebrew...', 'info')
+            stepUpdate('python', 'running', 'Installing Python via Homebrew...')
+            const installed = await installWithBrew('python')
+            if (installed) {
+                const verify = await runCommand(PYTHON_COMMAND, ['--version'])
+                const verifiedVersion = verify.stdout || verify.stderr
+                if (verify.code === 0 && verifiedVersion) {
+                    log(verifiedVersion, 'ok')
+                    markDone('python', verifiedVersion)
+                    return
+                }
+            }
             log('Python was not found on PATH. Install Python 3.11+ from python.org or Homebrew, then retry.', 'err')
             stepUpdate('python', 'error', 'Install Python 3.11+ and make sure it is on PATH.')
             throw new Error('python-install-required')
@@ -238,6 +264,18 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         }
 
         if (process.platform !== 'win32') {
+            log('Ollama not found. Trying Homebrew...', 'info')
+            stepUpdate('ollama', 'running', 'Installing Ollama via Homebrew...')
+            const installed = await installWithBrew('ollama')
+            if (installed) {
+                const verify = await runCommand(OLLAMA_COMMAND, ['--version'])
+                const verifiedVersion = verify.stdout || verify.stderr
+                if (verify.code === 0) {
+                    log((verifiedVersion || 'Ollama is available.').split('\n')[0], 'ok')
+                    markDone('ollama', (verifiedVersion || 'Ollama is available.').split('\n')[0])
+                    return
+                }
+            }
             log('Ollama was not found on PATH. Install it from ollama.com, then retry.', 'err')
             stepUpdate('ollama', 'error', 'Install Ollama from ollama.com and make sure it is on PATH.')
             throw new Error('ollama-install-required')

@@ -12,7 +12,9 @@ _MIN_CROP_HEIGHT = 100
 
 
 def crop_metadata_path(screenshot_path: Path) -> Path:
-    return screenshot_path.with_suffix(".ocr-crop.json")
+    from core.screenshot_files import capture_stem
+
+    return screenshot_path.with_name(capture_stem(screenshot_path) + ".ocr-crop.json")
 
 
 def _clamp_box(

@@ -18,7 +18,8 @@
   <div id="loading-view" class="view active">
     <div class="loading-spinner"></div>
     <div class="loading-title" id="loading-title">Clippy is stretching… don't watch, it's weird.</div>
-    <div class="loading-sub" id="loading-sub">Getting things ready…</div>
+    <div class="loading-wait-label">Waiting on</div>
+    <div class="loading-sub" id="loading-sub">Opening Clippy Vision</div>
     <div class="loading-error" id="loading-error"></div>
   </div>
 
@@ -26,6 +27,7 @@
   <div id="name-view" class="view">
     <h1>Welcome to Clippy Vision</h1>
     <p>What should I call you?</p>
+    <p class="name-next">Capture stays off until you press Start Capture. Sessions show up after a stretch of work. Questions are asked from Cursor, Claude, or VS Code after you connect them.</p>
     <div id="name-row">
       <input id="name-input" type="text" placeholder="Your name" autocomplete="off" />
       <button id="name-submit">Continue</button>
@@ -55,6 +57,17 @@
             <button type="button" id="settings-btn" class="nav-more-item" role="menuitem" data-nav="settings">Settings</button>
           </div>
         </div>
+        <div class="nav-more" id="pause-menu">
+          <button type="button" id="pause-btn" class="header-btn" aria-haspopup="true" aria-expanded="false" title="Pause capture" hidden>
+            Pause
+          </button>
+          <div class="nav-more-menu" id="pause-menu-panel" hidden role="menu">
+            <button type="button" class="nav-more-item" data-pause-minutes="15">15 minutes</button>
+            <button type="button" class="nav-more-item" data-pause-minutes="30">30 minutes</button>
+            <button type="button" class="nav-more-item" data-pause-minutes="60">1 hour</button>
+          </div>
+        </div>
+        <button type="button" id="connect-btn" class="header-btn" title="Connect Cursor, Claude, or VS Code">Connect</button>
         <button id="capture-btn" title="Toggle screen capture">
           <span class="capture-dot"></span>
           <span id="capture-label">Start Capture</span>
@@ -85,6 +98,10 @@
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="8" r="4"/></svg>
                   Profile
                 </button>
+                <button type="button" class="settings-nav-item" data-settings-panel="capture">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M4 8V6a2 2 0 0 1 2-2h2"/><path d="M16 4h2a2 2 0 0 1 2 2v2"/><path d="M20 16v2a2 2 0 0 1-2 2h-2"/><path d="M8 20H6a2 2 0 0 1-2-2v-2"/></svg>
+                  Capture &amp; data
+                </button>
                 <button type="button" class="settings-nav-item" data-settings-panel="privacy">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                   Privacy &amp; access
@@ -113,7 +130,7 @@
             <section class="settings-panel active" id="profile-section" data-settings-panel="profile">
               <h2 class="settings-panel-title">Profile</h2>
               <p class="settings-hint">
-                Your display name and what Clippy has stored about you. Edit anything here to correct or update it.
+                Your display name, a short introduction, and any identity fields you want Clippy to keep.
               </p>
 
               <div class="settings-field">
@@ -128,6 +145,7 @@
 
               <div class="settings-field">
                 <label>Memory profile</label>
+                <p class="settings-hint">Named fields, such as location or job. You can correct these here.</p>
                 <div id="identity-fields"></div>
                 <div id="identity-add-row">
                   <input id="identity-new-key" type="text" placeholder="Field (e.g. location)" />
@@ -136,15 +154,32 @@
                 </div>
                 <span id="profile-status" class="settings-status" style="display:block;margin-top:10px;"></span>
               </div>
+
+              <div id="memory-facts" class="memory-facts-block"></div>
             </section>
 
             <section class="settings-panel" id="privacy-section" data-settings-panel="privacy" hidden>
               <h2 class="settings-panel-title">Privacy &amp; access</h2>
+              <h3 class="settings-subhead">What to record</h3>
               <p class="settings-hint">
-                Choose which apps and windows Clippy should black out in screenshots.
-                Clippy Vision's own window is always redacted and isn't listed here.
+                By default Clippy watches every app, then blacks out the ones you choose below.
+                Switch to selected apps when you want an allow list instead.
               </p>
-              <h3 class="settings-subhead">Redact automatically</h3>
+              <div class="privacy-list" id="watch-mode-list"></div>
+              <div id="watch-apps" class="watch-apps" hidden>
+                <p class="settings-hint">Only checked apps are recorded. An empty list records nothing. Names are the process names of windows Clippy has already seen on this PC.</p>
+                <div id="watch-app-list" class="privacy-list"></div>
+                <div class="watch-add">
+                  <input id="watch-app-input" type="text" placeholder="App name, e.g. Chrome" spellcheck="false" />
+                  <button type="button" id="watch-app-add" class="quiet-btn">Add</button>
+                </div>
+              </div>
+              <span id="watch-status" class="settings-status watch-status"></span>
+
+              <h3 class="settings-subhead" style="margin-top: 22px;">Black out these apps</h3>
+              <p class="settings-hint">
+                These windows are painted out of screenshots. Clippy Vision's own window is always blacked out and isn't listed here.
+              </p>
               <div id="privacy-list" class="privacy-list"></div>
               <div class="settings-panel-foot">
                 <span id="privacy-count" class="settings-foot-muted">—</span>
@@ -153,9 +188,8 @@
 
               <h3 class="settings-subhead" style="margin-top: 22px;">Trusted folders</h3>
               <p class="settings-hint">
-                Clippy may search these folders on disk when you ask it to find or open a file.
-                Activity history alone is not enough — add project roots here
-                (or ask your MCP client to call remember_workspace_root when that tool is exposed).
+                Clippy may search these folders when a connected app asks it to find a file.
+                Screen history is not enough on its own. Add the project folders you want included.
               </p>
               <div id="workspace-roots-list" class="privacy-list"></div>
               <div class="settings-field" style="margin-top: 12px;">
@@ -168,7 +202,8 @@
                     placeholder="C:\Users\proto\Clippy_Vision"
                     style="flex: 1;"
                   />
-                  <button type="button" id="workspace-root-add-btn" class="settings-text-link">Add</button>
+                  <button type="button" id="workspace-root-browse-btn" class="quiet-btn">Browse</button>
+                  <button type="button" id="workspace-root-add-btn" class="quiet-btn">Add</button>
                 </div>
                 <span id="workspace-roots-status" class="settings-status" style="display:block;margin-top:8px;"></span>
               </div>
@@ -200,6 +235,110 @@
                   placeholder="Paths appear when Settings opens."></textarea>
               </div>
               <div class="privacy-list" id="mcp-client-list" style="margin-top: 14px;"></div>
+            </section>
+
+            <section class="settings-panel" id="capture-section" data-settings-panel="capture" hidden>
+              <h2 class="settings-panel-title">Capture &amp; data</h2>
+              <p class="settings-hint">
+                How long Clippy keeps what it saw, which local model writes the summaries,
+                and how to erase stored data. Shorter times delete older rows immediately.
+              </p>
+              <div class="capture-layout">
+                <div class="capture-stack">
+                  <div class="settings-group">
+                    <h3 class="settings-group-title">Retention</h3>
+                    <p class="settings-group-note">
+                      Days to keep each kind of record. Ordinary frames use the screenshot stay. Busy or linked frames can use the longest stay, and neither can outlast its event.
+                    </p>
+                    <div class="retain-grid">
+                      <div class="settings-field retain-field">
+                        <label for="retain-events">Events</label>
+                        <div class="retain-control">
+                          <input id="retain-events" type="number" min="1" max="30" step="1" inputmode="numeric" />
+                          <span class="retain-range">1–30</span>
+                        </div>
+                      </div>
+                      <div class="settings-field retain-field">
+                        <label for="retain-shots">Screenshots</label>
+                        <div class="retain-control">
+                          <input id="retain-shots" type="number" min="1" max="7" step="1" inputmode="numeric" />
+                          <span class="retain-range">1–7</span>
+                        </div>
+                      </div>
+                      <div class="settings-field retain-field">
+                        <label for="retain-shots-max">Longest stay</label>
+                        <div class="retain-control">
+                          <input id="retain-shots-max" type="number" min="1" max="14" step="1" inputmode="numeric" />
+                          <span class="retain-range">1–14</span>
+                        </div>
+                      </div>
+                      <div class="settings-field retain-field">
+                        <label for="retain-sessions">Session summaries</label>
+                        <div class="retain-control">
+                          <input id="retain-sessions" type="number" min="1" max="180" step="1" inputmode="numeric" />
+                          <span class="retain-range">1–180</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="settings-actions">
+                      <button type="button" id="retain-save" class="quiet-btn">Save retention</button>
+                      <span id="retain-status" class="settings-status"></span>
+                    </div>
+                  </div>
+
+                  <div class="settings-group">
+                    <h3 class="settings-group-title">Local model</h3>
+                    <p class="settings-group-note">
+                      Saving writes the model name. Restart Clippy to load it. If that model is not installed yet, setup downloads it with Ollama before the app opens.
+                    </p>
+                    <div class="settings-field model-field">
+                      <label for="settings-model">Model tag</label>
+                      <input id="settings-model" type="text" spellcheck="false" placeholder="qwen3:8b" />
+                    </div>
+                    <div class="settings-actions">
+                      <button type="button" id="model-save" class="quiet-btn">Save model</button>
+                      <button type="button" id="model-restart" class="quiet-btn">Restart Clippy</button>
+                      <span id="model-status" class="settings-status"></span>
+                    </div>
+                  </div>
+
+                  <div class="settings-group">
+                    <h3 class="settings-group-title">Erase stored data</h3>
+                    <p class="settings-group-note">
+                      Removes captured events, screenshots, session summaries, and memory facts.
+                      Your display name stays.
+                    </p>
+                    <div class="settings-actions">
+                      <button type="button" id="data-clear-btn" class="quiet-btn">Delete everything</button>
+                      <span id="data-clear-status" class="settings-status"></span>
+                    </div>
+                  </div>
+                </div>
+
+                <aside class="capture-aside" aria-label="Stored data">
+                  <div class="settings-group capture-stats">
+                    <h3 class="settings-group-title">Stored now</h3>
+                    <dl class="capture-stats-list" id="data-stats">
+                      <div>
+                        <dt>Events</dt>
+                        <dd id="stat-events">—</dd>
+                      </div>
+                      <div>
+                        <dt>Sessions</dt>
+                        <dd id="stat-sessions">—</dd>
+                      </div>
+                      <div>
+                        <dt>Memory facts</dt>
+                        <dd id="stat-facts">—</dd>
+                      </div>
+                      <div>
+                        <dt>Screenshots</dt>
+                        <dd id="stat-shots">—</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </aside>
+              </div>
             </section>
 
             <section class="settings-panel" id="updates-section" data-settings-panel="updates" hidden>
@@ -242,7 +381,7 @@
                 <div class="about-card-head">
                   <div>
                     <strong class="about-card-title">Clippy Vision</strong>
-                    <span class="about-card-meta">MIT licensed Â· github.com/protocorn/clippy-vision</span>
+                    <span class="about-card-meta">AGPL-3.0 · github.com/protocorn/clippy-vision</span>
                   </div>
                   <span id="about-badge" class="about-badge">Local</span>
                 </div>
@@ -275,12 +414,23 @@
         <div id="timeline-body">
           <div id="timeline-list-wrap">
             <div id="timeline-list-scroll">
-              <p class="timeline-intro">Captured work sessions. Pick one to see what happened during that stretch.</p>
+              <p class="timeline-intro">Captured work sessions. Open one to see the summary, the screen, and what was stored. Ask questions from Connect.</p>
+              <div class="timeline-search-row">
+                <input id="timeline-search" type="search" placeholder="Search sessions, apps, or screen text" autocomplete="off" />
+              </div>
+              <div id="timeline-hint" class="timeline-hint">
+                <p>Capture stays off until you press Start Capture. A session appears after Clippy has watched a stretch of work. To ask what you were doing, use Connect and ask from Cursor, Claude, or VS Code.</p>
+                <button type="button" id="timeline-hint-dismiss" class="settings-text-link">Dismiss</button>
+              </div>
               <div id="timeline-list"></div>
             </div>
             <div class="timeline-load-more-wrap">
               <button type="button" id="timeline-load-more" class="header-btn" hidden>Load more</button>
             </div>
+            <p class="timeline-feedback">
+              <a href="https://docs.google.com/forms/d/e/1FAIpQLScqsgeWGLdUS_Ba0Me0LPQH8QRrwnIgGiGGHwLElVuqIpfcxQ/viewform" target="_blank" rel="noopener noreferrer">Share feedback</a>
+              <span> · 5 min</span>
+            </p>
           </div>
 
           <div id="timeline-detail-wrap">

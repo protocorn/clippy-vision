@@ -3,7 +3,7 @@ const { BrowserWindow, Tray, Menu, screen, nativeImage, Notification } = require
 
 function createWindows({ paths, state, api, updates, shell, app }) {
     const { ELECTRON_DIR, ICON_ACTIVE, ICON_INACTIVE } = paths
-    const { isCapturing, toggleCapture, setCaptureCallbacks } = api
+    const { isCapturing, captureStatus, toggleCapture, pauseCapture, setCaptureCallbacks } = api
     const { checkForLatestRelease } = updates
 
     function getTrayIcon(active) {
@@ -14,45 +14,75 @@ function createWindows({ paths, state, api, updates, shell, app }) {
     function updateTrayIcon() {
         if (!state.tray) return
         state.tray.setImage(getTrayIcon(isCapturing()))
-        state.tray.setToolTip(isCapturing() ? 'Clippy Vision — Capturing' : 'Clippy Vision — Idle')
+        const status = captureStatus()
+        const tip = status.pending === 'starting'
+            ? 'Clippy Vision — Starting capture'
+            : status.pending === 'stopping'
+                ? 'Clippy Vision — Stopping capture'
+                : status.active
+                    ? 'Clippy Vision — Capturing'
+                    : (status.pausedUntil ? 'Clippy Vision — Paused' : 'Clippy Vision — Idle')
+        state.tray.setToolTip(tip)
     }
 
-    function broadcastCaptureStatus() {
-        const active = isCapturing()
+    function broadcastCaptureStatus(reason, notify) {
+        const status = captureStatus()
         if (state.mainWindow && !state.mainWindow.isDestroyed()) {
-            state.mainWindow.webContents.send('capture-status-changed', active)
+            state.mainWindow.webContents.send('capture-status-changed', status)
         }
-        if (Notification.isSupported()) {
-            new Notification({
-                title: 'Clippy Vision',
-                body: active ? 'Screen capture started' : 'Screen capture stopped',
-                silent: false,
-            }).show()
+        if (!notify || !Notification.isSupported()) return
+        let body = status.active ? 'Screen capture started' : 'Screen capture stopped'
+        if (reason === 'failed') body = 'Screen capture did not start'
+        else if (!status.active && status.pausedUntil) {
+            const when = new Date(status.pausedUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+            body = `Capture paused until ${when}`
+        } else if (reason === 'pause') {
+            body = 'Capture paused'
         }
+        new Notification({ title: 'Clippy Vision', body, silent: false }).show()
     }
 
     function rebuildTrayMenu() {
         // Rebuild after every capture transition so the menu label mirrors state.
         if (!state.tray) return
+        const status = captureStatus()
+        const paused = status.pausedUntil > Date.now()
+        const pending = status.pending === 'starting'
+            ? 'Starting Capture'
+            : status.pending === 'stopping'
+                ? 'Stopping Capture'
+                : ''
         state.tray.setContextMenu(Menu.buildFromTemplate([
-            { label: isCapturing() ? 'Stop Capture' : 'Start Capture', click: toggleCapture },
+            {
+                label: pending || (isCapturing() ? 'Stop Capture' : 'Start Capture'),
+                enabled: !pending,
+                click: toggleCapture,
+            },
+            { label: 'Pause for 15 minutes', enabled: isCapturing() && !paused, click: () => pauseCapture(15) },
+            { label: 'Pause for 30 minutes', enabled: isCapturing() && !paused, click: () => pauseCapture(30) },
+            { label: 'Pause for 1 hour', enabled: isCapturing() && !paused, click: () => pauseCapture(60) },
             { type: 'separator' },
-            { label: 'Open Chat', click: showMainWindow },
+            { label: 'Open Clippy Vision', click: showMainWindow },
             { type: 'separator' },
             { label: 'Quit', click: () => { state.isQuitting = true; api.stopCapture(); app.quit() } },
         ]))
     }
 
     setCaptureCallbacks({
+        onCapturePending() {
+            updateTrayIcon()
+            rebuildTrayMenu()
+            broadcastCaptureStatus(null, false)
+        },
         onCaptureStarted() {
             updateTrayIcon()
             rebuildTrayMenu()
-            broadcastCaptureStatus()
+            broadcastCaptureStatus(null, true)
         },
-        onCaptureStopped() {
+        onCaptureStopped(reason) {
             updateTrayIcon()
             rebuildTrayMenu()
-            broadcastCaptureStatus()
+            broadcastCaptureStatus(reason, true)
         },
     })
 

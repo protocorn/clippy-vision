@@ -356,12 +356,21 @@ def _axis_box(points) -> tuple[int, int, int, int] | None:
     return int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))
 
 
-def paint_secret_text(img: Image.Image) -> int:
-    """OCR the in-memory frame and black out secret lines before it is saved.
+def paint_secret_text(img: Image.Image, screen_text: str = "") -> int:
+    """Black out secret lines on the in-memory frame before it is saved.
 
-    Skipped when OCR is disabled or the machine is under memory/CPU pressure.
-    Field rectangles are painted separately and do not depend on this pass.
+    Password fields and secret spans already found in the accessibility tree
+    are painted by the caller. This pass OCRs the pixels only when that text
+    is too thin to trust (a canvas, a video, a window the tree could not read).
+    It is also skipped when OCR is disabled or the machine is under pressure.
     """
+    from core.accessibility_text import is_useful_accessibility_text
+
+    if is_useful_accessibility_text(screen_text):
+        from core.performance_metrics import increment
+
+        increment("ocr.skipped_accessibility_paint")
+        return 0
     from core.app_settings import get_capture_settings
     from core.model_residency import can_run_ocr
 

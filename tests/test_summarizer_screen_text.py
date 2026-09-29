@@ -1,9 +1,12 @@
+import time
 import unittest
 
 from core.summarizer import (
     MAX_PROMPT_CHARS,
     _activity_fingerprint,
+    _awaiting_screen_text,
     _build_prompt,
+    _covered_span,
     _model_skipped,
     _screen_text_fingerprint,
     is_contentful_for_summary,
@@ -18,6 +21,37 @@ class SummarizerScreenTextTests(unittest.TestCase):
             "Minimize\nMaximize\nRestore\nClose\nChrome Legacy Window"
         )
         self.assertFalse(is_useful_screen_text(chrome))
+
+    def test_editor_full_of_short_lines_is_useful(self):
+        screen = "\n".join(
+            f"const frame_{index} = capture.keepLatest(distance <= 6)" for index in range(40)
+        )
+        self.assertTrue(is_useful_screen_text(screen))
+        self.assertTrue(is_contentful_for_summary({
+            "event_type": "screenshot_analysis",
+            "summary": "Background screenshot of Cursor.exe",
+            "vision_ocr_text": screen,
+        }))
+
+    def test_old_empty_screenshot_does_not_hold_the_queue(self):
+        self.assertFalse(_awaiting_screen_text({
+            "event_type": "screenshot_analysis",
+            "vision_ocr_text": "",
+            "timestamp": time.time() - 3600,
+        }))
+        self.assertTrue(_awaiting_screen_text({
+            "event_type": "screenshot_analysis",
+            "vision_ocr_text": "",
+            "timestamp": time.time(),
+        }))
+
+    def test_session_covers_the_whole_stretch(self):
+        start, end = _covered_span([
+            {"timestamp": 10.0},
+            {"timestamp": 40.0},
+            {"timestamp": 400.0},
+        ])
+        self.assertEqual((start, end), (10.0, 400.0))
 
     def test_real_content_is_useful(self):
         text = (
@@ -43,8 +77,12 @@ class SummarizerScreenTextTests(unittest.TestCase):
             }
             for index in range(5)
         ]
+        for event in events:
+            event["event_type"] = "screenshot_analysis"
         prompt = _build_prompt(events)
         self.assertEqual(prompt.count(" | screen text: "), 1)
+        self.assertIn("event 0", prompt)
+        self.assertNotIn("event 1", prompt)
         self.assertLessEqual(len(prompt), MAX_PROMPT_CHARS)
 
     def test_prompt_caps_total_size(self):

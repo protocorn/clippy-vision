@@ -1,5 +1,15 @@
 import { timelineView, timelineBody, timelineList, timelineLoadMore, timelineDetailWrap, timelineDetailScroll, timelineDetailContent, TIMELINE_PAGE_SIZE, store } from './dom.js'
 import { showView, startOfDay, formatConversationTime } from './utils.js'
+import { confirmDialog } from './dialogs.js'
+
+const shotUrls = []
+
+function releaseShotUrls() {
+ while (shotUrls.length) {
+  const url = shotUrls.pop()
+  try { URL.revokeObjectURL(url) } catch (_) { /* ignore */ }
+ }
+}
 
 const APP_ICON_COLORS = [
  '#c9a24a', '#5b8def', '#5cbf8a', '#d67a8a', '#9b7bff', '#e07a5f', '#4db6ac', '#81a1c1',
@@ -121,6 +131,7 @@ export async function renderTimelineDetail(summaryId) {
  store.timelineSelectedId = summaryId
  highlightTimelineSession(summaryId)
  setTimelineDetailMode(true)
+ releaseShotUrls()
  timelineDetailContent.innerHTML = '<div class="timeline-empty">Loading session…</div>'
 
  try {
@@ -148,6 +159,7 @@ export async function renderTimelineDetail(summaryId) {
   }
 
   timelineDetailContent.appendChild(head)
+  timelineDetailContent.appendChild(createSessionActions(data))
 
   const listedEvents = data.events || []
   if (!listedEvents.length) {
@@ -265,6 +277,17 @@ export function createTimelineEventCard(event) {
   body.appendChild(urlEl)
  }
 
+ if (event.screenshot_filename) {
+  attachScreenshot(body, event.screenshot_filename)
+ }
+
+ const remove = document.createElement('button')
+ remove.type = 'button'
+ remove.className = 'timeline-event-delete'
+ remove.textContent = 'Delete this moment'
+ remove.addEventListener('click', () => deleteTimelineEvent(event.event_id))
+ body.appendChild(remove)
+
  card.appendChild(icon)
  card.appendChild(body)
  row.appendChild(marker)
@@ -339,7 +362,10 @@ export function createTimelineSessionButton(session) {
 
 export function renderTimelineList() {
  if (!store.timelineSessions.length) {
-  timelineList.innerHTML = '<div class="timeline-empty">No captured sessions yet. Turn on capture and Clippy will summarize your work here.</div>'
+  const emptyText = store.timelineQuery
+   ? 'No sessions match that search.'
+   : 'No captured sessions yet. Turn on capture and Clippy will summarize your work here.'
+  timelineList.innerHTML = `<div class="timeline-empty">${emptyText}</div>`
   timelineLoadMore.hidden = true
   return
  }
@@ -351,10 +377,20 @@ export function renderTimelineList() {
   const section = document.createElement('div')
   section.className = 'timeline-section'
 
-  const label = document.createElement('div')
-  label.className = 'timeline-section-label'
+  const labelRow = document.createElement('div')
+  labelRow.className = 'timeline-section-label'
+  const label = document.createElement('span')
   label.textContent = group.label
-  section.appendChild(label)
+  const erase = document.createElement('button')
+  erase.type = 'button'
+  erase.className = 'timeline-day-delete'
+  erase.textContent = 'Delete day'
+  const sample = group.items[0]
+  const stamp = sample.window_end || sample.created_at || sample.window_start
+  erase.addEventListener('click', () => deleteTimelineDay(stamp, group.label))
+  labelRow.appendChild(label)
+  labelRow.appendChild(erase)
+  section.appendChild(labelRow)
 
   const itemsWrap = document.createElement('div')
   itemsWrap.className = 'timeline-section-items'
@@ -386,6 +422,7 @@ export async function loadTimelineSessions({ reset = false } = {}) {
   const data = await window.clippy.listTimelineSessions({
    limit: TIMELINE_PAGE_SIZE,
    offset: store.timelineOffset,
+   q: store.timelineQuery || '',
   })
   store.timelineTotal = data.total || 0
   store.timelineSessions = reset
@@ -418,4 +455,140 @@ export async function openTimeline() {
 
 export function closeTimeline() {
  closeTimelineDetail()
+}
+
+function localDayBounds(tsSeconds) {
+ const date = new Date((tsSeconds || 0) * 1000)
+ const start = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+ const end = new Date(start)
+ end.setDate(end.getDate() + 1)
+ return { since: start.getTime() / 1000, until: end.getTime() / 1000 }
+}
+
+async function deleteTimelineDay(tsSeconds, label) {
+ const ok = await confirmDialog({
+  title: `Delete ${label}?`,
+  message: 'Sessions and captured moments from that day are removed from this computer.',
+  confirmLabel: 'Delete day',
+  danger: true,
+ })
+ if (!ok) return
+ const bounds = localDayBounds(tsSeconds)
+ await window.clippy.deleteTimeSpan(bounds.since, bounds.until)
+ closeTimelineDetail()
+ await loadTimelineSessions({ reset: true })
+}
+
+async function deleteTimelineEvent(eventId) {
+ const ok = await confirmDialog({
+  title: 'Delete this moment?',
+  message: 'This captured moment and its screenshot are removed. The rest of the session stays.',
+  confirmLabel: 'Delete moment',
+  danger: true,
+ })
+ if (!ok || !eventId) return
+ await window.clippy.deleteEvent(eventId)
+ if (store.timelineSelectedId) await renderTimelineDetail(store.timelineSelectedId)
+}
+
+function createSessionActions(data) {
+ const wrap = document.createElement('div')
+ wrap.className = 'timeline-detail-actions'
+
+ if ((data.user_correction || '').trim()) {
+  const note = document.createElement('p')
+  note.className = 'timeline-correction'
+  note.textContent = `You marked this summary wrong. ${data.user_correction}`
+  wrap.appendChild(note)
+ }
+
+ const row = document.createElement('div')
+ row.className = 'timeline-detail-action-row'
+
+ const wrong = document.createElement('button')
+ wrong.type = 'button'
+ wrong.className = 'header-btn'
+ wrong.textContent = 'This summary is wrong'
+ wrong.addEventListener('click', () => showCorrectionForm(wrap, data.summary_id, data.user_correction))
+
+ const erase = document.createElement('button')
+ erase.type = 'button'
+ erase.className = 'timeline-event-delete'
+ erase.textContent = 'Delete session'
+ erase.addEventListener('click', async () => {
+  const ok = await confirmDialog({
+   title: 'Delete this session?',
+   message: 'The summary and the moments inside its time window are removed.',
+   confirmLabel: 'Delete session',
+   danger: true,
+  })
+  if (!ok) return
+  await window.clippy.deleteSession(data.summary_id)
+  closeTimelineDetail()
+  await loadTimelineSessions({ reset: true })
+ })
+
+ row.appendChild(wrong)
+ row.appendChild(erase)
+ wrap.appendChild(row)
+ return wrap
+}
+
+function showCorrectionForm(wrap, summaryId, current) {
+ let form = wrap.querySelector('.timeline-correction-form')
+ if (form) {
+  form.hidden = false
+  return
+ }
+ form = document.createElement('form')
+ form.className = 'timeline-correction-form'
+ const input = document.createElement('textarea')
+ input.className = 'timeline-correction-input'
+ input.placeholder = 'What should Clippy remember instead? Leave blank to just flag the summary.'
+ input.value = current || ''
+ const save = document.createElement('button')
+ save.type = 'submit'
+ save.className = 'header-btn'
+ save.textContent = 'Save correction'
+ form.appendChild(input)
+ form.appendChild(save)
+ form.addEventListener('submit', async (event) => {
+  event.preventDefault()
+  save.disabled = true
+  try {
+   await window.clippy.correctSession(summaryId, input.value)
+   await renderTimelineDetail(summaryId)
+  } catch (error) {
+   save.disabled = false
+   save.textContent = error.message || 'Could not save'
+  }
+ })
+ wrap.appendChild(form)
+}
+
+async function attachScreenshot(body, filename) {
+ try {
+  const url = await window.clippy.screenshotObjectUrl(filename)
+  shotUrls.push(url)
+  const img = document.createElement('img')
+  img.className = 'timeline-shot'
+  img.alt = 'Captured screen'
+  img.src = url
+  img.addEventListener('click', () => openScreenshot(url))
+  body.appendChild(img)
+ } catch (_) { /* frame already expired */ }
+}
+
+function openScreenshot(url) {
+ const existing = document.getElementById('timeline-shot-overlay')
+ if (existing) existing.remove()
+ const overlay = document.createElement('div')
+ overlay.id = 'timeline-shot-overlay'
+ overlay.className = 'timeline-shot-overlay'
+ const img = document.createElement('img')
+ img.src = url
+ img.alt = 'Captured screen'
+ overlay.appendChild(img)
+ overlay.addEventListener('click', () => overlay.remove())
+ document.body.appendChild(overlay)
 }

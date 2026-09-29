@@ -43,6 +43,7 @@ class UiaJob:
     image_height: int
     monitor: dict
     redacted_text: str = ""
+    content_bounds: tuple[int, int, int, int] | None = None
 
 _queue: "queue.Queue[UiaJob]" = queue.Queue(maxsize=_MAX_QUEUE)
 _started = False
@@ -50,8 +51,14 @@ _started_lock = threading.Lock()
 
 
 def a11y_text_path(screenshot_path: Path) -> Path:
-    """Sidecar file the worker writes accessibility text to."""
-    return screenshot_path.with_suffix(".a11y.txt")
+    """Sidecar file the worker writes accessibility text to.
+
+    Named from the capture timestamp, including after the JPEG is renamed
+    to ``*_processed.jpg``.
+    """
+    from core.screenshot_files import capture_stem
+
+    return screenshot_path.with_name(capture_stem(screenshot_path) + ".a11y.txt")
 
 
 def read_persisted_accessibility_text(screenshot_path: Path) -> str:
@@ -80,6 +87,7 @@ def submit_uia_job(
     image_height: int,
     monitor: dict,
     redacted_text: str = "",
+    content_bounds: tuple[int, int, int, int] | None = None,
 ) -> None:
     """Enqueue UIA work for a just-captured screenshot. Never blocks the caller.
     ``expected_window_key`` should be window_key(metadata) for the window
@@ -88,6 +96,8 @@ def submit_uia_job(
     before it runs, on every platform.
     ``redacted_text`` is the buffer already scrubbed during capture. The
     worker stores that string instead of reading the live editor again.
+    ``content_bounds`` is the active tile from that same walk. When it is
+    present the worker skips its own bounds walk.
     """
 
     job = UiaJob(
@@ -98,6 +108,7 @@ def submit_uia_job(
         image_height,
         monitor,
         redacted_text,
+        content_bounds,
     )
 
     try:
@@ -140,6 +151,11 @@ def _process_job(job: UiaJob, timeout: float) -> None:
             _write_accessibility_text(job.screenshot_path, page_label)
         elif (job.redacted_text or "").strip():
             _write_accessibility_text(job.screenshot_path, job.redacted_text)
+        if job.content_bounds is not None:
+            # The capture walk already chose the active tile. Its rectangle
+            # was written with the frame; a second walk would only repeat it.
+            increment("uia_worker.bounds_from_capture")
+            return
         if not _target_still_safe(job):
             increment("uia_worker.target_changed")
             return

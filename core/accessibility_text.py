@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import heapq
 import re
 from collections import deque
 import threading
@@ -149,9 +150,17 @@ def _avg_line_length(text: str) -> float:
 
 
 def looks_like_nav_soup(text: str) -> bool:
-    """True when text is mostly short nav/sidebar labels, not prose."""
+    """True when text is a short list of nav labels, not a real screen.
+
+    An editor, terminal, or file list is also short lines, but there are many
+    of them and they differ. A sidebar is a handful of repeated labels.
+    """
     lines = _nonempty_lines(strip_ui_chrome(text))
     if len(lines) < 6:
+        return False
+    unique = len({line.casefold() for line in lines})
+    compact = "".join(character for character in "\n".join(lines) if character.isalnum())
+    if len(lines) >= 30 and unique >= 15 and len(compact) >= 500:
         return False
     avg = sum(len(line) for line in lines) / len(lines)
     short = sum(1 for line in lines if len(line.split()) <= 4)
@@ -173,6 +182,44 @@ def is_useful_accessibility_text(text: str) -> bool:
         return False
     compact = "".join(character for character in filtered if character.isalnum())
     return len(compact) >= MIN_USEFUL_CHARS and len(filtered.split()) >= 4
+
+
+def prefer_active_text(active: str, body: str) -> str:
+    """Keep the caret neighborhood ahead of the rest of the page.
+
+    Stored text is capped. A document read from the top can fill that cap
+    before the field the user is actually in. Lines from ``active`` stay
+    first; the same line later in ``body`` is dropped.
+    """
+    active = str(active or "").strip()
+    body = str(body or "").strip()
+    if not active:
+        return normalize_accessibility_text(body)
+    if not body:
+        return normalize_accessibility_text(active)
+    return normalize_accessibility_text(active, body)
+
+
+def rank_text_by_point(
+    pieces: list[tuple[str, tuple | None]],
+    point: tuple[int, int] | None,
+) -> str:
+    """Order text snippets so the ones nearest ``point`` survive the cap."""
+    if point is None:
+        return normalize_accessibility_text(*(text for text, _bounds in pieces))
+
+    def distance(bounds: tuple | None) -> float:
+        if not bounds:
+            return 10**18
+        center_x = (bounds[0] + bounds[2]) / 2
+        center_y = (bounds[1] + bounds[3]) / 2
+        return (center_x - point[0]) ** 2 + (center_y - point[1]) ** 2
+
+    ordered = sorted(
+        enumerate(pieces),
+        key=lambda item: (distance(item[1][1]), item[0]),
+    )
+    return normalize_accessibility_text(*(item[1][0] for item in ordered))
 
 
 def _control_area(control) -> int:
@@ -206,33 +253,41 @@ def _is_password(control) -> bool:
         return False
 
 
-def _text_from_control(control) -> str:
-    """Prefer TextPattern document text, then Value, then Name for content types."""
+_PATTERN_TEXT_TYPES = {"EditControl", "DocumentControl", "ComboBoxControl"}
+
+
+def _text_from_control(control, *, patterns: bool = True) -> str:
+    """Prefer TextPattern document text, then Value, then Name for content types.
+
+    ``patterns=False`` reads only the Name. Pattern queries are COM round
+    trips; a label, link, or list row already carries its text in Name.
+    """
     if control is None or _is_password(control):
         return ""
     chunks: list[str] = []
 
-    try:
-        pattern = control.GetTextPattern()
-        if pattern is not None and getattr(pattern, "DocumentRange", None) is not None:
-            text = pattern.DocumentRange.GetText(MAX_TEXT_CHARS) or ""
-            if text.strip():
-                chunks.append(text)
-    except Exception:
-        pass
+    if patterns:
+        try:
+            pattern = control.GetTextPattern()
+            if pattern is not None and getattr(pattern, "DocumentRange", None) is not None:
+                text = pattern.DocumentRange.GetText(MAX_TEXT_CHARS) or ""
+                if text.strip():
+                    chunks.append(text)
+        except Exception:
+            pass
 
-    try:
-        pattern = control.GetValuePattern()
-        value = "" if pattern is None else (pattern.Value or "")
-        # Skip bare URLs as primary "content" — keep them only if nothing else exists.
-        if value.strip() and not (
-            value.strip().startswith("http://") or value.strip().startswith("https://")
-        ):
-            chunks.append(value)
-        elif value.strip() and not chunks:
-            chunks.append(value)
-    except Exception:
-        pass
+        try:
+            pattern = control.GetValuePattern()
+            value = "" if pattern is None else (pattern.Value or "")
+            # Skip bare URLs as primary "content" — keep them only if nothing else exists.
+            if value.strip() and not (
+                value.strip().startswith("http://") or value.strip().startswith("https://")
+            ):
+                chunks.append(value)
+            elif value.strip() and not chunks:
+                chunks.append(value)
+        except Exception:
+            pass
 
     if not chunks:
         try:
@@ -272,32 +327,131 @@ def _find_best_document(root):
     return best
 
 
-def _collect_content_walk(root) -> str:
-    """Fallback: BFS but only content-ish controls, skipping chrome types."""
-    values: list[str] = []
-    queue = deque([(root, 0)])
+def _box_area(bounds: tuple[int, int, int, int] | None) -> int:
+    if not bounds:
+        return 0
+    return max(0, bounds[2] - bounds[0]) * max(0, bounds[3] - bounds[1])
+
+
+def _box_contains_point(bounds: tuple[int, int, int, int], x: float, y: float) -> bool:
+    return bounds[0] <= x < bounds[2] and bounds[1] <= y < bounds[3]
+
+
+def _boxes_overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def _activity_center(box: tuple[int, int, int, int]) -> tuple[float, float]:
+    return ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+
+
+def _distance_to_point(bounds: tuple | None, point: tuple[int, int]) -> float:
+    if not bounds:
+        return 10**18
+    center_x = (bounds[0] + bounds[2]) / 2
+    center_y = (bounds[1] + bounds[3]) / 2
+    return (center_x - point[0]) ** 2 + (center_y - point[1]) ** 2
+
+
+# Controls smaller than this are icons. Their children are glyphs.
+_DESCEND_MIN_AREA = 1_500
+
+
+def _note_content_piece(
+    control,
+    pieces: list[tuple[str, tuple | None]],
+    bounds: tuple[int, int, int, int] | None = None,
+) -> None:
+    ctype = _control_type_name(control)
+    if ctype in _CHROME_CONTROL_TYPES:
+        return
+    if ctype not in _CONTENT_CONTROL_TYPES and not _is_content_element(control):
+        return
+    piece = _text_from_control(control, patterns=ctype in _PATTERN_TEXT_TYPES)
+    if piece:
+        pieces.append((piece, bounds if bounds is not None else _control_bounds(control)))
+
+
+def _worth_descending(bounds: tuple[int, int, int, int] | None, depth: int) -> bool:
+    if depth >= MAX_UI_DEPTH:
+        return False
+    return bounds is None or _box_area(bounds) >= _DESCEND_MIN_AREA
+
+
+def _collect_content_pieces(
+    root,
+    point: tuple[int, int] | None = None,
+    *,
+    limit: int = MAX_UI_NODES,
+    visit=None,
+) -> list[tuple[str, tuple | None]]:
+    """Content snippets under root, reading at most ``limit`` controls.
+
+    With a point, visit controls nearest that point first. A file tree on
+    the left otherwise spends the node budget before the editor is reached.
+    ``visit(control, type_name, bounds)`` sees every control read, so a
+    caller can note edit fields in the same pass.
+    """
+    pieces: list[tuple[str, tuple | None]] = []
+    if root is None:
+        return pieces
+    if point is None:
+        queue = deque([(root, 0)])
+        visited = 0
+        while queue and visited < limit:
+            control, depth = queue.popleft()
+            visited += 1
+            try:
+                ctype = _control_type_name(control)
+                bounds = _control_bounds(control)
+                if visit is not None:
+                    visit(control, ctype, bounds)
+                if ctype in _CHROME_CONTROL_TYPES:
+                    continue
+                _note_content_piece(control, pieces, bounds)
+                if _worth_descending(bounds, depth):
+                    queue.extend((child, depth + 1) for child in control.GetChildren())
+            except Exception:
+                continue
+            if sum(len(text) for text, _bounds in pieces) >= MAX_TEXT_CHARS * 2:
+                break
+        return pieces
+
+    heap: list[tuple[float, int, object, int]] = [(0.0, 0, root, 0)]
+    seen: set[int] = set()
+    order = 1
     visited = 0
-    while queue and visited < MAX_UI_NODES:
-        control, depth = queue.popleft()
+    while heap and visited < limit:
+        _distance, _order, control, depth = heapq.heappop(heap)
+        if id(control) in seen:
+            continue
+        seen.add(id(control))
         visited += 1
         try:
             ctype = _control_type_name(control)
+            bounds = _control_bounds(control)
+            if visit is not None:
+                visit(control, ctype, bounds)
             if ctype in _CHROME_CONTROL_TYPES:
-                # Still walk children — content can sit under a pane near chrome.
-                if depth < MAX_UI_DEPTH:
-                    queue.extend((child, depth + 1) for child in control.GetChildren())
                 continue
-            if ctype in _CONTENT_CONTROL_TYPES or _is_content_element(control):
-                piece = _text_from_control(control)
-                if piece:
-                    values.append(piece)
-            if depth < MAX_UI_DEPTH:
-                queue.extend((child, depth + 1) for child in control.GetChildren())
+            _note_content_piece(control, pieces, bounds)
+            if _worth_descending(bounds, depth):
+                for child in control.GetChildren():
+                    if id(child) in seen:
+                        continue
+                    order += 1
+                    heapq.heappush(
+                        heap,
+                        (_distance_to_point(_control_bounds(child), point), order, child, depth + 1),
+                    )
         except Exception:
             continue
-        if sum(len(value) for value in values) >= MAX_TEXT_CHARS * 2:
-            break
-    return normalize_accessibility_text(*values)
+    return pieces
+
+
+def _collect_content_walk(root, point: tuple[int, int] | None = None) -> str:
+    """Fallback: content controls only, skipping chrome types."""
+    return rank_text_by_point(_collect_content_pieces(root, point), point)
 
 
 def _region_score(text: str, area: int) -> float:
@@ -454,6 +608,12 @@ def foreground_content_bounds(hwnd: int | None = None) -> tuple[int, int, int, i
     The result is geometry only: it remains useful when a UIA tree exposes
     Cursor/VS Code chrome text but not the actual editor buffer.
     """
+    if IS_MACOS:
+        try:
+            from core.mac_ui import front_content_bounds
+        except ImportError:
+            from mac_ui import front_content_bounds
+        return front_content_bounds()
     if not IS_WINDOWS:
         return None
     try:
@@ -472,11 +632,15 @@ def foreground_content_bounds(hwnd: int | None = None) -> tuple[int, int, int, i
         return None
 
 
-def _best_region_text(scope) -> str:
-    """
-    Split scope into competing regions, blocklist each, pick the max-scoring
-    region as document text.
-    """
+def _text_of_region(region, point: tuple[int, int] | None) -> str:
+    raw = _collect_content_walk(region, point)
+    if not raw.strip() and _control_type_name(region) in {"EditControl", "DocumentControl"}:
+        raw = _text_from_control(region)
+    return strip_ui_chrome(raw)
+
+
+def _best_region_text(scope, point: tuple[int, int] | None = None) -> str:
+    """Densest non-nav region. Used by probes; capture uses ``core.screen_tiles``."""
     if scope is None:
         return ""
     regions = _competing_regions(scope)
@@ -486,13 +650,7 @@ def _best_region_text(scope) -> str:
         try:
             # Walk the region subtree — avoid Document TextPattern dumping the
             # whole page (sidebar + main) into one blob.
-            raw = _collect_content_walk(region)
-            if not raw.strip() and _control_type_name(region) in {
-                "EditControl",
-                "DocumentControl",
-            }:
-                raw = _text_from_control(region)
-            filtered = strip_ui_chrome(raw)
+            filtered = _text_of_region(region, point)
             score = _region_score(filtered, _control_area(region))
             if score > best_score:
                 best_score = score
@@ -504,20 +662,35 @@ def _best_region_text(scope) -> str:
         return best_text[:MAX_TEXT_CHARS]
 
     # No competing peers — fall back to scoped walk / document text.
-    walked = strip_ui_chrome(_collect_content_walk(scope))
+    walked = strip_ui_chrome(_collect_content_walk(scope, point))
     if walked.strip():
         return walked[:MAX_TEXT_CHARS]
     return strip_ui_chrome(_text_from_control(scope))[:MAX_TEXT_CHARS]
 
 
+def _screen_text_from_root(root, focused, document, *, window: str = "", visit=None):
+    """Text and rectangle of the tile the user is working in.
+
+    The window is divided into tiles from the tree's geometry. The tile
+    with the most activity since the last walk wins; ties are all kept.
+    An empty winner stays empty, which is what sends OCR to that tile.
+    """
+    from core.screen_tiles import active_screen_text
+
+    return active_screen_text(
+        root, focused, document, window=window or _window_memory_key(root), visit=visit
+    )
+
+
+def _window_memory_key(root) -> str:
+    try:
+        return str(int(getattr(root, "NativeWindowHandle", 0) or 0))
+    except Exception:
+        return ""
+
+
 def _windows_text(hwnd: int | None = None) -> str:
-    """
-    Extract foreground text with structure-first filtering:
-      1) focused Edit/Document
-      2) best region under largest content Document (max text after blocklist)
-      3) best region under window root
-      4) content-control walk (skip toolbars/menus/buttons)
-    """
+    """Foreground text from the active tile of the foreground window."""
     try:
         import uiautomation as auto
         import win32gui
@@ -528,38 +701,12 @@ def _windows_text(hwnd: int | None = None) -> str:
         root = auto.ControlFromHandle(target)
         if root is None:
             return ""
-
-        # 1) Focused editor / document — best for Cursor, Notepad, forms.
         try:
             focused = auto.GetFocusedControl()
         except Exception:
             focused = None
-        if focused is not None and _control_type_name(focused) in {"EditControl", "DocumentControl"}:
-            focused_text = _text_from_control(focused)
-            if is_useful_accessibility_text(focused_text):
-                return focused_text[:MAX_TEXT_CHARS]
-
-        # 2) Browser / app document: compete regions (sidebar vs main pane).
-        document = _find_best_document(root)
-        if document is not None:
-            region_text = _best_region_text(document)
-            if region_text.strip():
-                return region_text[:MAX_TEXT_CHARS]
-
-        # 3) No document pane — compete regions under the window itself.
-        window_region = _best_region_text(root)
-        if window_region.strip():
-            return window_region[:MAX_TEXT_CHARS]
-
-        # 4) Structured fallback walk.
-        walked = _collect_content_walk(root)
-        if walked.strip():
-            return walked[:MAX_TEXT_CHARS]
-
-        # Last resort: focused control even if short (still better than chrome soup).
-        if focused is not None:
-            return _text_from_control(focused)[:MAX_TEXT_CHARS]
-        return ""
+        choice = _screen_text_from_root(root, focused, _find_best_document(root), window=str(target))
+        return choice.text
     except Exception:
         return ""
 
@@ -708,6 +855,188 @@ def _rects_for_values(control, values: list[str]) -> tuple[list[tuple[int, int, 
     return rects, complete
 
 
+_ACTIVITY_LINES = 8
+_ACTIVITY_CHARS = 1600
+# A box larger than this is the page, not the place the user is working.
+_ACTIVITY_BOX_AREA = 250_000
+
+
+def _pointer_inside(bounds: tuple[int, int, int, int] | None) -> tuple[int, int] | None:
+    """Cursor position when it sits inside ``bounds``. None otherwise."""
+    if bounds is None or not IS_WINDOWS:
+        return None
+    try:
+        import win32gui
+
+        x, y = win32gui.GetCursorPos()
+    except Exception:
+        return None
+    left, top, right, bottom = bounds
+    if left <= x < right and top <= y < bottom:
+        return int(x), int(y)
+    return None
+
+
+def _caret_box() -> tuple[int, int, int, int] | None:
+    """Screen rectangle of the text caret in the foreground window.
+
+    A caret is often 0 pixels wide. That still marks where the user is typing
+    or selecting, including inside editors the accessibility tree cannot read.
+    """
+    if not IS_WINDOWS:
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        import win32gui
+        import win32process
+
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", ctypes.c_long),
+                ("top", ctypes.c_long),
+                ("right", ctypes.c_long),
+                ("bottom", ctypes.c_long),
+            ]
+
+        class GUITHREADINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("flags", wintypes.DWORD),
+                ("hwndActive", wintypes.HWND),
+                ("hwndFocus", wintypes.HWND),
+                ("hwndCapture", wintypes.HWND),
+                ("hwndMenuOwner", wintypes.HWND),
+                ("hwndMoveSize", wintypes.HWND),
+                ("hwndCaret", wintypes.HWND),
+                ("rcCaret", RECT),
+            ]
+
+        hwnd = win32gui.GetForegroundWindow()
+        if not hwnd:
+            return None
+        thread_id, _pid = win32process.GetWindowThreadProcessId(hwnd)
+        info = GUITHREADINFO()
+        info.cbSize = ctypes.sizeof(GUITHREADINFO)
+        if not ctypes.windll.user32.GetGUIThreadInfo(thread_id, ctypes.byref(info)):
+            return None
+        if not info.hwndCaret:
+            return None
+        rect = info.rcCaret
+        left, top = int(rect.left), int(rect.top)
+        right, bottom = int(rect.right), int(rect.bottom)
+        if bottom <= top:
+            return None
+        if right <= left:
+            right = left + 2
+        return left, top, right, bottom
+    except Exception:
+        return None
+
+
+def _selection_box(control) -> tuple[int, int, int, int] | None:
+    """Visible caret or selection from the accessibility text pattern.
+
+    Monaco and other custom editors often have no Win32 caret. The text
+    pattern still reports a 1px-wide range where the user is typing.
+    """
+    if control is None:
+        return None
+    try:
+        pattern = control.GetTextPattern()
+    except Exception:
+        return None
+    if pattern is None:
+        return None
+    try:
+        selected = pattern.GetSelection() or []
+    except Exception:
+        return None
+    if not selected:
+        return None
+    try:
+        rects = selected[0].GetBoundingRectangles() or []
+    except Exception:
+        return None
+    if not rects:
+        return None
+    rect = rects[0]
+    left, top = int(rect.left), int(rect.top)
+    right, bottom = int(rect.right), int(rect.bottom)
+    if bottom <= top:
+        return None
+    if right <= left:
+        right = left + 2
+    box = (left, top, right, bottom)
+    bounds = _control_bounds(control)
+    if bounds and _box_area(box) > _box_area(bounds) * 0.5:
+        return None
+    return box
+
+
+def _resolve_activity_box(root, focused) -> tuple[int, int, int, int] | None:
+    """Caret, then the text-pattern selection, then a small focused field."""
+    root_bounds = _control_bounds(root)
+    caret = _caret_box()
+    if caret and root_bounds and _boxes_overlap(caret, root_bounds):
+        return caret
+    selected = _selection_box(focused)
+    if selected and (root_bounds is None or _boxes_overlap(selected, root_bounds)):
+        return selected
+    if focused is None:
+        return None
+    bounds = _control_bounds(focused)
+    if bounds and _box_area(bounds) <= _ACTIVITY_BOX_AREA and root_bounds and _boxes_overlap(bounds, root_bounds):
+        return bounds
+    return None
+
+
+def _excerpt_around(text_range) -> str:
+    """Lines around a caret or hit, without uiautomation's default half-second sleep."""
+    try:
+        import uiautomation as auto
+
+        cloned = text_range.Clone()
+        start = auto.TextPatternRangeEndpoint.Start
+        end = auto.TextPatternRangeEndpoint.End
+        cloned.MoveEndpointByUnit(start, auto.TextUnit.Line, -_ACTIVITY_LINES, waitTime=0)
+        cloned.MoveEndpointByUnit(end, auto.TextUnit.Line, _ACTIVITY_LINES, waitTime=0)
+        return str(cloned.GetText(_ACTIVITY_CHARS) or "")
+    except Exception:
+        return ""
+
+
+def _activity_excerpt(control) -> str:
+    """Text around the caret, or around the cursor when it is inside the control."""
+    if control is None:
+        return ""
+    try:
+        pattern = control.GetTextPattern()
+    except Exception:
+        return ""
+    if pattern is None:
+        return ""
+    try:
+        selected = pattern.GetSelection() or []
+    except Exception:
+        selected = []
+    if selected:
+        excerpt = _excerpt_around(selected[0])
+        if excerpt.strip():
+            return excerpt
+    point = _pointer_inside(_control_bounds(control))
+    if point is None:
+        return ""
+    try:
+        hit = pattern.RangeFromPoint(point[0], point[1])
+    except Exception:
+        return ""
+    if hit is None:
+        return ""
+    return _excerpt_around(hit)
+
+
 def _focused_editor(auto):
     """Focused Edit or Document. That is the control whose buffer was stored for Cursor."""
     try:
@@ -753,6 +1082,21 @@ def _note_edit(control, edit_rects: list, edit_values: list, seen: set) -> None:
     edit_values.append(_edit_value(control))
 
 
+def _mac_redaction() -> dict | None:
+    """Password fields, secret spans, and scrubbed text from the front Mac window."""
+    try:
+        from core.mac_ui import front_field_nodes, redaction_from_nodes
+    except ImportError:
+        from mac_ui import front_field_nodes, redaction_from_nodes
+
+    nodes = front_field_nodes()
+    if nodes is None:
+        return None
+    result = redaction_from_nodes(nodes)
+    result["redacted_text"] = normalize_accessibility_text(result.get("redacted_text") or "")
+    return result
+
+
 def collect_redaction(hwnd: int | None = None) -> dict | None:
     """Fields and secret spans to remove before a screenshot is stored.
 
@@ -780,6 +1124,8 @@ def collect_redaction(hwnd: int | None = None) -> dict | None:
             secret_values,
         )
 
+    if IS_MACOS:
+        return _mac_redaction()
     if not IS_WINDOWS:
         return {"edit_rects": [], "secret_rects": [], "redacted_text": ""}
     try:
@@ -797,46 +1143,32 @@ def collect_redaction(hwnd: int | None = None) -> dict | None:
 
     document = _find_best_document(root)
     focused = _focused_editor(auto)
-    if document is not None:
-        edit_scope = document
-    elif focused is not None:
-        try:
-            edit_scope = focused.GetParentControl() or focused
-        except Exception:
-            edit_scope = focused
-    else:
-        edit_scope = root
 
     edit_rects: list[tuple[int, int, int, int]] = []
     edit_values: list[str] = []
     seen_edits: set[tuple[int, int, int, int]] = set()
     row_nodes: list[dict] = []
-    queue = deque([(edit_scope, 0)])
-    visited = 0
-    while queue and visited < MAX_UI_NODES:
-        control, depth = queue.popleft()
-        visited += 1
-        try:
-            ctype = _control_type_name(control)
-            bounds = _control_bounds(control)
-            is_password = _is_password(control)
-            if ctype in _EDIT_CONTROL_TYPES or is_password:
-                _note_edit(control, edit_rects, edit_values, seen_edits)
-            label = _own_label(control)
-            if label and bounds is not None:
-                row_nodes.append({"text": label, "bounds": bounds})
-                if is_secret_name(label):
-                    value = _edit_value(control)
-                    if value and value != label:
-                        row_nodes.append({"text": value, "bounds": bounds})
-            if depth < MAX_UI_DEPTH and ctype not in _CHROME_CONTROL_TYPES:
-                queue.extend((child, depth + 1) for child in control.GetChildren())
-        except Exception:
-            continue
+
+    def _visit(control, ctype: str, bounds) -> None:
+        # Runs inside the tile reads, so fields are found in the same pass
+        # that collects text. A second walk of the same tree is not needed.
+        is_password = _is_password(control)
+        if ctype in _EDIT_CONTROL_TYPES or is_password:
+            _note_edit(control, edit_rects, edit_values, seen_edits)
+        label = _own_label(control)
+        if label and bounds is not None:
+            row_nodes.append({"text": label, "bounds": bounds})
+            if is_secret_name(label):
+                value = _edit_value(control)
+                if value and value != label:
+                    row_nodes.append({"text": value, "bounds": bounds})
+
+    # Pattern text below still locates secret rectangles. The stored string
+    # is the active tile only, and that tile's rectangle is the OCR crop.
+    choice = _screen_text_from_root(root, focused, document, window=str(target), visit=_visit)
     if focused is not None:
         _note_edit(focused, edit_rects, edit_values, seen_edits)
 
-    chunks: list[str] = []
     secret_rects: list[tuple[int, int, int, int]] = []
     seen_controls = set()
     for control in (focused, document):
@@ -846,7 +1178,6 @@ def collect_redaction(hwnd: int | None = None) -> dict | None:
         raw = _pattern_source_text(control)
         if not raw.strip():
             continue
-        chunks.append(raw)
         values = secret_values(raw)
         if not values:
             continue
@@ -859,11 +1190,12 @@ def collect_redaction(hwnd: int | None = None) -> dict | None:
     paired = paired_row_secrets(row_nodes)
     secret_rects.extend(item["bounds"] for item in paired)
     value_tokens = edit_values + [item["text"] for item in paired]
-    redacted = redact_secrets(redact_field_values("\n".join(chunks), value_tokens))
+    redacted = redact_secrets(redact_field_values(choice.text, value_tokens))
     return {
         "edit_rects": edit_rects,
         "secret_rects": secret_rects,
         "redacted_text": normalize_accessibility_text(redacted),
+        "content_bounds": choice.bounds,
     }
 
 
@@ -932,17 +1264,29 @@ def collect_edit_snapshots(hwnd: int | None = None) -> list[dict] | None:
 
 def _run_with_timeout(func, timeout: float, *args, **kwargs):
     """Run ``func`` on a helper thread and abandon it past ``timeout``.
+
     UIA COM calls can hang indefinitely against certain apps. Python cannot
     kill a thread, so on timeout we return the fallback immediately and let
     the stuck worker thread die on its own; it only ever touches its own
     locals, never shared state, so an abandoned thread is harmless.
+
+    UI Automation has to be initialized on that helper thread. Without it
+    every walk fails with CoInitialize and the frame is stored with no text.
     """
     box: list = [None]
+
     def _target():
         try:
-            box[0] = func(*args, **kwargs)
+            if IS_WINDOWS:
+                import uiautomation as auto
+
+                with auto.UIAutomationInitializerInThread():
+                    box[0] = func(*args, **kwargs)
+            else:
+                box[0] = func(*args, **kwargs)
         except Exception:
             box[0] = None
+
     thread = threading.Thread(target=_target, daemon=True)
     thread.start()
     thread.join(timeout)

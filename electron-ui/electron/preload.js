@@ -189,14 +189,112 @@ contextBridge.exposeInMainWorld('clippy', {
         return response.json()
     },
 
-    listTimelineSessions: async ({ since, until, limit = 40, offset = 0 } = {}) => {
+    listTimelineSessions: async ({ since, until, q = '', limit = 40, offset = 0 } = {}) => {
         const params = new URLSearchParams({
             limit: String(limit),
             offset: String(offset),
+            q: q || '',
         })
         if (since != null) params.set('since', String(since))
         if (until != null) params.set('until', String(until))
         const response = await fetch(await apiUrl(`/timeline/sessions?${params}`))
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    deleteSession: async (summaryId) => {
+        const response = await fetch(
+            await apiUrl(`/sessions/${encodeURIComponent(summaryId)}`),
+            { method: 'DELETE' },
+        )
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    correctSession: async (summaryId, text) => {
+        const response = await fetch(
+            await apiUrl(`/sessions/${encodeURIComponent(summaryId)}/correction`),
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text || '' }),
+            },
+        )
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    deleteEvent: async (eventId) => {
+        const response = await fetch(
+            await apiUrl(`/events/${encodeURIComponent(eventId)}`),
+            { method: 'DELETE' },
+        )
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    deleteTimeSpan: async (since, until) => {
+        const response = await fetch(await apiUrl('/timeline/span/delete'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ since, until }),
+        })
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    screenshotObjectUrl: async (filename) => {
+        const safe = String(filename || '').split(/[/\\]/).pop()
+        if (!safe) throw new Error('Missing screenshot')
+        const response = await fetch(await apiUrl(`/screenshots/${encodeURIComponent(safe)}`))
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        const blob = await response.blob()
+        return URL.createObjectURL(blob)
+    },
+
+    getCaptureSettings: async () => {
+        const response = await fetch(await apiUrl('/settings/capture'))
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    updateCaptureSettings: async (payload) => {
+        const response = await fetch(await apiUrl('/settings/capture'), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        })
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    getDataStats: async () => {
+        const response = await fetch(await apiUrl('/settings/data'))
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    clearData: async (scopes) => {
+        const response = await fetch(await apiUrl('/settings/data/clear'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scopes }),
+        })
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    listSeenApps: async () => {
+        const response = await fetch(await apiUrl('/apps/seen'))
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    deleteMemoryFact: async (factId) => {
+        const response = await fetch(
+            await apiUrl(`/memory/facts/${encodeURIComponent(factId)}`),
+            { method: 'DELETE' },
+        )
         if (!response.ok) throw new Error(await getErrorMessage(response))
         return response.json()
     },
@@ -236,7 +334,17 @@ contextBridge.exposeInMainWorld('clippy', {
 
     toggleCapture: () => ipcRenderer.invoke('toggle-capture'),
 
+    pauseCapture: (minutes) => ipcRenderer.invoke('pause-capture', minutes),
+
     getCaptureStatus: () => ipcRenderer.invoke('get-capture-status'),
+
+    pickFolder: () => ipcRenderer.invoke('pick-folder'),
+
+    getLLMConfig: () => ipcRenderer.invoke('get-llm-config'),
+
+    saveLLMConfig: (config) => ipcRenderer.invoke('save-llm-config', config || {}),
+
+    relaunchApp: () => ipcRenderer.invoke('relaunch-app'),
 
     onCaptureStatusChanged: (callback) => {
         ipcRenderer.on('capture-status-changed', (_event, active) => callback(active))

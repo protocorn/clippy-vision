@@ -55,6 +55,14 @@ from core.storage import (
     list_timeline_sessions,
     set_user_name,
 )
+from core.user_controls import (
+    delete_event,
+    delete_session,
+    delete_time_span,
+    list_seen_apps,
+    retire_fact,
+    set_session_correction,
+)
 from core.workspace_roots import list_roots, remember_root, remove_root
 
 # Soft cap for any leftover composer text.
@@ -168,7 +176,19 @@ class CaptureSettingsRequest(BaseModel):
     raw_retention_days: int | None = None
     screenshot_retention_days: int | None = None
     screenshot_retention_max_days: int | None = None
+    summary_retention_days: int | None = None
+    watch_mode: str | None = None
+    watch_apps: list[str] | None = None
     launch_at_login: bool | None = None
+
+
+class SessionCorrectionRequest(BaseModel):
+    text: str = ""
+
+
+class TimeSpanRequest(BaseModel):
+    since: float
+    until: float
 
 
 class DataClearRequest(BaseModel):
@@ -397,6 +417,7 @@ def screenshot_file(filename: str):
 def timeline_sessions(
     since: float | None = None,
     until: float | None = None,
+    q: str = "",
     limit: int = Query(40, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
@@ -405,6 +426,7 @@ def timeline_sessions(
         until=until,
         limit=limit,
         offset=offset,
+        q=q,
     )
 
 
@@ -414,6 +436,49 @@ def session_detail(summary_id: str):
     if data is None:
         raise HTTPException(status_code=404, detail="Session not found.")
     return data
+
+
+@app.delete("/sessions/{summary_id}")
+def session_delete(summary_id: str):
+    result = delete_session(summary_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return result
+
+
+@app.post("/sessions/{summary_id}/correction")
+def session_correction(summary_id: str, req: SessionCorrectionRequest):
+    result = set_session_correction(summary_id, req.text)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return result
+
+
+@app.delete("/events/{event_id}")
+def event_delete(event_id: str):
+    if not delete_event(event_id):
+        raise HTTPException(status_code=404, detail="Event not found.")
+    return {"ok": True}
+
+
+@app.post("/timeline/span/delete")
+def timeline_span_delete(req: TimeSpanRequest):
+    try:
+        return delete_time_span(req.since, req.until)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/apps/seen")
+def seen_apps(limit: int = Query(24, ge=1, le=40)):
+    return {"apps": list_seen_apps(limit)}
+
+
+@app.delete("/memory/facts/{fact_id}")
+def memory_fact_delete(fact_id: str):
+    if not retire_fact(fact_id):
+        raise HTTPException(status_code=404, detail="Fact not found.")
+    return get_profile()
 
 
 @app.get("/conversations")

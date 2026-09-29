@@ -17,10 +17,20 @@ from classifier.worker import apply_vision_verdict, build_capture_text_verdict
 from core.model_residency import can_load_text
 from core.performance_metrics import increment, load_backoff_multiplier, set_gauge, timed
 from core.screenshot_enrichment import enrich_screenshot
+from core.screenshot_files import (
+    PHASH_SIMILAR_DISTANCE,
+    SIMILAR_FRAME_WINDOW_MS,
+    capture_stem,
+    delete_screenshot_files,
+    image_names,
+    perceptual_hash,
+    release_text_sidecars,
+    retarget_screenshot_filename,
+)
 
 POLL_SECS = 10
-PHASH_THRESHOLD = 2  # bit distance: 0-2 = identical, 10+ = very different
-BURST_COLLAPSE_WINDOW_MS = 30_000
+PHASH_THRESHOLD = PHASH_SIMILAR_DISTANCE
+BURST_COLLAPSE_WINDOW_MS = SIMILAR_FRAME_WINDOW_MS
 NEAREST_EVENT_WINDOW_SECS = 10  # ±10s to find a nearby event
 RECENT_THRESHOLD_SECS = 60  # screenshots within this window are processed first
 HASH_CACHE_MAX = 512
@@ -230,7 +240,7 @@ def _compute_all_hashes(paths: list[Path]) -> dict[str, imagehash.ImageHash]:
                 continue
 
             with Image.open(p) as image:
-                digest = imagehash.phash(image)
+                digest = perceptual_hash(image)
             hashes[p.stem] = digest
             _HASH_CACHE[cache_key] = (stat.st_mtime_ns, stat.st_size, str(digest))
         except Exception as e:
@@ -254,9 +264,9 @@ def _group_by_similarity(
     hashes: dict[str, imagehash.ImageHash],
 ) -> list[list[Path]]:
     """
-    Group screenshots that look visually identical (pHash distance ≤ PHASH_THRESHOLD)
-    using Union-Find. Each group is sorted oldest-first; the last element is the
-    most recent (used as the vision representative).
+    Group screenshots that look like the same screen (pHash distance ≤ PHASH_THRESHOLD)
+    within SIMILAR_FRAME_WINDOW_MS. Each group is sorted oldest-first; the last
+    element is the one we keep.
     """
     valid = [p for p in paths if p.stem in hashes]
 
@@ -327,12 +337,11 @@ def _group_by_similarity(
 # ─────────────────────────────────────────────────────────────
 def _process_group(group: list[Path]) -> bool:
     """
-    Compute the image embedding once for the representative while extracting
-    each frame's own accessibility/OCR text. This preserves timestamp accuracy
-    when small text changes do not materially change the perceptual hash.
+    Keep the newest frame in a lookalike group. Older images are deleted so
+    they do not become a second event or a second summary of the same screen.
 
-    Returns True if successful (all members marked processed).
-    Returns False if the representative failed (no members marked processed).
+    Returns True if the newest frame was stored.
+    Returns False if that frame could not be stored (nothing is deleted).
     """
     representative = group[-1]  # most recent = best context
     rep_ts = (_screenshot_timestamp_ms(representative) or 0) / 1000.0
@@ -377,31 +386,37 @@ def _process_group(group: list[Path]) -> bool:
     print(f"  [screenshot_processor] {verdict['verdict']} | {activity}")
 
 
-    # Copy verdict to all other group members (different timestamps, same screen content)
     for path in group[:-1]:
-        ts = (_screenshot_timestamp_ms(path) or 0) / 1000.0
-        other_event = _get_nearest_event(ts)
-        if other_event is None:
-            other_event = _create_screenshot_event(ts)
-        try:
-            member_text, _, _ = enrich_screenshot(path, include_image_embedding=False)
-        except Exception as e:
-            print(f"  [screenshot_processor] Text enrichment failed for {path.name}: {e}")
-            member_text = ""
-        member_verdict = build_capture_text_verdict(other_event, member_text)
-        applied = apply_vision_verdict(
-            other_event["event_id"],
-            member_verdict,
-            image_embedding,
-            image_embedding_model,
-            path.name,
-        )
-        if not applied:
-            continue
-        _mark_as_processed(path)
-        print(f"  [screenshot_processor] Copied verdict to duplicate {path.name[:20]}... [{other_event['event_id'][:8]}]")
-
+        delete_screenshot_files(path, include_text=False)
+        print(f"  [screenshot_processor] dropped similar screenshot {path.name}")
+    release_text_sidecars(representative)
     return _mark_as_processed(representative)
+
+
+def _collapse_saved_lookalikes(paths: list[Path], hashes: dict[str, imagehash.ImageHash]) -> None:
+    """Delete older lookalikes that are already on disk, including processed ones."""
+    for group in _group_by_similarity(paths, hashes):
+        if len(group) < 2:
+            continue
+        keep = group[-1]
+        old_names: list[str] = []
+        already_stored = False
+        for path in group[:-1]:
+            raw_name, processed_name = image_names(capture_stem(path))
+            old_names.extend([raw_name, processed_name])
+            if path.stem.endswith("_processed"):
+                already_stored = True
+            delete_screenshot_files(path, include_text=False)
+            print(f"  [screenshot_processor] dropped similar screenshot {path.name}")
+        kept_name = keep.name
+        if already_stored and not keep.stem.endswith("_processed") and keep.exists():
+            target = keep.with_name(f"{keep.stem}_processed.jpg")
+            try:
+                keep.replace(target)
+                kept_name = target.name
+            except OSError:
+                kept_name = keep.name
+        retarget_screenshot_filename(old_names, kept_name)
 
 
 
@@ -433,6 +448,16 @@ def screenshot_processor_loop():
         # enrich_screenshot() still has accessibility text to fall back on
         # when OCR specifically is skipped.
         time.sleep(POLL_SECS * load_backoff_multiplier())
+
+        saved = [
+            path for path in _SCREENSHOT_DIR.glob("*.jpg")
+            if _screenshot_timestamp_ms(path) is not None
+        ]
+        if len(saved) > 1:
+            with timed("processor.hash_backlog"):
+                saved_hashes = _compute_all_hashes(saved)
+            with timed("processor.group_backlog"):
+                _collapse_saved_lookalikes(saved, saved_hashes)
 
         all_unprocessed = _get_unprocessed_screenshots()
         depth = len(all_unprocessed)

@@ -44,7 +44,7 @@ MAX_EVENTS_PER_WINDOW = 25
 SESSION_GAP_SECS = 600  # merge events across process UUIDs within 10 min gaps
 MAX_SESSION_DURATION_SECS = 30 * 60  # hard cap so backlog cannot form multi-hour sessions
 MAX_PROMPT_CHARS = 7000
-PER_EVENT_SCREEN_CHARS = 500
+PER_EVENT_SCREEN_CHARS = 1200
 DEDUP_LOOKBACK_SECS = 30 * 60
 # Vision-refresh hot-loop guard: timeouts must not re-queue the same session every tick.
 REFRESH_FAIL_MARK_AFTER = 3
@@ -90,6 +90,7 @@ Rules:
 - Use past tense. Be specific.
 - When a window title names the application and a file, project, or page, mention both. A file titled report.md in a Notes workspace, open in an editor, is the editor and Notes, not only Notes.
 - Never treat typing speed, word counts, revision ratios, or bare app switches as the work itself.
+- Screen text is what was visible. Code, terminals, file lists, and pages made of short lines are the work. Describe that, not the fact that a screenshot was taken.
 - Never describe an idle screen. Set skip to true instead.
 Respond ONLY with valid JSON, no other text."""
 
@@ -112,10 +113,16 @@ def _title_is_informative(title: str) -> bool:
 
 
 def _awaiting_screen_text(event: dict) -> bool:
-    """A real window whose OCR has not been written yet. Leave it in the queue."""
+    """A screenshot whose text may still be on the way. Leave it in the queue briefly."""
     if str(event.get("event_type") or "") != "screenshot_analysis":
         return False
-    return not str(event.get("vision_ocr_text") or "").strip()
+    if str(event.get("vision_ocr_text") or "").strip():
+        return False
+    try:
+        age = time.time() - float(event.get("timestamp") or 0)
+    except (TypeError, ValueError):
+        return False
+    return age < 10 * 60
 
 
 def _should_retire_without_summary(events: list[dict]) -> bool:
@@ -208,9 +215,31 @@ def _contentful_events(events: list[dict]) -> list[dict]:
     return [event for event in events if is_contentful_for_summary(event)]
 
 
+def _dedupe_repeated_events(events: list[dict]) -> list[dict]:
+    """Drop a later screenshot or focus event that repeats screen text or the same summary."""
+    seen_screen: set[str] = set()
+    seen_summary: set[str] = set()
+    kept: list[dict] = []
+    for event in events:
+        kind = str(event.get("event_type") or "").strip()
+        screen = event.get("vision_ocr_text") or ""
+        if kind in {"screenshot_analysis", "context_change"} and is_useful_screen_text(screen):
+            fingerprint = _screen_text_fingerprint(screen)
+            if fingerprint in seen_screen:
+                continue
+            seen_screen.add(fingerprint)
+        summary_key = " ".join(str(event.get("summary") or "").split()).casefold()
+        if kind in {"screenshot_analysis", "context_change"} and summary_key:
+            if summary_key in seen_summary and not is_useful_screen_text(screen):
+                continue
+            seen_summary.add(summary_key)
+        kept.append(event)
+    return kept
+
+
 def _select_events_for_prompt(events: list[dict]) -> list[dict]:
     """Keep an oldest-first contentful slice so backlog drains instead of chasing the newest tip."""
-    contentful = _contentful_events(events)
+    contentful = _dedupe_repeated_events(_contentful_events(events))
     selected = (
         list(contentful[:MAX_EVENTS_PER_WINDOW])
         if len(contentful) > MAX_EVENTS_PER_WINDOW
@@ -313,9 +342,15 @@ def _activity_fingerprint(events: list[dict]) -> str:
     return hashlib.sha1(blob.encode("utf-8", errors="ignore")).hexdigest()
 
 
+def _covered_span(events: list[dict]) -> tuple[float, float]:
+    """The stretch of activity, not the single event that happened to pass the filter."""
+    stamps = [float(event["timestamp"]) for event in events]
+    return min(stamps), max(stamps)
+
+
 def _skip_span(events: list[dict], reason: str) -> SkipWindow:
-    selected = _select_events_for_prompt(events) or events
-    return SkipWindow(selected[0]["timestamp"], selected[-1]["timestamp"], reason)
+    start, end = _covered_span(events)
+    return SkipWindow(start, end, reason)
 
 
 def summarize_window(events: list[dict], session_id: str) -> dict | SkipWindow | None:
@@ -360,16 +395,17 @@ def summarize_window(events: list[dict], session_id: str) -> dict | SkipWindow |
     selected = _select_events_for_prompt(events)
     if not selected:
         return None
+    window_start, window_end = _covered_span(events)
     summary = {
         "summary_id": str(uuid.uuid4()),
         "session_id": session_id,
         "created_at": now,
-        "window_start": selected[0]["timestamp"],
-        "window_end": selected[-1]["timestamp"],
+        "window_start": window_start,
+        "window_end": window_end,
         "summary": summary_text,
         "active_task": result.get("active_task"),
         "entities": result.get("entities", []),
-        "event_count": len(selected),
+        "event_count": len(events),
         "embedding": embedding,
         "content_hash": fingerprint or None,
     }

@@ -1,6 +1,6 @@
 # Contributing to Clippy Vision
 
-Thanks for your interest in contributing! Clippy Vision is an open-source project that welcomes contributions from the community.
+Thanks for your interest in contributing! Clippy Vision is an open-source project that welcomes contributions from the community. Contributions are licensed under AGPL-3.0, the same license as the next release.
 
 ## Ways to Contribute
 
@@ -73,7 +73,7 @@ Clippy Vision supports Windows and macOS. The app lives in `electron-ui/` and st
 | | Installed (Start Menu) | `npm start` |
 |--|--|--|
 | Window / tray label | Clippy Vision | Clippy Vision (dev) |
-| Activity data | `%APPDATA%\Clippy Vision\data` | `<repo>\core\data` |
+| Activity data | `%APPDATA%\Clippy Vision\data` on Windows, `~/Library/Application Support/Clippy Vision/data` on macOS | `<repo>\core\data` |
 | Single-instance lock | Own lock | Own lock |
 
 Both can run at the same time. If `npm start` exits immediately, a previous **dev** instance is still in the system tray — right-click it → Quit, then start again. The terminal prints which instance is running (`[clippy] starting Clippy Vision (dev)`).
@@ -118,19 +118,19 @@ Before submitting a PR:
 
 ### High Priority
 - [ ] Cross-OS support
-  - [x] macOS support
+  - [x] macOS support (same capture and privacy path as Windows: field painting, visible-window blackout, auth-page blackout)
   - [ ] Linux support
-- [ ] Wire Settings → Access control UI to the existing privacy API (see open `good first issue`s)
+- [x] Settings → Privacy is wired to the privacy API
 - [ ] Automated tests for classification pipeline
 - [ ] Performance optimization for screenshot capture and OCR
 - [ ] Better error handling and logging (e.g. surface API `detail` in the UI)
 
 ### Medium Priority
 - [ ] Docker/containerization support
-- [ ] Alternative model support (LLaMA, Mistral, etc.)
+- [x] Choose the local chat model in setup (any Ollama tag; `qwen3:8b` is only the suggestion)
 - [ ] Web UI for database exploration
-- [ ] Export/import conversation history
-- [ ] Configurable retention policies
+- [ ] Import of an exported archive (export and clear already exist under Settings)
+- [x] Configurable retention for events, screenshots, and session summaries
 
 ### Low Priority
 - [ ] Plugin system for custom tools

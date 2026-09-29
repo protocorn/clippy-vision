@@ -100,6 +100,9 @@ purge_expired()
 start_worker()
 start_uia_worker()
 start_screenshot_daemon()
+# Electron waits for this line before telling the user capture is on.
+# Imports and the scheduler are done; later OCR loads on the first frame.
+print("CAPTURE_READY", flush=True)
 
 
 # A burst ends after a short pause; grouping keystrokes keeps activity records

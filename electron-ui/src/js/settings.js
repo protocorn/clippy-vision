@@ -1,6 +1,6 @@
 ﻿import {
  settingsView, settingsName, settingsIntro,
- identityFields, identityNewKey, identityNewVal, identityAddBtn, profileStatus,
+ identityFields, identityNewKey, identityNewVal, identityAddBtn, memoryFacts, profileStatus,
  updateCheckToggle, updatesStatus, aboutVersion, aboutPlatform, aboutModel, aboutMemory,
  aboutBadge, privacyList, privacyStatus, privacyCount, workspaceRootsList, workspaceRootInput,
  workspaceRootAddBtn, workspaceRootsStatus, settingsUserLabel, settingsRuntimeLabel,
@@ -10,11 +10,13 @@
 } from './dom.js'
 import { showView, setStatus } from './utils.js'
 import { openTimeline } from './timeline.js'
+import { confirmDialog } from './dialogs.js'
+import { captureRuntimeLabel } from './capture-ui.js'
 
 let profileSaveInFlight = false
 
 export function showSettingsPanel(panelId) {
- const id = panelId || 'profile'
+ const id = typeof panelId === 'string' && panelId ? panelId : 'profile'
  for (const item of settingsNavItems()) {
  item.classList.toggle('active', item.dataset.settingsPanel === id)
  }
@@ -38,7 +40,7 @@ export function renderIdentityFields() {
  const empty = document.createElement('div')
  empty.className = 'settings-hint'
  empty.style.marginBottom = '0'
- empty.textContent = 'Nothing stored yet - Clippy will fill this in as you chat, or add fields below.'
+ empty.textContent = 'No identity fields yet. Clippy adds these from captured work, or you can add one below.'
  identityFields.appendChild(empty)
  return
  }
@@ -253,6 +255,7 @@ export async function loadPrivacySettings() {
   setStatus(privacyStatus, `Could not load privacy settings: ${error.message}`, 'error')
  }
  loadWorkspaceRoots()
+ loadWatchSettings()
 }
 
 export function renderWorkspaceRoots(roots) {
@@ -262,7 +265,7 @@ export function renderWorkspaceRoots(roots) {
  if (!items.length) {
   const empty = document.createElement('div')
   empty.className = 'settings-hint'
-  empty.textContent = 'No trusted folders yet. Add a project path below or tell Clippy in chat.'
+  empty.textContent = 'No trusted folders yet. Browse to a project folder, or paste its path.'
   workspaceRootsList.appendChild(empty)
   return
  }
@@ -281,7 +284,7 @@ export function renderWorkspaceRoots(roots) {
 
   const removeBtn = document.createElement('button')
   removeBtn.type = 'button'
-  removeBtn.className = 'settings-text-link'
+  removeBtn.className = 'quiet-btn'
   removeBtn.textContent = 'Remove'
   removeBtn.addEventListener('click', () => removeWorkspaceRoot(root.root_id))
 
@@ -364,20 +367,16 @@ export async function togglePrivacyTarget(id, checkbox) {
 
 async function refreshRuntimeStatus() {
  if (!settingsRuntimeLabel) return
- let captureOn = false
+ let status = null
  try {
-  if (window.clippy?.getCaptureStatus) {
-   captureOn = !!(await window.clippy.getCaptureStatus())
-  }
+  if (window.clippy?.getCaptureStatus) status = await window.clippy.getCaptureStatus()
  } catch (_) { /* ignore */ }
- settingsRuntimeLabel.textContent = captureOn
-  ? 'Running locally · capture on'
-  : 'Running locally · capture off'
- if (settingsRuntimeDot) settingsRuntimeDot.classList.toggle('is-off', !captureOn)
+ settingsRuntimeLabel.textContent = captureRuntimeLabel(status)
+ if (settingsRuntimeDot) settingsRuntimeDot.classList.toggle('is-off', !(status && status.active))
 }
 
-export async function loadSettings() {
- showSettingsPanel('profile')
+export async function loadSettings(panelId) {
+ showSettingsPanel(panelId || 'profile')
  loadUpdateCheck()
  loadAboutInfo()
  loadPrivacySettings()
@@ -392,10 +391,12 @@ export async function loadSettings() {
   store.identityDraft = { ...(profile.identity || {}) }
   store.identityCleared = new Set()
   renderIdentityFields()
+  renderMemoryFacts(profile.facts)
   setStatus(profileStatus, '', null)
  } catch (error) {
   setStatus(profileStatus, `Could not load profile: ${error.message}`, 'error')
  }
+ loadCaptureSettings()
 }
 
 export async function saveProfile({ statusText = 'Saved.' } = {}) {
@@ -427,6 +428,7 @@ export async function saveProfile({ statusText = 'Saved.' } = {}) {
   store.identityDraft = { ...(updated.identity || {}) }
   store.identityCleared = new Set()
   renderIdentityFields()
+  renderMemoryFacts(updated.facts)
   setStatus(profileStatus, statusText, 'ok')
   setTimeout(() => setStatus(profileStatus, '', null), 2000)
   return true
@@ -439,9 +441,9 @@ export async function saveProfile({ statusText = 'Saved.' } = {}) {
  }
 }
 
-export async function openSettings() {
+export async function openSettings(panelId) {
  showView(settingsView)
- await loadSettings()
+ await loadSettings(panelId)
 }
 
 export function closeSettings() {
@@ -630,4 +632,413 @@ export async function copyMcpConfig() {
  } finally {
  mcpCopyBtn.disabled = false
  }
+}
+
+function factStem(name) {
+ return String(name || '').replace(/\.exe$/i, '').trim().toLowerCase()
+}
+
+// Same identities as core/process_names.py. A saved chrome.exe matches
+// the macOS process Google Chrome.
+const PROCESS_KEYS = {
+ chrome: 'chrome',
+ 'google chrome': 'chrome',
+ msedge: 'edge',
+ 'microsoft edge': 'edge',
+ brave: 'brave',
+ 'brave browser': 'brave',
+ firefox: 'firefox',
+ 'mozilla firefox': 'firefox',
+ telegram: 'telegram',
+ telegramdesktop: 'telegram',
+ whatsapp: 'whatsapp',
+ discord: 'discord',
+ slack: 'slack',
+ signal: 'signal',
+ instagram: 'instagram',
+ cursor: 'cursor',
+ 'clippy vision': 'clippy',
+ 'clippy-vision': 'clippy',
+}
+
+function processKey(name) {
+ const stem = factStem(name)
+ return PROCESS_KEYS[stem] || stem
+}
+
+const FACT_PAGE_SIZE = 4
+let factPage = 0
+let factItems = []
+
+export function renderMemoryFacts(facts) {
+ if (!memoryFacts) return
+ factItems = Array.isArray(facts) ? facts : []
+ const pageCount = Math.max(1, Math.ceil(factItems.length / FACT_PAGE_SIZE))
+ if (factPage > pageCount - 1) factPage = pageCount - 1
+ if (factPage < 0) factPage = 0
+ memoryFacts.innerHTML = ''
+
+ const title = document.createElement('h3')
+ title.className = 'settings-subhead'
+ title.textContent = 'What Clippy remembers'
+ memoryFacts.appendChild(title)
+
+ const hint = document.createElement('p')
+ hint.className = 'settings-hint'
+ hint.textContent = 'Facts distilled from captured sessions. These are separate from the named fields above.'
+ memoryFacts.appendChild(hint)
+
+ if (!factItems.length) {
+  const empty = document.createElement('div')
+  empty.className = 'settings-hint'
+  empty.textContent = 'Nothing yet. Facts appear after Clippy summarizes enough of your work.'
+  memoryFacts.appendChild(empty)
+  return
+ }
+
+ const start = factPage * FACT_PAGE_SIZE
+ const pageItems = factItems.slice(start, start + FACT_PAGE_SIZE)
+ const list = document.createElement('div')
+ list.className = 'privacy-list'
+ for (const fact of pageItems) {
+  const row = document.createElement('div')
+  row.className = 'privacy-row'
+  const text = document.createElement('div')
+  text.className = 'privacy-row-text'
+  const strong = document.createElement('strong')
+  strong.textContent = fact.text
+  text.appendChild(strong)
+  if (fact.label) {
+   const span = document.createElement('span')
+   span.textContent = fact.label
+   text.appendChild(span)
+  }
+  const remove = document.createElement('button')
+  remove.type = 'button'
+  remove.className = 'memory-remove'
+  remove.textContent = 'Remove'
+  remove.addEventListener('click', () => removeMemoryFact(fact.fact_id, remove))
+  row.appendChild(text)
+  row.appendChild(remove)
+  list.appendChild(row)
+ }
+ memoryFacts.appendChild(list)
+
+ if (factItems.length > FACT_PAGE_SIZE) {
+  const pager = document.createElement('div')
+  pager.className = 'memory-pager'
+  const prev = document.createElement('button')
+  prev.type = 'button'
+  prev.className = 'memory-page-btn'
+  prev.textContent = 'Previous'
+  prev.disabled = factPage === 0
+  prev.addEventListener('click', () => {
+   factPage -= 1
+   renderMemoryFacts(factItems)
+  })
+  const label = document.createElement('span')
+  label.textContent = `${start + 1}–${start + pageItems.length} of ${factItems.length}`
+  const next = document.createElement('button')
+  next.type = 'button'
+  next.className = 'memory-page-btn'
+  next.textContent = 'Next'
+  next.disabled = factPage >= pageCount - 1
+  next.addEventListener('click', () => {
+   factPage += 1
+   renderMemoryFacts(factItems)
+  })
+  pager.appendChild(prev)
+  pager.appendChild(label)
+  pager.appendChild(next)
+  memoryFacts.appendChild(pager)
+ }
+}
+
+async function removeMemoryFact(factId, button) {
+ const ok = await confirmDialog({
+  title: 'Remove this memory?',
+  message: 'Clippy will stop using this fact. It does not delete the sessions it came from.',
+  confirmLabel: 'Remove',
+  danger: true,
+ })
+ if (!ok) return
+ button.disabled = true
+ try {
+  const profile = await window.clippy.deleteMemoryFact(factId)
+  renderMemoryFacts(profile.facts)
+ } catch (error) {
+  setStatus(profileStatus, `Could not remove fact: ${error.message}`, 'error')
+  button.disabled = false
+ }
+}
+
+let watchSettings = { watch_mode: 'all', watch_apps: [] }
+
+function choiceControl(input) {
+ const wrap = document.createElement('span')
+ wrap.className = input.type === 'radio' ? 'choice choice-radio' : 'choice choice-check'
+ const face = document.createElement('span')
+ face.className = 'choice-face'
+ input.classList.add('choice-input')
+ wrap.appendChild(input)
+ wrap.appendChild(face)
+ return wrap
+}
+
+function renderWatchSettings(settings, apps) {
+ const modeList = document.getElementById('watch-mode-list')
+ const appBox = document.getElementById('watch-apps')
+ const appList = document.getElementById('watch-app-list')
+ if (!modeList || !appBox || !appList) return
+ watchSettings = {
+  watch_mode: settings.watch_mode === 'selected' ? 'selected' : 'all',
+  watch_apps: [...(settings.watch_apps || [])],
+ }
+ modeList.innerHTML = ''
+ for (const mode of [
+  ['all', 'Watch everything', 'Record every app, except windows you black out below.'],
+  ['selected', 'Only selected apps', 'Record just the apps you check. Everything else is ignored.'],
+ ]) {
+  const row = document.createElement('label')
+  row.className = 'privacy-row'
+  const text = document.createElement('div')
+  text.className = 'privacy-row-text'
+  const strong = document.createElement('strong')
+  strong.textContent = mode[1]
+  const span = document.createElement('span')
+  span.textContent = mode[2]
+  text.appendChild(strong)
+  text.appendChild(span)
+  const input = document.createElement('input')
+  input.type = 'radio'
+  input.name = 'watch-mode'
+  input.checked = watchSettings.watch_mode === mode[0]
+  input.addEventListener('change', () => saveWatchMode(mode[0]))
+  row.appendChild(text)
+  row.appendChild(choiceControl(input))
+  modeList.appendChild(row)
+ }
+ appBox.hidden = watchSettings.watch_mode !== 'selected'
+ const seen = new Map()
+ for (const app of apps || []) {
+  const stem = processKey(app.process_name)
+  if (stem && stem !== 'unknown') seen.set(stem, app.process_name)
+ }
+ for (const name of watchSettings.watch_apps) {
+  if (!seen.has(processKey(name))) seen.set(processKey(name), name)
+ }
+ appList.innerHTML = ''
+ if (!seen.size) {
+  const empty = document.createElement('div')
+  empty.className = 'settings-hint'
+  empty.textContent = 'No apps recorded yet. Add a process name, then start capture.'
+  appList.appendChild(empty)
+  return
+ }
+ for (const [stem, label] of seen) {
+  const row = document.createElement('label')
+  row.className = 'privacy-row'
+  const text = document.createElement('div')
+  text.className = 'privacy-row-text'
+  const strong = document.createElement('strong')
+  strong.textContent = label
+  text.appendChild(strong)
+  const box = document.createElement('input')
+  box.type = 'checkbox'
+  box.checked = watchSettings.watch_apps.some((name) => processKey(name) === stem)
+  box.addEventListener('change', () => toggleWatchApp(label, box.checked))
+  row.appendChild(text)
+  row.appendChild(choiceControl(box))
+  appList.appendChild(row)
+ }
+}
+
+async function loadWatchSettings() {
+ const status = document.getElementById('watch-status')
+ try {
+  const [settings, seen] = await Promise.all([
+   window.clippy.getCaptureSettings(),
+   window.clippy.listSeenApps(),
+  ])
+  renderWatchSettings(settings, seen.apps || [])
+  if (status) setStatus(status, '', null)
+ } catch (error) {
+  if (status) setStatus(status, `Could not load watch list: ${error.message}`, 'error')
+ }
+}
+
+async function saveWatchMode(mode) {
+ const status = document.getElementById('watch-status')
+ try {
+  const settings = await window.clippy.updateCaptureSettings({ watch_mode: mode })
+  const seen = await window.clippy.listSeenApps()
+  renderWatchSettings(settings, seen.apps || [])
+  if (status) setStatus(status, mode === 'selected' ? 'Only selected apps are recorded.' : 'Every app is recorded.', 'ok')
+ } catch (error) {
+  if (status) setStatus(status, error.message, 'error')
+ }
+}
+
+async function toggleWatchApp(name, enabled) {
+ const apps = watchSettings.watch_apps.filter((item) => processKey(item) !== processKey(name))
+ if (enabled) apps.push(name)
+ const status = document.getElementById('watch-status')
+ try {
+  const settings = await window.clippy.updateCaptureSettings({ watch_apps: apps, watch_mode: 'selected' })
+  const seen = await window.clippy.listSeenApps()
+  renderWatchSettings(settings, seen.apps || [])
+ } catch (error) {
+  if (status) setStatus(status, error.message, 'error')
+ }
+}
+
+export async function addWatchAppFromInput() {
+ const input = document.getElementById('watch-app-input')
+ const name = (input?.value || '').trim()
+ if (!name) return
+ await toggleWatchApp(name, true)
+ if (input) input.value = ''
+}
+
+let loadedRetention = null
+
+function renderDataStats(data) {
+ const counts = {
+  'stat-events': data?.events || 0,
+  'stat-sessions': data?.sessions || 0,
+  'stat-facts': data?.memory_facts || 0,
+  'stat-shots': data?.screenshots || 0,
+ }
+ for (const [id, value] of Object.entries(counts)) {
+  const node = document.getElementById(id)
+  if (node) node.textContent = Number(value).toLocaleString()
+ }
+}
+
+async function loadCaptureSettings() {
+ const events = document.getElementById('retain-events')
+ const shots = document.getElementById('retain-shots')
+ const shotsMax = document.getElementById('retain-shots-max')
+ const sessions = document.getElementById('retain-sessions')
+ const model = document.getElementById('settings-model')
+ try {
+  const [settings, data, llm] = await Promise.all([
+   window.clippy.getCaptureSettings(),
+   window.clippy.getDataStats(),
+   window.clippy.getLLMConfig(),
+  ])
+  loadedRetention = settings
+  if (events) events.value = settings.raw_retention_days
+  if (shots) shots.value = settings.screenshot_retention_days
+  if (shotsMax) shotsMax.value = settings.screenshot_retention_max_days
+  if (sessions) sessions.value = settings.summary_retention_days
+  if (model) model.value = llm.chat_model || ''
+  renderDataStats(data)
+ } catch (error) {
+  const status = document.getElementById('retain-status')
+  if (status) setStatus(status, error.message, 'error')
+ }
+}
+
+const RETENTION_LIMITS = {
+ raw_retention_days: { min: 1, max: 30, label: 'Events' },
+ screenshot_retention_days: { min: 1, max: 7, label: 'Screenshots' },
+ screenshot_retention_max_days: { min: 1, max: 14, label: 'Longest screenshot stay' },
+ summary_retention_days: { min: 1, max: 180, label: 'Session summaries' },
+}
+
+function readRetentionInput(id) {
+ const value = Number(document.getElementById(id)?.value)
+ return Number.isFinite(value) ? value : NaN
+}
+
+export async function saveRetention() {
+ const status = document.getElementById('retain-status')
+ const next = {
+  raw_retention_days: readRetentionInput('retain-events'),
+  screenshot_retention_days: readRetentionInput('retain-shots'),
+  screenshot_retention_max_days: readRetentionInput('retain-shots-max'),
+  summary_retention_days: readRetentionInput('retain-sessions'),
+ }
+ for (const [key, rule] of Object.entries(RETENTION_LIMITS)) {
+  const value = next[key]
+  if (!Number.isInteger(value) || value < rule.min || value > rule.max) {
+   setStatus(status, `${rule.label} must be a whole number from ${rule.min} to ${rule.max}.`, 'error')
+   return
+  }
+ }
+ if (next.screenshot_retention_days > next.screenshot_retention_max_days) {
+  setStatus(status, 'Ordinary screenshots cannot be kept longer than the longest screenshot stay.', 'error')
+  return
+ }
+ if (next.screenshot_retention_max_days > next.raw_retention_days) {
+  setStatus(status, 'A screenshot cannot be kept longer than the event it belongs to.', 'error')
+  return
+ }
+ const shrinking = loadedRetention && (
+  next.raw_retention_days < loadedRetention.raw_retention_days
+  || next.summary_retention_days < loadedRetention.summary_retention_days
+  || next.screenshot_retention_days < loadedRetention.screenshot_retention_days
+ )
+ if (shrinking) {
+  const ok = await confirmDialog({
+   title: 'Shorten how long data is kept?',
+   message: 'Older events and sessions outside the new limit are deleted now.',
+   confirmLabel: 'Delete older data',
+   danger: true,
+  })
+  if (!ok) return
+ }
+ setStatus(status, 'Saving...', null)
+ try {
+  loadedRetention = await window.clippy.updateCaptureSettings(next)
+  setStatus(status, 'Retention saved.', 'ok')
+  await loadCaptureSettings()
+ } catch (error) {
+  setStatus(status, error.message, 'error')
+ }
+}
+
+export async function saveModelSetting() {
+ const status = document.getElementById('model-status')
+ const chatModel = (document.getElementById('settings-model')?.value || '').trim()
+ if (!chatModel) {
+  setStatus(status, 'Enter a model tag.', 'error')
+  return
+ }
+ setStatus(status, 'Saving...', null)
+ try {
+  await window.clippy.saveLLMConfig({ chat_model: chatModel })
+  setStatus(status, 'Saved. Restart Clippy. If this model is not installed, setup downloads it first.', 'ok')
+ } catch (error) {
+  setStatus(status, error.message, 'error')
+ }
+}
+
+export async function clearAllData() {
+ const ok = await confirmDialog({
+  title: 'Delete everything Clippy stored?',
+  message: 'Events, screenshots, sessions, and memory facts are removed. Your display name stays.',
+  confirmLabel: 'Delete everything',
+  danger: true,
+ })
+ if (!ok) return
+ const status = document.getElementById('data-clear-status')
+ setStatus(status, 'Deleting...', null)
+ try {
+  await window.clippy.clearData(['all', 'memory'])
+  setStatus(status, 'Stored data deleted.', 'ok')
+  await loadCaptureSettings()
+  const profile = await window.clippy.getProfile()
+  renderMemoryFacts(profile.facts)
+ } catch (error) {
+  setStatus(status, error.message, 'error')
+ }
+}
+
+export async function browseWorkspaceRoot() {
+ const picked = await window.clippy.pickFolder()
+ if (!picked || picked.canceled || !picked.path || !workspaceRootInput) return
+ workspaceRootInput.value = picked.path
+ await addWorkspaceRootFromInput()
 }

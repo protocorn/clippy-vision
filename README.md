@@ -3,7 +3,7 @@
 > **A local, free, auditable memory layer for your AI agents.** It watches your work on-device, stores it privately, and lets Cursor, Claude Desktop, VS Code, or any MCP client search that memory. The desktop app captures, summarizes, and shows the timeline. There is no in-app chat.
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Models](https://img.shields.io/badge/models-Ollama%20local-orange)
 ![MCP](https://img.shields.io/badge/MCP-Cursor%20%7C%20Claude%20Desktop%20%7C%20VS%20Code-purple)
 [![All Contributors](https://img.shields.io/github/all-contributors/protocorn/clippy-vision?color=ee8449&style=flat-square)](#contributors)
@@ -23,7 +23,7 @@ It passively observes active windows, clipboard, typing patterns, and screenshot
 
 If you never connect a client, Clippy still captures and remembers. The timeline in the app is how you see what was stored.
 
-Everything runs on your machine. No API keys required for capture or memory. No cloud. No data leaving your device.
+Capture and the memory database stay on this computer. No API keys are required for that. If you connect a cloud agent, that agent receives the memory it asks for, after Clippy scrubs secrets and windows you marked private.
 
 ---
 
@@ -42,7 +42,7 @@ Connect once from the app. The agent calls Clippy's tools (`search_sessions`, `s
 | Sees | Names and timestamps, one app at a time | Whatever you paste or upload | Screen content across every app |
 | Who queries it | You, manually | You, by pasting | Your agent, through MCP |
 | Needs you to reconstruct context | Yes | Yes | No — already saw it |
-| Runs where | Local | Cloud | 100% on your machine |
+| Runs where | Local | Cloud | On your machine. A cloud agent receives only the replies it requests |
 | Best for | "Which tab did I open?" | "Help me solve / write / explain this" | "Get my real work history back into my agent" |
 
 Clippy does not replace Claude or ChatGPT. It feeds those tools the personal activity history they cannot see on their own.
@@ -59,7 +59,7 @@ Clippy does not replace Claude or ChatGPT. It feeds those tools the personal act
   <img src="assets/demo-vs-claude-urls.png" alt="Clippy Vision vs Claude on a personal activity question" width="720" />
 </p>
 
-<p align="center"><em>Same kind of personal question. Clippy's local chat answers from activity it saw on your machine. A cloud chat has no record of that work unless you paste it in.</em></p>
+<p align="center"><em>Same kind of personal question. A connected app can answer from activity Clippy saw on your machine. A cloud chat has no record of that work unless you paste it in.</em></p>
 
 Your work is not stored in one place. It is spread across the browser, your IDE, local PDFs, terminal output, chat apps, notes, spreadsheets, and design tools. Clippy keeps one timeline across them, so you — in the app or via an MCP agent — can search what was on the screen — not just filenames — and reconstruct a whole stretch of work instead of hunting one artifact at a time.
 
@@ -85,26 +85,26 @@ Click your platform to download **v1.3.1** directly:
   <a href="https://github.com/protocorn/clippy-vision/releases/latest"><img src="https://img.shields.io/github/release-date/protocorn/clippy-vision?style=flat-square&label=latest%20release" alt="Latest release date" /></a>
 </p>
 
-The installer includes a setup wizard that handles Python, Ollama, and all required models automatically. No terminal required.
+The installer includes a setup wizard. On Windows it can install Python and Ollama with winget. On macOS it uses Homebrew when Homebrew is already installed; otherwise install Python 3.11+ and Ollama, then retry. macOS also asks for Screen Recording and Accessibility. The installers are unsigned: Windows SmartScreen needs More info → Run anyway, and macOS Gatekeeper needs a right-click → Open the first time.
 
-Clippy Vision is under active development. Three releases shipped in the first two weeks, including full macOS support, and bug reports usually get a reply the same day.
+Clippy Vision is under active development. Windows and macOS share the same capture and privacy path: windows, clipboard, typing metrics, screenshots, password-field painting, and blackout of privacy-listed apps. Bug reports usually get a reply the same day.
 
-**Trying Clippy?** [Share feedback (5 min)](https://forms.gle/qxqmNBXzJsWGAAe29) to help shape what we build next.
+**Trying Clippy?** [Share feedback (5 min)](https://docs.google.com/forms/d/e/1FAIpQLScqsgeWGLdUS_Ba0Me0LPQH8QRrwnIgGiGGHwLElVuqIpfcxQ/viewform) to help shape what we build next.
 
 ### System requirements
 
-Clippy Vision runs a local text model for chat and uses accessibility APIs plus OCR for screen capture (no vision model in the capture path).
+Clippy Vision runs a local text model to classify events, summarize sessions, and distill memory. Screen text comes from accessibility APIs plus OCR. There is no vision model on the capture path, and there is no in-app chat.
 
 | | Minimum | Recommended |
 |--|---------|-------------|
-| OS | Windows 10 / 11 (64-bit) | Windows 11 |
+| OS | Windows 10 / 11 (64-bit) or macOS 12+ | Windows 11 or a current macOS |
 | System RAM | 8 GB | 16 GB |
-| GPU VRAM | Not required (integrated OK) | 4 GB+ dedicated |
+| Graphics memory | Not required. Integrated graphics or Apple unified memory is enough | 4 GB+ dedicated on Windows, or 16 GB unified memory on Apple silicon |
 | Free disk | 8 GB | 10 GB+ |
 
 - **First run** needs internet for dependencies and for the chat model you choose in setup (for example `qwen3:8b` is ~4.7 GB). Clippy does not force a specific model.
-- The setup wizard **checks your PC** against these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that chat may feel slower.
-- Integrated / shared GPUs are allowed at minimum; a dedicated GPU still helps chat speed.
+- The setup wizard **checks this computer** against these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that summaries may feel slower.
+- Integrated and shared GPUs are allowed at minimum. A dedicated GPU, or more unified memory on a Mac, still helps summary speed.
 - **Lower-spec / contributor machines:** capture uses accessibility + OCR (no vision model in setup). Pick a smaller chat model in setup if needed. Details in [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
 
 ---
@@ -115,8 +115,8 @@ Clippy Vision runs a local text model for chat and uses accessibility APIs plus 
 ### Option A - Installer (recommended)
 
 1. Use the [Download](#download) buttons above (Windows, macOS Apple Silicon, or macOS Intel)
-2. Follow the setup wizard (installs Python, Ollama, and AI models)
-3. Launch from Start Menu → Clippy Vision
+2. Follow the setup wizard. It installs the model you picked. Windows can also install Python and Ollama. macOS does that through Homebrew when Homebrew is present, and asks for Screen Recording and Accessibility.
+3. Launch Clippy Vision from the Start Menu on Windows, or from Applications on macOS.
 
 ### Option B - Run from source
 
@@ -135,19 +135,19 @@ The app will open the setup wizard on first launch and walk you through dependen
 
 - **MCP memory server** - connect Cursor, Claude Desktop, or VS Code so those agents can search sessions, events, and long-term memory
 - **Passive screen awareness** - captures foreground windows, clipboard, typing bursts, and screenshots in the background
-- **Hierarchical memory** - events → session summaries → distilled long-term facts; memory never resets
+- **Hierarchical memory** - events roll up into session summaries and long-term facts. Facts stay until you delete them. Events, screenshots, and sessions expire on the schedule in Settings
 - **Privacy layer** - before text or a screenshot is stored, Clippy tries to redact passwords and other sensitive data: password fields are painted out, and keys, tokens, and secret-shaped text are stripped. Clippy's own window is blacked out in every screenshot. This is an effort, not a guarantee.
 - **Three-tier event classification** - rule-based → feature-based → LLM fallback, so only meaningful events are stored
 - **Low-cost screen text** - accessibility/UI text first with RapidOCR fallback; no vision model in capture
 - **Timeline view** - browse captured sessions in the app and drill into exactly what was recorded
 - **Toggle capture** - start/stop data capture from the tray icon or the in-app button, with a desktop notification on change
-- **Per-app redaction** - Instagram, WhatsApp, Telegram, Signal, Slack, Discord, and private windows can be blacked out in captures from Settings. Turn capture off when you want nothing stored.
+- **Per-app redaction** - Instagram, WhatsApp, Telegram, Signal, Slack, and Discord can be blacked out in captures from Settings. Private browsing is on by default for Google Chrome, Microsoft Edge, and Brave on Windows and macOS. Turn capture off when you want nothing stored.
 
 ---
 
 ## Where this is going
 
-Clippy's bet is to be a **local memory layer** that agents query through MCP. The server ships with the packaged app (one-click config for Cursor / Claude Desktop / VS Code) and a timeline view lets you audit what was captured. Next priorities: stronger per-app privacy controls (reliable incognito/private-window redaction) and optional cloud model providers for users who prefer API speed over full locality. Proactive skills come after trust and access are solid.
+Clippy's bet is to be a **local memory layer** that agents query through MCP. The server ships with the packaged app (one-click config for Cursor / Claude Desktop / VS Code) and a timeline view lets you audit what was captured. Next priorities: optional cloud model providers for users who prefer API speed over full locality. Proactive skills come after trust and access are solid.
 
 No dates attached to any of it. [PROJECT_VISION.md](PROJECT_VISION.md) has the current thinking, the priority order, and an honest list of what does not work yet. If you want to shape any of it, the [open issues](https://github.com/protocorn/clippy-vision/issues) are the place to start.
 
@@ -189,7 +189,7 @@ Fast rules that immediately flag obvious signals: too few keystrokes → not int
 Scoring starts at 5. Multiple features add or subtract: typing deviation, context novelty (how many times this app was seen in 7 days), typing intensity z-score, clipboard content length. Events below 4 are dropped; above 7 are kept; 4-7 go to Tier 2.
 
 **Tier 2 - LLM fallback**
-The last 3 events + current event are sent to `qwen3:8b` for context-aware classification. Output is `INTERESTING` or `NOT_INTERESTING`; classification never queues a vision model.
+The last 3 events plus the current event are sent to the chat model you chose in setup for context-aware classification. Output is `INTERESTING` or `NOT_INTERESTING`. Classification never queues a vision model.
 
 **Screen text enrichment**
 Each captured frame records bounded text from the foreground accessibility/UI API. Accessibility-tree walks run on a dedicated background worker (`core/uia_worker.py`), so a slow app can never delay the next capture. RapidOCR runs only when that text is empty or too sparse. A background processor (`core/screenshot_processor.py`) groups visually identical screenshots using perceptual hashing and stores the resulting text with the nearest event (±10 s); if none exists, it creates a `screenshot_analysis` event. Backlog enrichment is throttled under system load and guarantees older screenshots always make progress. Image embeddings and event-level RAG are disabled by default.
@@ -198,7 +198,7 @@ Each captured frame records bounded text from the foreground accessibility/UI AP
 
 ### Segment 2 - Summarization
 
-A background summarizer wakes about every **60 seconds** and turns pending activity events into session summaries with `qwen3:8b`. That interval is the check cadence, not the session length: each tick looks for unsummarized events, merges them into activity windows (events within a 10-minute gap, capped at 30 minutes), and summarizes groups with at least 3 events (up to 25 per summary). It runs in two passes per tick:
+A background summarizer wakes about every **60 seconds** and turns pending activity events into session summaries with the chat model you chose in setup. That interval is the check cadence, not the session length: each tick looks for unsummarized events, merges them into activity windows (events within a 10-minute gap, capped at 30 minutes), and summarizes groups with at least 3 events (up to 25 per summary). It runs in two passes per tick:
 
 - **Pass 1:** Summarizes pending event windows
 - **Pass 2:** Refreshes sessions when delayed screenshot text becomes available
@@ -241,18 +241,18 @@ Connect under **Settings → Connect apps**. Timeline, privacy, and capture cont
 
 ### Segment 5 - Database
 
-All data lives in a local SQLite database (`core/data/events.db`):
+All data lives in a local SQLite database. A source checkout uses `core/data/events.db`. An installed app uses its own data folder: `%APPDATA%\Clippy Vision\data` on Windows, and `~/Library/Application Support/Clippy Vision/data` on macOS.
 
 | Table | Contents | Retention |
 |-------|----------|-----------|
-| `events` | Raw captured events | 7 days |
-| `sessions` | Summaries of events | 90 days |
-| `memory_clusters` | Cluster metadata | Permanent |
-| `memory_facts` | Individual long-term facts | Permanent |
-| `memory_conflicts` | Unresolved fact contradictions | Permanent |
-| `memory_meta` | Settings and distiller state | Permanent |
-| `conversations` | Full conversation history | Permanent |
-| `user_profile` | User name | Permanent |
+| `events` | Raw captured events | 7 days by default (1–30 in Settings) |
+| `sessions` | Summaries of events | 90 days by default (1–180 in Settings) |
+| `memory_clusters` | Cluster metadata | Until you delete it |
+| `memory_facts` | Individual long-term facts | Until you delete it |
+| `memory_conflicts` | Unresolved fact contradictions | Until you delete it |
+| `memory_meta` | Settings and distiller state | Until you clear app data |
+| `conversations` | Leftover rows from the removed in-app chat. The current app does not write a chat here | Until you clear app data |
+| `user_profile` | User name | Until you clear app data |
 
 FTS5 virtual tables on `events` and `sessions` enable full-text search across all stored content.
 
@@ -260,10 +260,11 @@ FTS5 virtual tables on `events` and `sessions` enable full-text search across al
 
 ## Privacy
 
-- All processing is local. Nothing leaves your machine.
-- A privacy layer runs before capture is saved. It tries to redact passwords and other sensitive data: password fields are painted black on the screenshot, and API keys, tokens, private keys, and other secret-shaped text are removed from what gets stored. Clippy's own window is blacked out in every screenshot. This is a best effort. Something can still slip through, so capture on/off remains the sure switch.
-- You can toggle data capture on/off at any time from the tray icon.
-- Per-app redaction blacks out windows you choose in Settings, including Instagram, WhatsApp, Telegram, Signal, Slack, Discord, and private browsing.
+- Capture, summarization, and the database stay on this computer. Clippy's own network call is the GitHub update check described below. A connected cloud agent is separate: it receives the tool replies it requests.
+- A privacy layer runs before capture is saved, on Windows and macOS. It tries to paint password fields and other single-line fields, and it removes API keys, tokens, private keys, and other secret-shaped text from what gets stored. Clippy's own window is blacked out while it is in front. Apps you mark private are blacked out whenever they are visible, not only when they are in front. Private browsing is on by default for Google Chrome, Microsoft Edge, and Brave on Windows and macOS: the window is painted black, the address is not stored, and the title is saved as "Private window". Firefox, Opera, and Safari are not covered. This is a best effort. Pause capture when a window must not be stored.
+- The same redactor runs again on every MCP tool reply. Screenshot file paths are left out, and a window you marked private is returned as "This moment was private" with the app and time only. If that filter fails, the tool returns nothing. The copy on this computer is unchanged.
+- You can toggle data capture on/off at any time from the tray icon, and delete one moment, one session, or one day from the timeline.
+- Per-app redaction blacks out windows you choose in Settings, including Instagram, WhatsApp, Telegram, Signal, Slack, and Discord. Private browsing for Google Chrome, Microsoft Edge, and Brave is on unless you turn that toggle off.
 
 <p align="center">
   <img src="assets/instagram-redaction.jpg" alt="Instagram login with the password field blacked out in a Clippy capture" width="720" />
@@ -271,7 +272,7 @@ FTS5 virtual tables on `events` and `sessions` enable full-text search across al
 - Captured data has TTLs: raw events expire after 7 days, session summaries after 90 days. Screenshots default to 1 day; high-signal frames (interesting flag, interest score, URL present, clipboard/paste) can live up to `screenshot_retention_max_days` (default 7). OCR text on events remains after the JPEG is purged.
 - The local API binds to `127.0.0.1` on a port chosen at launch, so it is never reachable from your network.
 
-**The one outbound request:** Clippy Vision checks the public GitHub releases page for a newer version, at most once every 12 hours. It sends no chat, screen, profile, or account data — only the request itself, like opening the releases page in a browser. Turn it off any time under **Settings → Updates**.
+**The one request Clippy makes by itself:** it checks the public GitHub releases page for a newer version, at most once every 12 hours. That request carries no screen, profile, or account data. Turn it off any time under **Settings → Updates**. Tool replies sent to an MCP client are not this request. They leave the machine only if that client sends them on.
 
 ---
 
@@ -296,7 +297,7 @@ The built installer appears at `electron-ui/dist/ClippyVision-Windows-Setup-{ver
 
 ## License
 
-MIT - see [LICENSE](LICENSE) for details.
+AGPL-3.0. See [LICENSE](LICENSE). Releases already published through v1.3.1 stay under MIT. A commercial license for companies that cannot use AGPL is not written yet.
 
 ---
 

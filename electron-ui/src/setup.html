@@ -789,7 +789,7 @@
             <div class="model-suggest-label">Suggestions — click one, or type any Ollama model tag</div>
             <div class="model-chips" id="model-chips" role="group" aria-label="Suggested local AI models"></div>
             <label id="llm-cli-command-field" hidden>CLI command/path<input id="llm-cli-command" placeholder="Detected from PATH" /></label>
-            <div class="provider-help">This one local model powers Clippy’s chat <em>and</em> backend work (event classification, session summaries, memory distilling, agent reasoning). Pick any Ollama tag — Clippy does not force a specific model. Size and speed depend on what you choose.</div>
+            <div class="provider-help">This one local model writes session summaries and long-term memory. Questions are asked from a connected app, not inside Clippy. Pick any Ollama tag. You can change it later in Settings. Size and speed depend on what you choose.</div>
             <label id="llm-api-key-field">API key <span style="font-weight:400;text-transform:none;letter-spacing:normal">optional</span><input id="llm-api-key" type="password" placeholder="Leave blank if your local server needs no key" autocomplete="off" /></label>
             <button type="button" class="secondary" id="llm-connect-btn" hidden>Connect account in Terminal</button>
           </div>
@@ -1063,7 +1063,7 @@
         {
           id: 'packages',
           title: 'Python packages',
-          why: 'Needed for the local API, screen capture, OCR, privacy helpers, and the in-app agent. Installed into your Python environment from requirements.txt.',
+          why: 'Needed for the local API, screen capture, OCR, and privacy helpers. Installed into your Python environment from requirements.txt.',
           meta: 'One-time pip install · size varies by what is already present',
           required: true,
         },
@@ -1073,20 +1073,20 @@
           id: 'ollama',
           title: 'Ollama (local model runtime)',
           why: 'Runs the local AI model you chose entirely on this machine. Clippy installs Ollama only if it is missing; if you already have it, this step just verifies it.',
-          meta: 'Installed only when missing · from ollama.com / winget',
+          meta: 'Installed only when missing · winget on Windows, Homebrew on macOS, or ollama.com',
           required: true,
         })
         items.push({
           id: 'local-ml',
-          title: 'Local ML weights (embeddings + query router)',
-          why: 'MiniLM embeddings power memory search. The small router model picks the right retrieval strategy before the main model runs. Downloaded from Hugging Face into Clippy’s models folder — not a vision model.',
+          title: 'Local ML weights (embeddings)',
+          why: 'MiniLM embeddings are downloaded from Hugging Face for optional memory search. This is not a vision model, and capture does not load one.',
           meta: 'Roughly hundreds of MB · skipped if already present',
           required: true,
         })
         items.push({
           id: 'chat-model',
           title: `Local AI model: ${safeModel}`,
-          why: `This is Clippy’s main local LLM — used for in-app chat and for backend work (classifying events, summarizing sessions, distilling memory, and agent reasoning). Clippy pulls only the model you selected. Size depends on the tag (for example qwen3:8b is around 4–5 GB).`,
+          why: `This is Clippy’s main local model. It classifies events, summarizes sessions, and distills memory. You ask questions from Cursor, Claude, or VS Code after setup. Clippy pulls only the model you selected. Size depends on the tag (for example qwen3:8b is around 4–5 GB).`,
           meta: `ollama pull ${safeModel} · skipped if already on this machine`,
           required: true,
         })
@@ -1094,7 +1094,7 @@
         items.push({
           id: 'external-chat',
           title: 'Your existing local AI API',
-          why: `Clippy will call ${safeModel} on the Base URL you set for chat and backend LLM jobs. No Ollama model download runs in this mode.`,
+          why: `Clippy will call ${safeModel} on the Base URL you set for summaries and memory. No Ollama model download runs in this mode.`,
           meta: 'No extra model download from Clippy',
           required: true,
         })
@@ -1190,8 +1190,8 @@
       $('llm-api-key').placeholder = config.api_key_set ? 'Saved key is set · leave blank to keep it' : 'Leave blank if your local server needs no key'
       const managed = isManagedOllamaUrl($('llm-base-url').value)
       $('provider-help').textContent = managed
-        ? 'Clippy can install and manage Ollama locally. Type any model tag or pick a suggestion — this model runs chat and backend jobs. Nothing is forced.'
-        : 'Clippy will use this existing local API for chat and backend LLM jobs, and skip managed Ollama installs and model pulls.'
+        ? 'Clippy can install and manage Ollama locally. Type any model tag or pick a suggestion. This model writes summaries and memory. Change it later in Settings.'
+        : 'Clippy will use this existing local API for summaries and memory, and skip managed Ollama installs and model pulls.'
     }
 
     function selectedLLMConfig() {

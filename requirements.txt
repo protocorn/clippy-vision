@@ -1,6 +1,8 @@
 pywin32>=306; platform_system == "Windows"
 uiautomation; platform_system == "Windows"
 pyobjc-framework-Quartz>=10.0; platform_system == "Darwin"
+pyobjc-framework-Cocoa>=10.0; platform_system == "Darwin"
+pyobjc-framework-ApplicationServices>=10.0; platform_system == "Darwin"
 mss
 Pillow
 pynput

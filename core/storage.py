@@ -225,6 +225,7 @@ conn.commit()
 
 _ensure_column("sessions", "summary_embedding", "TEXT")
 _ensure_column("sessions", "content_hash", "TEXT")
+_ensure_column("sessions", "user_correction", "TEXT")
 
 conn.execute("""
 CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts
@@ -429,7 +430,10 @@ def set_user_name(name: str) -> str:
 ###########################################
 def store_event(event: Event):
 
-    from core.app_settings import get_capture_settings
+    from core.app_settings import get_capture_settings, should_watch_process
+    process_name = (event.get("window_context") or {}).get("process_name") or ""
+    if not should_watch_process(process_name):
+        return
     retention_days = get_capture_settings()["raw_retention_days"]
 
 
@@ -490,6 +494,12 @@ def store_event(event: Event):
 ####### HELPERS FOR STORING SUMMARY #######
 ###########################################
 
+def _summary_ttl_seconds() -> int:
+    from core.app_settings import get_capture_settings
+    days = int(get_capture_settings()["summary_retention_days"])
+    return days * 24 * 60 * 60
+
+
 def store_summary(summary: dict, vision_enriched: bool = False, embedding: list | None = None):
     if not vision_enriched:
         existing = conn.execute(
@@ -519,7 +529,7 @@ def store_summary(summary: dict, vision_enriched: bool = False, embedding: list 
             summary.get("active_task"),
             json.dumps(summary.get("entities", [])),
             summary["event_count"],
-            summary["created_at"] + (TTL_SUMMARY_DAYS * 24 * 60 * 60),
+            summary["created_at"] + (_summary_ttl_seconds()),
             1 if vision_enriched else 0,
             json.dumps(embedding) if embedding else None,
             summary.get("content_hash"),
@@ -558,6 +568,7 @@ def list_timeline_sessions(
     until: float | None = None,
     limit: int = 40,
     offset: int = 0,
+    q: str | None = None,
 ) -> dict:
     """Return a page of captured sessions that overlap the requested window."""
     limit = min(max(limit, 1), 100)
@@ -574,6 +585,28 @@ def list_timeline_sessions(
     if until is not None:
         filters.append("window_start < ?")
         parameters.append(until)
+    query = " ".join((q or "").split())
+    if query:
+        like = f"%{query.replace('%', '').replace('_', '')}%"
+        filters.append(
+            """(
+                summary LIKE ? COLLATE NOCASE
+                OR IFNULL(active_task, '') LIKE ? COLLATE NOCASE
+                OR EXISTS (
+                    SELECT 1 FROM events e
+                    WHERE e.timestamp >= sessions.window_start
+                      AND e.timestamp <= sessions.window_end
+                      AND (
+                        IFNULL(e.summary, '') LIKE ? COLLATE NOCASE
+                        OR IFNULL(e.current_window_title, '') LIKE ? COLLATE NOCASE
+                        OR IFNULL(e.process_name, '') LIKE ? COLLATE NOCASE
+                        OR IFNULL(e.active_url, '') LIKE ? COLLATE NOCASE
+                        OR IFNULL(e.vision_ocr_text, '') LIKE ? COLLATE NOCASE
+                      )
+                )
+            )"""
+        )
+        parameters.extend([like] * 7)
 
     conditions = " AND ".join(filters)
     deduped_from = f"""
@@ -755,7 +788,7 @@ def list_session_events(summary_id: str) -> dict | None:
     row = conn.execute(
         """
         SELECT summary_id, session_id, window_start, window_end,
-               summary, active_task, event_count
+               summary, active_task, event_count, user_correction
         FROM sessions
         WHERE summary_id = ?
         """,
@@ -788,6 +821,7 @@ def list_session_events(summary_id: str) -> dict | None:
         "summary": row[4],
         "active_task": row[5],
         "event_count": row[6] or 0,
+        "user_correction": (row[7] or "").strip(),
         "events": [
             {
                 "event_id": e[0],

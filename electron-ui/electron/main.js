@@ -1,5 +1,6 @@
 const {
     app, ipcMain, shell, dialog, globalShortcut, clipboard,
+    systemPreferences, desktopCapturer,
 } = require('electron')
 const path = require('path')
 const fs   = require('fs')
@@ -74,8 +75,21 @@ app.on('second-instance', () => {
 })
 
 // Expose only narrow, validated desktop actions to the isolated renderer.
-ipcMain.handle('toggle-capture',     () => { api.toggleCapture();  return api.isCapturing() })
-ipcMain.handle('get-capture-status', () => api.isCapturing())
+ipcMain.handle('toggle-capture',     () => { api.toggleCapture();  return api.captureStatus() })
+ipcMain.handle('pause-capture',      (_event, minutes) => api.pauseCapture(minutes))
+ipcMain.handle('get-capture-status', () => api.captureStatus())
+ipcMain.handle('pick-folder', async () => {
+    const result = await dialog.showOpenDialog(state.mainWindow, {
+        title: 'Choose a folder Clippy may search',
+        properties: ['openDirectory'],
+    })
+    if (result.canceled || !result.filePaths || !result.filePaths[0]) return { canceled: true, path: '' }
+    return { canceled: false, path: result.filePaths[0] }
+})
+ipcMain.handle('relaunch-app', () => {
+    app.relaunch()
+    app.exit(0)
+})
 ipcMain.handle('get-login-item', () => app.getLoginItemSettings().openAtLogin)
 ipcMain.handle('set-login-item', (_event, enabled) => {
     const openAtLogin = Boolean(enabled)
@@ -195,9 +209,31 @@ ipcMain.handle('open-provider-auth', (_event, provider) => llmConfig.openProvide
 
 setup.registerSetupIpc(ipcMain, hardware.getHardwareCheck)
 
+function requestMacPermissions() {
+    // Screen capture and password painting both need these prompts. Asking
+    // here is what makes a fresh Mac install able to see the same windows
+    // Windows sees without a settings scavenger hunt.
+    if (process.platform !== 'darwin') return
+    try {
+        if (!systemPreferences.isTrustedAccessibilityClient(false)) {
+            systemPreferences.isTrustedAccessibilityClient(true)
+            console.log('[permissions] macOS Accessibility prompt requested')
+        }
+    } catch (error) {
+        console.log('[permissions] Accessibility check failed:', error.message)
+    }
+    if (systemPreferences.getMediaAccessStatus('screen') === 'granted') return
+    desktopCapturer.getSources({ types: ['screen'] }).then(() => {
+        console.log('[permissions] macOS Screen Recording prompt requested')
+    }).catch((error) => {
+        console.log('[permissions] Screen Recording check failed:', error.message)
+    })
+}
+
 app.whenReady().then(async () => {
     // Windows groups the taskbar entry, tray icon, and notifications by this id.
     if (process.platform === 'win32') app.setAppUserModelId('com.clippyvision.app')
+    requestMacPermissions()
 
     // Register the global shortcut once Electron owns the application session.
     globalShortcut.register('CommandOrControl+Shift+Space', () => api.toggleCapture())

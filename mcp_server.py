@@ -38,10 +38,25 @@ with redirect_stdout(sys.stderr):
 
 mcp = FastMCP("Clippy-Vision MCP")
 
+_WITHHELD = "Cloud result withheld. The privacy filter did not finish."
+
 
 def _call_tool(function, *args, **kwargs):
+    """Run a tool, then scrub the reply before it reaches a cloud client.
+
+    Capture has already stored its own copy. This pass does not change the
+    database. If scrubbing fails, the raw reply is not returned.
+    """
     with redirect_stdout(sys.stderr):
-        return function(*args, **kwargs)
+        result = function(*args, **kwargs)
+    if not isinstance(result, str):
+        result = "" if result is None else str(result)
+    try:
+        from core.cloud_egress import redact_cloud_result
+
+        return redact_cloud_result(result)
+    except Exception:
+        return _WITHHELD
 
 
 @mcp.tool()
@@ -171,7 +186,7 @@ def list_screenshots_tool(start: str = "", end: str = "", limit: int = 30) -> st
 @mcp.tool()
 def get_screenshot_tool(filename: str = "", timestamp: float = 0.0) -> str:
     """Fetch one screenshot by filename or unix timestamp.
-    Returns local path when the image still exists; otherwise OCR/event text backup.
+    Returns redacted screen text. The image file path is not included.
     Screenshots use adaptive TTL (important frames kept longer, capped)."""
     ts = timestamp if timestamp and timestamp > 0 else None
     return _call_tool(

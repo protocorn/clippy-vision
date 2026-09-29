@@ -183,10 +183,12 @@ def get_identity() -> dict:
 
 def get_profile() -> dict:
     from core.storage import get_user_name
+    from core.user_controls import list_memory_facts
     return {
         "name": get_user_name(),
         "introduction": get_introduction(),
         "identity": get_identity(),
+        "facts": list_memory_facts(),
     }
 
 def get_introduction_meta() -> dict:

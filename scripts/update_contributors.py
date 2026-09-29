@@ -256,7 +256,7 @@ def discover_logins_from_git(
         if key.lower() in {b.lower() for b in SKIP_LOGINS}:
             continue
         if not looks_like_login(key):
-            # Raw display names ("Sahil Chordia") are skipped — only real logins.
+            # Raw display names ("Ada Lovelace") are skipped — only real logins.
             continue
         found.append(key)
     return found

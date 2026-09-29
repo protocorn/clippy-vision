@@ -276,7 +276,7 @@ function createApiSpawn({ paths, llmConfig, state }) {
     }
 
     function isCapturing() {
-        return state.captureProcess != null && !state.captureProcess.killed
+        return capturePhase === 'active'
     }
 
     function writeCaptureState(active) {
@@ -290,50 +290,122 @@ function createApiSpawn({ paths, llmConfig, state }) {
     }
 
     let captureCallbacks = null
+    // idle → starting → active → stopping → idle. The button stays on the
+    // pending step until the process prints CAPTURE_READY or actually exits.
+    let capturePhase = 'idle'
+    let stopReason = null
 
     function setCaptureCallbacks(callbacks) {
         captureCallbacks = callbacks
     }
 
+    function notifyCapture(kind, reason) {
+        if (!captureCallbacks) return
+        if (kind === 'pending') captureCallbacks.onCapturePending?.(capturePhase, reason)
+        else if (kind === 'started') captureCallbacks.onCaptureStarted()
+        else captureCallbacks.onCaptureStopped(reason)
+    }
+
+    let pauseTimer = null
+    let pausedUntil = 0
+
+    function clearPauseTimer() {
+        if (pauseTimer) clearTimeout(pauseTimer)
+        pauseTimer = null
+        pausedUntil = 0
+    }
+
+    function captureStatus() {
+        const pending = capturePhase === 'starting' || capturePhase === 'stopping' ? capturePhase : ''
+        return {
+            active: capturePhase === 'active',
+            pending,
+            pausedUntil: pausedUntil > Date.now() ? pausedUntil : 0,
+        }
+    }
+
+    function pauseCapture(minutes) {
+        if (!isCapturing()) return captureStatus()
+        const mins = Math.max(1, Math.min(180, Number(minutes) || 15))
+        clearPauseTimer()
+        pausedUntil = Date.now() + mins * 60 * 1000
+        stopCapture('pause')
+        pauseTimer = setTimeout(() => {
+            pauseTimer = null
+            pausedUntil = 0
+            startCapture()
+        }, mins * 60 * 1000)
+        return captureStatus()
+    }
+
     function startCapture() {
         // Capture is a separate Python process because keyboard hooks and image
         // processing must not block Electron's renderer or tray event loop.
-        if (isCapturing()) return
-        const proc = spawnHidden(PYTHON_COMMAND, [CAPTURE_SCRIPT], { cwd: ROOT })
+        clearPauseTimer()
+        if (capturePhase === 'active' || capturePhase === 'starting' || capturePhase === 'stopping') return
+        capturePhase = 'starting'
+        stopReason = null
+        const proc = spawnHidden(PYTHON_COMMAND, [CAPTURE_SCRIPT], {
+            cwd: ROOT,
+            env: { PYTHONUNBUFFERED: '1' },
+        })
         state.captureProcess = proc
-        proc.stdout.on('data', d => console.log('[Capture]', d.toString().trim()))
+        let readyBuffer = ''
+        let settled = false
+        const finish = (reason) => {
+            if (settled) return
+            settled = true
+            if (state.captureProcess === proc) state.captureProcess = null
+            stopReason = null
+            if (capturePhase === 'idle') return
+            capturePhase = 'idle'
+            writeCaptureState(false)
+            notifyCapture('stopped', reason)
+        }
+        proc.stdout.on('data', (d) => {
+            const text = d.toString()
+            console.log('[Capture]', text.trim())
+            if (capturePhase !== 'starting' || state.captureProcess !== proc) return
+            readyBuffer = (readyBuffer + text).slice(-400)
+            if (!readyBuffer.includes('CAPTURE_READY')) return
+            capturePhase = 'active'
+            writeCaptureState(true)
+            notifyCapture('started')
+            console.log('[Capture] ready pid=', proc.pid)
+        })
         proc.stderr.on('data', d => console.error('[Capture ERR]', d.toString().trim()))
         proc.on('exit', (code) => {
             console.log('[Capture] exited', code)
-            if (state.captureProcess !== proc) return
-            state.captureProcess = null
-            writeCaptureState(false)
-            if (captureCallbacks) captureCallbacks.onCaptureStopped()
+            finish(capturePhase === 'starting' ? 'failed' : stopReason)
         })
-        if (captureCallbacks) captureCallbacks.onCaptureStarted()
-        writeCaptureState(true)
-        console.log('[Capture] started pid=', state.captureProcess.pid)
+        proc.on('error', () => finish('failed'))
+        notifyCapture('pending')
+        console.log('[Capture] starting pid=', proc.pid)
     }
 
-    function stopCapture() {
+    function stopCapture(reason) {
         // Windows needs a tree kill for child processes; POSIX systems can use the
         // normal termination signal and let the Python shutdown hook clean up.
-        if (!state.captureProcess) return
+        if (capturePhase !== 'active' && capturePhase !== 'starting') return
         const proc = state.captureProcess
-        state.captureProcess = null
-        writeCaptureState(false)
+        if (!proc) {
+            capturePhase = 'idle'
+            return
+        }
+        stopReason = reason || null
+        capturePhase = 'stopping'
+        notifyCapture('pending', reason)
         if (process.platform === 'win32' && proc.pid) {
             spawnHidden('taskkill', ['/pid', String(proc.pid), '/T', '/F'])
         } else {
             try { proc.kill('SIGTERM') } catch (_) { }
         }
-
-        if (captureCallbacks) captureCallbacks.onCaptureStopped()
-        console.log('[Capture] stopped')
+        console.log('[Capture] stopping')
     }
 
     function toggleCapture() {
-        if (isCapturing()) stopCapture()
+        if (capturePhase === 'starting' || capturePhase === 'stopping') return
+        if (capturePhase === 'active') stopCapture()
         else startCapture()
     }
 
@@ -354,10 +426,12 @@ function createApiSpawn({ paths, llmConfig, state }) {
         ollamaReachable,
         ensureOllamaServing,
         isCapturing,
+        captureStatus,
         writeCaptureState,
         setCaptureCallbacks,
         startCapture,
         stopCapture,
+        pauseCapture,
         toggleCapture,
     }
 }

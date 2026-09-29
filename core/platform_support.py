@@ -121,15 +121,24 @@ def _windows_metadata() -> WindowMetadata | None:
             result = None
         else:
             class_name = win32gui.GetClassName(hwnd)
-            active_url = _windows_browser_url(auto.WindowControl(Handle=hwnd), class_name)
             try:
                 _, pid = win32process.GetWindowThreadProcessId(hwnd)
                 process_name = psutil.Process(pid).name()
             except Exception:
                 process_name = "unknown"
+            from core.private_windows import window_is_private
+
+            if window_is_private(hwnd, process_name):
+                # The page title and address are the private session. Keep a
+                # fixed label so events do not store what was on screen.
+                title = "Private window"
+                active_url = None
+            else:
+                title = win32gui.GetWindowText(hwnd) or ""
+                active_url = _windows_browser_url(auto.WindowControl(Handle=hwnd), class_name)
             result = WindowMetadata(
                 timestamp=time.time(),
-                current_window_title=win32gui.GetWindowText(hwnd) or "",
+                current_window_title=title,
                 active_url=active_url,
                 process_name=process_name,
             )
@@ -248,6 +257,21 @@ _MAC_BROWSER_SCRIPTS = {
     "Microsoft Edge": 'tell application "Microsoft Edge" to URL of active tab of front window',
     "Arc": 'tell application "Arc" to URL of active tab of front window',
     "Safari": 'tell application "Safari" to URL of current tab of front window',
+    # Firefox has no URL dictionary. Read the address bar the way Windows
+    # reads it from UI Automation.
+    "Firefox": r'''
+tell application "System Events"
+    tell process "Firefox"
+        try
+            return value of text field 1 of combo box 1 of group 1 of toolbar 1 of group 1 of front window
+        end try
+        try
+            return value of combo box 1 of toolbar 1 of group 1 of front window
+        end try
+        return ""
+    end tell
+end tell
+''',
 }
 
 
@@ -268,10 +292,16 @@ def _mac_metadata() -> tuple[WindowMetadata | None, tuple[int, int, int, int] | 
         except ValueError:
             pass
 
+    from core.private_windows import window_is_private
+
     active_url = None
-    browser_script = _MAC_BROWSER_SCRIPTS.get(process_name)
-    if browser_script:
-        active_url = _run_command(["osascript", "-e", browser_script], timeout=1.5) or None
+    if window_is_private(None, process_name):
+        # The page title and address are the private session.
+        title = "Private window"
+    else:
+        browser_script = _MAC_BROWSER_SCRIPTS.get(process_name)
+        if browser_script:
+            active_url = _run_command(["osascript", "-e", browser_script], timeout=1.5) or None
 
     return (
         WindowMetadata(

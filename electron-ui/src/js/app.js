@@ -1,6 +1,8 @@
 import {
   nameInput, nameSubmit, nameError, nameView, loadingView, loadingSub,
-  appBrand, homeBtn, homeMenuBtn, settingsBtn, captureBtn, captureLabel, timelineLoadMore,
+  appBrand, homeBtn, homeMenuBtn, settingsBtn, captureBtn, captureLabel,
+  pauseBtn, pauseMenu, pauseMenuPanel, connectBtn,
+  timelineSearch, timelineHint, timelineHintDismiss, timelineLoadMore,
   timelineDetailBack, updateBanner, updateBannerText, updateBannerLink,
   updateBannerDismiss, identityAddBtn, identityNewKey, identityNewVal,
   settingsName, settingsIntro, updateCheckToggle, mcpCopyBtn,
@@ -10,10 +12,25 @@ import { showView } from './utils.js'
 import { submitName } from './onboarding.js'
 import {
   openSettings, addIdentityField, saveProfile, saveUpdateCheck, copyMcpConfig,
-  wireSettingsNav, addWorkspaceRootFromInput,
+  wireSettingsNav, addWorkspaceRootFromInput, browseWorkspaceRoot,
+  addWatchAppFromInput, saveRetention, saveModelSetting, clearAllData,
 } from './settings.js'
 import { openTimeline, loadTimelineSessions, closeTimelineDetail } from './timeline.js'
-import { setCaptureUI } from './capture-ui.js'
+import { captureRuntimeLabel, setCaptureUI } from './capture-ui.js'
+
+const WAIT_COPY = [
+  [/dependenc/i, 'Checking Python, Ollama, and the local model'],
+  [/server|loading models/i, 'Starting the local server on this machine'],
+  [/text model/i, 'Loading the text model into memory'],
+]
+
+function describeWait(sub) {
+  const text = String(sub || '').trim()
+  for (const [pattern, label] of WAIT_COPY) {
+    if (pattern.test(text)) return label
+  }
+  return text || 'Opening Clippy Vision'
+}
 
 function on(el, event, handler) {
   if (!el) return
@@ -31,11 +48,38 @@ function wireUi() {
   on(captureBtn, 'click', async () => {
     captureBtn.disabled = true
     try {
-      await window.clippy.toggleCapture()
+      setCaptureUI(await window.clippy.toggleCapture())
     } finally {
-      captureBtn.disabled = false
+      if (!captureBtn.classList.contains('is-pending')) captureBtn.disabled = false
     }
   })
+
+  function setPauseMenuOpen(open) {
+    if (!pauseMenu || !pauseBtn || !pauseMenuPanel) return
+    pauseMenu.classList.toggle('is-open', open)
+    pauseBtn.setAttribute('aria-expanded', open ? 'true' : 'false')
+    pauseMenuPanel.hidden = !open
+  }
+
+  on(pauseBtn, 'click', (e) => {
+    e.stopPropagation()
+    setPauseMenuOpen(pauseMenuPanel?.hidden !== false)
+  })
+  if (pauseMenuPanel) {
+    pauseMenuPanel.addEventListener('click', async (e) => {
+      const minutes = Number(e.target?.dataset?.pauseMinutes || 0)
+      if (!minutes) return
+      setPauseMenuOpen(false)
+      try {
+        setCaptureUI(await window.clippy.pauseCapture(minutes))
+      } catch (error) {
+        const { alertDialog } = await import('./dialogs.js')
+        await alertDialog({ title: 'Could not pause', message: error.message || 'Pause failed.' })
+      }
+    })
+  }
+
+  on(connectBtn, 'click', () => openSettings('mcp'))
 
   on(updateBannerDismiss, 'click', () => {
     store.dismissedUpdateVersion = updateBannerText.dataset.version
@@ -47,16 +91,12 @@ function wireUi() {
     showUpdateBanner(data)
   })
 
-  window.clippy.onCaptureStatusChanged((active) => {
-    setCaptureUI(active)
+  window.clippy.onCaptureStatusChanged((status) => {
+    setCaptureUI(status)
     const label = document.getElementById('settings-runtime-label')
     const dot = document.querySelector('.settings-runtime-dot')
-    if (label) {
-      label.textContent = active
-        ? 'Running locally · capture on'
-        : 'Running locally · capture off'
-    }
-    if (dot) dot.classList.toggle('is-off', !active)
+    if (label) label.textContent = captureRuntimeLabel(status)
+    if (dot) dot.classList.toggle('is-off', !status?.active)
   })
 
   on(nameSubmit, 'click', submitName)
@@ -86,14 +126,14 @@ function wireUi() {
     on(item, 'click', () => setNavMoreOpen(false))
   }
   document.addEventListener('click', (e) => {
-    if (!navMore || navMore.contains(e.target)) return
-    setNavMoreOpen(false)
+    if (navMore && !navMore.contains(e.target)) setNavMoreOpen(false)
+    if (pauseMenu && !pauseMenu.contains(e.target)) setPauseMenuOpen(false)
   })
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') setNavMoreOpen(false)
   })
 
-  on(settingsBtn, 'click', openSettings)
+  on(settingsBtn, 'click', () => openSettings())
   wireSettingsNav()
   on(identityAddBtn, 'click', addIdentityField)
   on(identityNewVal, 'keydown', e => {
@@ -107,11 +147,36 @@ function wireUi() {
   on(updateCheckToggle, 'change', saveUpdateCheck)
   on(mcpCopyBtn, 'click', copyMcpConfig)
   on(workspaceRootAddBtn, 'click', addWorkspaceRootFromInput)
+  on(document.getElementById('workspace-root-browse-btn'), 'click', browseWorkspaceRoot)
+  on(document.getElementById('watch-app-add'), 'click', addWatchAppFromInput)
+  on(document.getElementById('watch-app-input'), 'keydown', (e) => {
+    if (e.key === 'Enter') addWatchAppFromInput()
+  })
+  on(document.getElementById('retain-save'), 'click', saveRetention)
+  on(document.getElementById('model-save'), 'click', saveModelSetting)
+  on(document.getElementById('model-restart'), 'click', () => window.clippy.relaunchApp())
+  on(document.getElementById('data-clear-btn'), 'click', clearAllData)
   on(workspaceRootInput, 'keydown', e => {
     if (e.key === 'Enter') addWorkspaceRootFromInput()
   })
 
   on(timelineLoadMore, 'click', () => loadTimelineSessions({ reset: false }))
+  on(timelineSearch, 'input', () => {
+    clearTimeout(store.searchTimer)
+    store.searchTimer = setTimeout(() => {
+      store.timelineQuery = timelineSearch.value.trim()
+      loadTimelineSessions({ reset: true })
+    }, 250)
+  })
+  on(timelineHintDismiss, 'click', () => {
+    try { localStorage.setItem('clippy.timelineHintDismissed', '1') } catch (_) { /* ignore */ }
+    if (timelineHint) timelineHint.hidden = true
+  })
+  try {
+    if (localStorage.getItem('clippy.timelineHintDismissed') === '1' && timelineHint) {
+      timelineHint.hidden = true
+    }
+  } catch (_) { /* ignore */ }
   on(timelineDetailBack, 'click', closeTimelineDetail)
 }
 
@@ -160,7 +225,7 @@ export async function init() {
   }, 2800)
 
   window.clippy.onLoadingStatus((data) => {
-    if (data?.sub && loadingSub) loadingSub.textContent = data.sub
+    if (data?.sub && loadingSub) loadingSub.textContent = describeWait(data.sub)
   })
 
   try {
