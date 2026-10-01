@@ -36,9 +36,10 @@ _DEFAULTS: dict[str, Any] = {
     "watch_mode": "all",
     "watch_apps": [],
     "launch_at_login": False,
-    # Hard ceiling for a single UIA bounds/text query on the async worker.
-    # UIA COM calls can hang against certain apps; this bounds the damage.
-    "uia_timeout_seconds": 1.5,
+    # How long one accessibility walk may block the frame that started it.
+    # A Cursor window often takes a few seconds. A hung call still gives up
+    # so the next frame can walk; the late text stays on the frame that asked.
+    "uia_timeout_seconds": 8.0,
 }
 
 
@@ -103,7 +104,7 @@ def normalize_capture_settings(values: dict[str, Any] | None = None) -> dict[str
         "watch_mode": mode,
         "watch_apps": apps,
         "launch_at_login": _as_bool(source.get("launch_at_login"), False),
-        "uia_timeout_seconds": _as_float(source.get("uia_timeout_seconds"), 1.5, 0.5, 5.0),
+        "uia_timeout_seconds": _as_float(source.get("uia_timeout_seconds"), 8.0, 0.5, 20.0),
     }
 
 

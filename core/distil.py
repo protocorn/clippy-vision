@@ -104,95 +104,146 @@ def distil() -> None:
     if not summaries:
         return
 
-    facts = _extract_facts(summaries)
-    print(f"  [DISTIL] {len(facts)} facts extracted")
-
-    if not facts:
+    shareable = [summary for summary in summaries if _summary_is_shareable(summary)]
+    if not shareable:
+        _set_meta("last_distilled_at", time.time())
         return
 
+    from core.memory_consolidation import maybe_consolidate, record_candidate
 
+    # A sitting is one uninterrupted stretch of activity. A gap over 30 minutes starts the next.
+    sittings = _group_sittings(shareable)
+    stored: set[str] = set()
+    try:
+        for sitting in sittings:
+            observations = _extract_observations(sitting)
+            # On-screen content that is not about the person is dropped.
+            about_user = [item for item in observations if item.get("about_user")]
+            if not about_user:
+                continue
+            texts = [item["text"] for item in about_user]
+            embeddings = embed_texts(texts)
+            seen_at = min(float(item["window_start"]) for item in sitting)
+            session_ids = [item["summary_id"] for item in sitting]
+            # Near-duplicate sentences in this sitting become one candidate.
+            for indices in _cluster_batch(embeddings):
+                members = [about_user[index] for index in indices]
+                vectors = [embeddings[index] for index in indices]
+                observation = max(members, key=lambda item: len(item["text"]))["text"]
+                kind = "observed" if any(item["kind"] == "observed" for item in members) else "inferred"
+                dim = len(vectors[0])
+                centroid = [
+                    sum(vector[axis] for vector in vectors) / len(vectors)
+                    for axis in range(dim)
+                ]
+                candidate_id = record_candidate(
+                    observation,
+                    centroid,
+                    kind=kind,
+                    about_user=True,
+                    session_ids=session_ids,
+                    seen_at=seen_at,
+                    source="screen",
+                )
+                if candidate_id:
+                    stored.add(candidate_id)
+    except Exception as exc:
+        # Leave last_distilled_at alone so the next run can retry these sessions.
+        print(f"  [DISTIL] observations not stored: {exc}")
+        return
 
-
-    embeddings = embed_texts(facts)
-
-    # Compute all embeddings upfront so we can pre-cluster the whole batch
-    # before touching existing clusters. This prevents the cold-start cascade
-    # where fact N blindly joins a cluster that fact N-1 just created.
-    groups = _cluster_batch(embeddings)
-    print(f"  [DISTIL] {len(groups)} topic group(s) from {len(facts)} facts")
-
-    for indices in groups:
-        group_facts = [facts[i] for i in indices]
-        group_embs  = [embeddings[i] for i in indices]
-
-
-
-        # Route the group by its centroid so one outlier fact can't
-        # drag the whole group into the wrong existing cluster.
-        dim = len(group_embs[0])
-        group_centroid = [
-            sum(e[d] for e in group_embs) / len(group_embs)
-            for d in range(dim)
-        ]
-
-        cluster_id, sim = _route_fact(group_centroid)
-        target = cluster_id if (cluster_id and sim >= CLUSTER_THRESHOLD) else None
-
-        for fact, emb in zip(group_facts, group_embs):
-            if target:
-                _merge_into_cluster(target, fact, emb)
-            else:
-
-
-                # First fact in the group spawns the new cluster;
-                # the rest merge into it.
-                target = _create_cluster(fact, emb)
-
+    print(f"  [DISTIL] {len(stored)} candidate(s) from {len(sittings)} sitting(s)")
     version = _get_meta("profile_version", 0) + 1
     _set_meta("last_distilled_at", time.time())
     _set_meta("profile_version", version)
     _set_meta("distilled_from_sessions",
               _get_meta("distilled_from_sessions", 0) + len(summaries))
     print(f"  [DISTIL] Done — profile v{version}")
+    maybe_consolidate()
 
 
 
 
 
-EXTRACT_FACTS_SCHEMA = {
+def _group_sittings(summaries: list[dict]) -> list[list[dict]]:
+    """Split summaries into separate sittings. A gap, or a long run, starts another."""
+    ordered = sorted(summaries, key=lambda item: float(item["window_start"]))
+    if not ordered:
+        return []
+    groups = [[ordered[0]]]
+    for summary in ordered[1:]:
+        gap = float(summary["window_start"]) - float(groups[-1][-1]["window_end"])
+        if gap > SESSION_GAP_SECONDS or len(groups[-1]) >= SESSION_MAX_SUMMARIES:
+            groups.append([summary])
+        else:
+            groups[-1].append(summary)
+    return groups
+
+
+_OBSERVATION_SCHEMA = {
     "type": "object",
     "properties": {
-        "facts": {
+        "observations": {
             "type": "array",
-            "items": {"type": "string"}
+            "items": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["observed", "inferred"]},
+                    "about_user": {"type": "boolean"},
+                },
+                "required": ["text", "kind", "about_user"],
+            },
         }
     },
-    "required": ["facts"]
+    "required": ["observations"],
 }
 
-EXTRACT_FACTS_SYSTEM_PROMPT = """
-You extract durable, atomic facts about a person from session summaries.
-Each fact must be a single, self-contained sentence about who the person is, what they do,
-what they are building, or what they prefer. Do not include transient or trivial details.
-If no facts are found, return an empty array.
-Return JSON {"facts": [...]}.
+_OBSERVATION_SYSTEM = """
+You read summaries of what was on a screen during one sitting.
+Return short observations of that sitting. Do not write a biography.
+
+Each observation:
+- text: one sentence about what happened
+- kind: "observed" when the summary states it, "inferred" when you are guessing
+- about_user: true only when it is about the person using this computer
+  (a routine, preference, relationship, trip, goal, or situation of theirs).
+  false when it is something they looked at: an article, a page about someone else,
+  another person's document, or on-screen content that is not about them.
+
+One sitting is not a lasting fact about who they are.
+If nothing happened, return an empty array.
+Return JSON {"observations": [{"text", "kind", "about_user"}]}.
 """
 
-def _extract_facts(summaries: list[dict]) -> list[str]:
+
+def _extract_observations(summaries: list[dict]) -> list[dict]:
     context = "\n\n".join(
         f"[{s.get('active_task','')}] {s.get('summary','')}" for s in summaries
     )
-
     body = gateway.chat(
-        [{"role": "system", "content": EXTRACT_FACTS_SYSTEM_PROMPT},
+        [{"role": "system", "content": _OBSERVATION_SYSTEM},
          {"role": "user", "content": context}],
-        MODEL, format=EXTRACT_FACTS_SCHEMA,
+        MODEL, format=_OBSERVATION_SCHEMA,
         think=False, options={"temperature": 0},
         priority=Priority.BACKGROUND,
     )
     content = body["message"]["content"]
-    facts = json.loads(content) if isinstance(content, str) else content
-    return facts.get("facts", [])
+    payload = json.loads(content) if isinstance(content, str) else content
+    observations = []
+    for item in payload.get("observations") or []:
+        if not isinstance(item, dict):
+            continue
+        text = " ".join(str(item.get("text") or "").split()).strip()
+        if not text:
+            continue
+        kind = "observed" if str(item.get("kind") or "").strip().lower() == "observed" else "inferred"
+        observations.append({
+            "text": text,
+            "kind": kind,
+            "about_user": bool(item.get("about_user")),
+        })
+    return observations
 
 
 def _cosine_similarity(a, b):
@@ -303,6 +354,12 @@ def _merge_into_cluster(cluster_id: str, fact: str, embedding: list, source: str
     text = result.get("text") or fact
 
     if action == "NOOP":
+        if isinstance(target, int) and 0 <= target < len(rows):
+            conn.execute(
+                "UPDATE memory_facts SET last_confirmed = ? WHERE fact_id = ?",
+                (time.time(), rows[target][0]),
+            )
+            conn.commit()
         return
 
     if action == "CONFLICT" and isinstance(target, int) and 0 <= target < len(rows):
@@ -348,16 +405,51 @@ def _merge_into_cluster(cluster_id: str, fact: str, embedding: list, source: str
     return
 
 
-def _insert_fact(cluster_id: str, fact: str, embedding: list, fact_id: str | None = None, source: str = "distiller") -> None:
+def _summary_is_shareable(summary: dict) -> bool:
+    """False when the session touched a private window, or we can no longer tell."""
+    from core.cloud_provenance import resolve_session_private
+
+    flag = resolve_session_private(
+        summary["summary_id"],
+        float(summary["window_start"]),
+        float(summary["window_end"]),
+        summary.get("private"),
+    )
+    return flag == 0
+
+
+def _insert_fact(
+    cluster_id: str,
+    fact: str,
+    embedding: list,
+    fact_id: str | None = None,
+    source: str = "distiller",
+    private: int | None = 0,
+    scope: str | None = None,
+    kind: str | None = None,
+    session_ids: list | None = None,
+    last_confirmed: float | None = None,
+    valid_from: float | None = None,
+) -> str:
     now = time.time()
+    fact_id = fact_id or str(uuid.uuid4())
+    if scope is None:
+        scope = "stated" if source in {"agent", "user"} else "pattern"
+    if last_confirmed is None and scope == "stated":
+        last_confirmed = now
     conn.execute(
         """INSERT INTO memory_facts
-           (fact_id, cluster_id, text, vector_embedding, valid_from, created_at, source)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (fact_id or str(uuid.uuid4()), cluster_id, fact,
-         json.dumps(embedding), now, now, source)
+           (fact_id, cluster_id, text, vector_embedding, valid_from, created_at, source, private,
+            support_session_ids, last_confirmed, scope, kind)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            fact_id, cluster_id, fact, json.dumps(embedding),
+            valid_from if valid_from is not None else now, now, source, private,
+            json.dumps(session_ids or []), last_confirmed, scope, kind,
+        )
     )
     conn.commit()
+    return fact_id
 
 def _recompute_centroid(cluster_id: str) -> None:
     rows = conn.execute(
@@ -509,12 +601,11 @@ def _update_profile_from_message(user_message: str) -> None:
 
 
 def ingest_conversation(user_message: str, agent_reply: str) -> dict:
-    """Extract facts from a completed agent turn and route them into memory clusters.
-    Also extracts structured biographical fields and saves them to identity memory
-    (always-injected) so they are reliably available without semantic retrieval.
-    Only the user message is used as the fact source — the agent reply is output,
-    not ground truth about the user.
-    Designed to run in a background thread — all LLM calls use Priority.BACKGROUND.
+    """Store what the user explicitly said.
+
+    Biographical statements go straight into identity and are not copied into
+    a claim that ages. A one-sitting situation becomes a candidate, not a claim.
+    Only the user message is the source. Designed for a background thread.
     Returns {"facts": [...], "profile": [...]} and may include "error"."""
     try:
         return _ingest_conversation(user_message, agent_reply)
@@ -565,30 +656,26 @@ def _ingest_conversation(user_message: str, agent_reply: str) -> dict:
     if not facts:
         return {"facts": [], "profile": profile}
 
-    print(f"\n  [DISTIL/agent] {len(facts)} fact(s) from conversation turn")
+    # Identity already holds the biography. Do not also file a decaying claim.
+    if profile:
+        print(f"\n  [DISTIL/agent] identity updated ({', '.join(profile)}); no cluster copy")
+        return {"facts": [], "profile": profile}
 
+    from core.memory_consolidation import record_candidate
+
+    print(f"\n  [DISTIL/agent] {len(facts)} situation(s) kept as candidates")
+    seen_at = time.time()
     embeddings = embed_texts(facts)
-
-    groups = _cluster_batch(embeddings)
-
-    for indices in groups:
-        group_facts = [facts[i] for i in indices]
-        group_embs  = [embeddings[i] for i in indices]
-
-        dim = len(group_embs[0])
-        group_centroid = [
-            sum(e[d] for e in group_embs) / len(group_embs)
-            for d in range(dim)
-        ]
-
-        cluster_id, sim = _route_fact(group_centroid)
-        target = cluster_id if (cluster_id and sim >= CLUSTER_THRESHOLD) else None
-
-        for fact, emb in zip(group_facts, group_embs):
-            if target:
-                _merge_into_cluster(target, fact, emb, source="agent")
-            else:
-                target = _create_cluster(fact, emb, source="agent")
+    for fact, embedding in zip(facts, embeddings):
+        record_candidate(
+            fact,
+            embedding,
+            kind="observed",
+            about_user=True,
+            session_ids=[],
+            seen_at=seen_at,
+            source="user",
+        )
     return {"facts": list(facts), "profile": profile}
 
 
@@ -606,7 +693,7 @@ _LABEL_SCHEMA = {
     "required": ["label", "description"]
 }
 
-def _create_cluster(fact: str, embedding: list, source: str = "distiller") -> str:
+def _label_for_fact(fact: str) -> tuple[str, str]:
     body = gateway.chat(
         [{"role": "system", "content": _LABEL_SYS},
          {"role": "user", "content": fact}],
@@ -615,7 +702,15 @@ def _create_cluster(fact: str, embedding: list, source: str = "distiller") -> st
         priority=Priority.BACKGROUND,
     )
     content = body["message"]["content"]
-    meta    = json.loads(content) if isinstance(content, str) else content
+    meta = json.loads(content) if isinstance(content, str) else content
+    return meta.get("label", "misc"), meta.get("description", "")
+
+
+def _create_cluster(fact: str, embedding: list, source: str = "distiller", **fact_kwargs) -> str:
+    label = fact_kwargs.pop("label", None)
+    description = fact_kwargs.pop("description", None)
+    if not label:
+        label, description = _label_for_fact(fact)
 
     now        = time.time()
     cluster_id = str(uuid.uuid4())
@@ -623,9 +718,9 @@ def _create_cluster(fact: str, embedding: list, source: str = "distiller") -> st
         """INSERT INTO memory_clusters
            (cluster_id, label, description, centroid, created_at, updated_at, fact_count)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (cluster_id, meta.get("label", "misc"), meta.get("description", ""),
+        (cluster_id, label or "misc", description or "",
          json.dumps(embedding), now, now, 1)
     )
     conn.commit()
-    _insert_fact(cluster_id, fact, embedding, source=source)
+    _insert_fact(cluster_id, fact, embedding, source=source, **fact_kwargs)
     return cluster_id

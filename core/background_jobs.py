@@ -34,6 +34,12 @@ def start_background_jobs() -> None:
     except Exception as exc:
         print(f"[background] Distil check skipped: {exc}")
 
+    try:
+        from core.memory_consolidation import maybe_consolidate
+        maybe_consolidate()
+    except Exception as exc:
+        print(f"[background] Memory consolidation skipped: {exc}")
+
     start_screenshot_processor()
     start_summarizer()
     start_catch_up_worker()

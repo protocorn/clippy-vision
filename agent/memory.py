@@ -45,7 +45,8 @@ def semantic_memory_context_from_vec(q_vec: list) -> str:
 
     rows = conn.execute("""
         SELECT f.fact_id, f.text, f.vector_embedding, f.cluster_id,
-               c.label, c.description, f.source, f.valid_from, f.created_at
+               c.label, c.description, f.source, f.valid_from, f.created_at,
+               f.last_confirmed, f.scope
         FROM memory_facts f
         JOIN memory_clusters c ON c.cluster_id = f.cluster_id
         WHERE f.valid_to IS NULL
@@ -57,7 +58,7 @@ def semantic_memory_context_from_vec(q_vec: list) -> str:
     conflict_ids = unresolved_conflict_fact_ids(conn)
     now = time.time()
     scored = []
-    for fact_id, text, vec_json, cluster_id, label, description, source, valid_from, created_at in rows:
+    for fact_id, text, vec_json, cluster_id, label, description, source, valid_from, created_at, last_confirmed, scope in rows:
         if not vec_json:
             continue
         f_vec = json.loads(vec_json)
@@ -71,6 +72,8 @@ def semantic_memory_context_from_vec(q_vec: list) -> str:
                 cluster_label=label,
                 in_unresolved_conflict=fact_id in conflict_ids,
                 now=now,
+                last_confirmed=last_confirmed,
+                scope=scope,
             )
             score = combined_score(sim, fresh)
             scored.append((score, text, cluster_id, label, description))
@@ -185,14 +188,13 @@ def recall_memory(
 ) -> str:
     """List clusters for the recall_memory tool, ranked by freshness.
 
-    By default hides recovered_* clusters and those whose best active fact
-    freshness is below min_freshness (0.20). Pass include_stale=True to see all.
+    By default hides clusters whose best active fact freshness is below
+    min_freshness (0.20). Pass include_stale=True to see all.
     Optional query runs a semantic memory_query instead of a full listing.
     """
     from core.memory_freshness import (
         DEFAULT_MIN_CLUSTER_FRESHNESS,
         cluster_freshness_summary,
-        is_recovered_label,
         unresolved_conflict_fact_ids,
     )
 
@@ -215,7 +217,7 @@ def recall_memory(
     scored_clusters = []
     for c in clusters:
         rows = conn.execute(
-            """SELECT fact_id, text, source, valid_from, created_at
+            """SELECT fact_id, text, source, valid_from, created_at, last_confirmed, scope
                FROM memory_facts
                WHERE cluster_id = ? AND valid_to IS NULL""",
             (c["cluster_id"],),
@@ -227,6 +229,8 @@ def recall_memory(
                 "source": r[2],
                 "valid_from": r[3],
                 "created_at": r[4],
+                "last_confirmed": r[5],
+                "scope": r[6],
                 "label": c["label"],
             }
             for r in rows
@@ -241,7 +245,7 @@ def recall_memory(
     hidden = 0
     for _rank, mx, c, summary in scored_clusters:
         if not include_stale:
-            if is_recovered_label(c["label"]) or mx < floor:
+            if mx < floor:
                 hidden += 1
                 continue
         lines.append(
@@ -253,10 +257,10 @@ def recall_memory(
     if shown == 0:
         return (
             "No fresh memory clusters matched. "
-            "Retry with include_stale=true to see recovered/low-freshness clusters."
+            "Retry with include_stale=true to see low-freshness clusters."
         )
     if hidden:
-        lines.append(f"  ({hidden} stale/recovered clusters hidden — pass include_stale=true to show)")
+        lines.append(f"  ({hidden} low-freshness clusters hidden — pass include_stale=true to show)")
     return "\n".join(lines)
 
 
@@ -269,7 +273,7 @@ def fetch_cluster(label: str, include_stale_facts: bool = True) -> str:
     if not match:
         return f"No cluster found with label '{label}'."
     rows = conn.execute(
-        """SELECT fact_id, text, source, valid_from, created_at
+        """SELECT fact_id, text, source, valid_from, created_at, last_confirmed, scope
            FROM memory_facts
            WHERE cluster_id = ? AND valid_to IS NULL
            ORDER BY valid_from DESC""",
@@ -280,7 +284,7 @@ def fetch_cluster(label: str, include_stale_facts: bool = True) -> str:
     conflict_ids = unresolved_conflict_fact_ids(conn)
     now = time.time()
     lines = []
-    for fact_id, text, source, valid_from, created_at in rows:
+    for fact_id, text, source, valid_from, created_at, last_confirmed, scope in rows:
         fresh = fact_freshness(
             text=text,
             source=source,
@@ -289,6 +293,8 @@ def fetch_cluster(label: str, include_stale_facts: bool = True) -> str:
             cluster_label=match["label"],
             in_unresolved_conflict=fact_id in conflict_ids,
             now=now,
+            last_confirmed=last_confirmed,
+            scope=scope,
         )
         if not include_stale_facts and fresh < 0.15:
             continue
@@ -332,7 +338,7 @@ def remember_turn(user_message: str) -> str:
     if profile:
         lines.append("Profile updated: " + ", ".join(profile))
     if facts:
-        lines.append("Remembered:")
+        lines.append("Noted for now. It becomes a lasting claim if it shows up again on a later day:")
         lines.extend(f"- {fact}" for fact in facts)
     return "\n".join(lines)
 

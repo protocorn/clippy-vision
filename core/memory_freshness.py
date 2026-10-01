@@ -2,10 +2,10 @@
 
 freshness ∈ [0, 1] = decay(age) × source_weight × quality
 
-Used to demote recovered placeholders, OCR pollution, and long-untouched
-distilled guesses relative to recent agent-authored facts — without deleting
-anything. Callers still require semantic similarity; freshness only re-ranks
-and filters listing noise.
+Used to demote placeholder text and long-untouched distilled guesses
+relative to recent agent-authored facts, without deleting anything. Callers
+still require semantic similarity; freshness only re-ranks and filters
+listing noise.
 """
 
 from __future__ import annotations
@@ -39,11 +39,16 @@ _PLACEHOLDER_RE = re.compile(
     r"^(unknown|n/?a|none|null|recovered|placeholder|todo|tbd)[\s.]*$",
     re.IGNORECASE,
 )
-_RECOVERED_LABEL_RE = re.compile(r"^recovered([_\s]|$)", re.IGNORECASE)
 
 
-def age_days(valid_from: float | None, created_at: float | None = None, *, now: float | None = None) -> float:
-    stamp = float(valid_from or created_at or 0.0)
+def age_days(
+    valid_from: float | None,
+    created_at: float | None = None,
+    *,
+    last_confirmed: float | None = None,
+    now: float | None = None,
+) -> float:
+    stamp = float(last_confirmed or valid_from or created_at or 0.0)
     if stamp <= 0:
         return 3650.0  # ~10y → essentially dead
     return max(0.0, ((now if now is not None else time.time()) - stamp) / 86400.0)
@@ -66,10 +71,6 @@ def quality_factor(
 ) -> float:
     """Multiplicative quality gate. Low values bury junk without hard-deleting."""
     q = 1.0
-    label = (cluster_label or "").strip()
-    if _RECOVERED_LABEL_RE.match(label) or label.lower().startswith("recovered_"):
-        q *= 0.12
-
     cleaned = (text or "").strip()
     if not cleaned:
         return 0.0
@@ -91,9 +92,21 @@ def fact_freshness(
     cluster_label: str = "",
     in_unresolved_conflict: bool = False,
     now: float | None = None,
+    last_confirmed: float | None = None,
+    scope: str | None = None,
 ) -> float:
-    """Return freshness in [0, 1]."""
-    d = decay(age_days(valid_from, created_at, now=now), source)
+    """Return freshness in [0, 1].
+
+    Pattern claims age from last_confirmed (else valid_from). A stated claim
+    is something the person said to store, so it does not decay.
+    """
+    if (scope or "").strip().lower() == "stated":
+        d = 1.0
+    else:
+        d = decay(
+            age_days(valid_from, created_at, last_confirmed=last_confirmed, now=now),
+            source,
+        )
     s = source_weight(source)
     q = quality_factor(
         text,
@@ -138,6 +151,8 @@ def score_fact_row(
         cluster_label=str(row.get("label") or row.get("cluster_label") or ""),
         in_unresolved_conflict=bool(conflict_ids and fact_id in conflict_ids),
         now=now,
+        last_confirmed=row.get("last_confirmed"),
+        scope=row.get("scope"),
     )
 
 
@@ -155,7 +170,3 @@ def cluster_freshness_summary(
     mean = sum(scores) / len(scores)
     ranking = mx * math.log1p(len(facts))
     return {"max": mx, "mean": mean, "ranking": ranking}
-
-
-def is_recovered_label(label: str) -> bool:
-    return bool(_RECOVERED_LABEL_RE.match((label or "").strip()))

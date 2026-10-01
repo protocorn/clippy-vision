@@ -7,6 +7,7 @@ import time
 from core.events import Event
 from core.paths import get_db_path
 from core.performance_metrics import observe_timing
+from core.timeline_groups import assign_similar_session_groups
 
 TTL_SUMMARY_DAYS = 90
 # Event types that may form session windows for summarization.
@@ -226,6 +227,7 @@ conn.commit()
 _ensure_column("sessions", "summary_embedding", "TEXT")
 _ensure_column("sessions", "content_hash", "TEXT")
 _ensure_column("sessions", "user_correction", "TEXT")
+_ensure_column("sessions", "private", "INTEGER")
 
 conn.execute("""
 CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts
@@ -326,6 +328,55 @@ CREATE TABLE IF NOT EXISTS memory_meta (
 """)
 conn.commit()
 
+_ensure_column("memory_facts", "private", "INTEGER")
+_ensure_column("memory_facts", "support_session_ids", "TEXT")
+_ensure_column("memory_facts", "last_confirmed", "REAL")
+_ensure_column("memory_facts", "scope", "TEXT")
+_ensure_column("memory_facts", "kind", "TEXT")
+
+# One sitting, not a lasting claim. Recall does not read this table.
+# A row becomes a memory_facts claim only after a later local day repeats it.
+#
+# kind         "observed" — the summary or the person stated it.
+#              "inferred" — the model guessed from the screen.
+# about_user   1 — about the person (a routine, preference, trip, goal).
+#              0 — on-screen content that is not about them, such as an article
+#              or someone else's document. Those rows are not inserted.
+# session_ids  JSON list of session summary ids in this sitting.
+#              Example: ["8f3a","91c0"]. Empty for something the person typed
+#              to the agent rather than something capture saw.
+# first_seen   Unix time of the earliest session in the sitting.
+# last_seen    Unix time of the latest session merged into this row.
+# local_day    Local calendar day of first_seen, "YYYY-MM-DD".
+#              Example: "2026-12-10". A second day is what allows promotion.0
+# status       "open"     — waiting. One day is not enough.
+#              "promoted" — saved as a claim after a later day repeated it.
+#              "absorbed" — matched a claim that already existed.
+#              "flagged"  — contradicts a claim. The claim was not overwritten.
+# source       "screen" — distilled from a captured sitting.
+#              "user"   — the person said it, and it was not an identity field.
+conn.execute("""
+CREATE TABLE IF NOT EXISTS memory_candidates (
+    candidate_id TEXT PRIMARY KEY,
+    text TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    about_user INTEGER NOT NULL DEFAULT 1,
+    session_ids TEXT NOT NULL,
+    vector_embedding TEXT NOT NULL,
+    first_seen REAL NOT NULL,
+    last_seen REAL NOT NULL,
+    local_day TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    source TEXT NOT NULL DEFAULT 'screen',
+    created_at REAL NOT NULL
+)
+""")
+conn.execute(
+    "CREATE INDEX IF NOT EXISTS idx_memory_candidates_status "
+    "ON memory_candidates(status, local_day)"
+)
+conn.commit()
+
 
 
 
@@ -345,6 +396,7 @@ CREATE TABLE IF NOT EXISTS memory_conflicts (
 )
 """)
 conn.commit()
+_ensure_column("memory_conflicts", "candidate_id", "TEXT")
 
 
 
@@ -511,14 +563,22 @@ def store_summary(summary: dict, vision_enriched: bool = False, embedding: list 
         if existing:
             return
 
+    private_flag = None
+    try:
+        from core.cloud_provenance import window_private_state
+
+        private_flag = window_private_state(summary["window_start"], summary["window_end"])
+    except Exception:
+        private_flag = None
+
     conn.execute(
         """INSERT OR REPLACE INTO sessions (
             session_id, summary_id, created_at,
             window_start, window_end,
             summary, active_task, entities,
             event_count, expires_at, vision_enriched, summary_embedding,
-            content_hash
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            content_hash, private
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             summary["session_id"],
             summary["summary_id"],
@@ -533,6 +593,7 @@ def store_summary(summary: dict, vision_enriched: bool = False, embedding: list 
             1 if vision_enriched else 0,
             json.dumps(embedding) if embedding else None,
             summary.get("content_hash"),
+            private_flag,
         )
     )
     conn.commit()
@@ -612,7 +673,7 @@ def list_timeline_sessions(
     deduped_from = f"""
         FROM (
             SELECT session_id, summary_id, created_at, window_start, window_end,
-                   summary, active_task, entities, event_count,
+                   summary, active_task, entities, event_count, summary_embedding,
                    ROW_NUMBER() OVER (
                        PARTITION BY window_start, window_end, event_count
                        ORDER BY vision_enriched DESC, created_at DESC, summary_id DESC
@@ -630,7 +691,7 @@ def list_timeline_sessions(
 
     rows = conn.execute(
         f"""SELECT session_id, summary_id, created_at, window_start, window_end,
-                   summary, active_task, entities, event_count
+                   summary, active_task, entities, event_count, summary_embedding
             {deduped_from}
             ORDER BY window_end DESC, created_at DESC, summary_id DESC
             LIMIT ? OFFSET ?""",
@@ -638,6 +699,7 @@ def list_timeline_sessions(
     ).fetchall()
 
     sessions = []
+    embeddings = []
     for row in rows:
         entities = row[7]
         try:
@@ -655,20 +717,40 @@ def list_timeline_sessions(
             "entities": entities,
             "event_count": row[8] or 0,
         })
+        embeddings.append(_timeline_embedding(row[9]))
+
+    # Group only this page. A run split by "load more" stays split.
+    assign_similar_session_groups(sessions, embeddings)
 
     return {"sessions": sessions, "total": total, "limit": limit, "offset": offset}
+
+
+def _timeline_embedding(raw) -> list | None:
+    if not raw:
+        return None
+    try:
+        vector = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(vector, list) or len(vector) < 2:
+        return None
+    try:
+        return [float(value) for value in vector]
+    except (TypeError, ValueError):
+        return None
 
 def get_summaries(since: float) -> list[dict]:
     rows = conn.execute(
         """SELECT session_id, summary_id, created_at,
                   window_start, window_end, summary, active_task, entities,
-                  event_count, expires_at, vision_enriched
+                  event_count, expires_at, vision_enriched, private
         FROM sessions
         WHERE created_at > ?
         ORDER BY created_at ASC""",
         (since,)
     ).fetchall()
-    return [{"session_id": r[0], "summary_id": r[1], "created_at": r[2], "window_start": r[3], "window_end": r[4], "summary": r[5], "active_task": r[6], "entities": r[7], "event_count": r[8], "expires_at": r[9], "vision_enriched": r[10]} for r in rows]
+    return [{"session_id": r[0], "summary_id": r[1], "created_at": r[2], "window_start": r[3], "window_end": r[4], "summary": r[5], "active_task": r[6], "entities": r[7], "event_count": r[8], "expires_at": r[9], "vision_enriched": r[10], "private": r[11]} for r in rows]
+
 
 def get_unsummarized_events(since: float) -> list[dict]:
     placeholders = ",".join("?" for _ in SUMMARIZER_EVENT_TYPES)
@@ -1087,6 +1169,7 @@ def clear_data(scopes: list[str] | set[str]) -> dict:
         result["memory_facts"] += int(conn.execute(
             "DELETE FROM memory_facts WHERE source = 'distiller'"
         ).rowcount or 0)
+        conn.execute("DELETE FROM memory_candidates WHERE source = 'screen'")
         conn.execute(
             "DELETE FROM memory_meta WHERE key IN ('last_distilled_at', 'profile_version', 'distilled_from_sessions')"
         )
@@ -1103,6 +1186,7 @@ def clear_data(scopes: list[str] | set[str]) -> dict:
         result["memory_facts"] += int(conn.execute("DELETE FROM memory_facts").rowcount or 0)
         result["memory_clusters"] += int(conn.execute("DELETE FROM memory_clusters").rowcount or 0)
         conn.execute("DELETE FROM memory_conflicts")
+        conn.execute("DELETE FROM memory_candidates")
         conn.execute(
             "DELETE FROM memory_meta WHERE key IN ('last_distilled_at', 'profile_version', 'distilled_from_sessions')"
         )

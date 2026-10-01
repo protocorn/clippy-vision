@@ -50,7 +50,7 @@ def _fetch_memory(q_vec: list) -> str:
     placeholders = ",".join("?" * len(surviving_clusters_ids))
     fact_rows = conn.execute(f"""
     SELECT f.fact_id, f.text, f.vector_embedding, f.cluster_id, c.label, c.description,
-           f.source, f.valid_from, f.created_at
+           f.source, f.valid_from, f.created_at, f.last_confirmed, f.scope
     FROM memory_facts f
     JOIN memory_clusters c ON f.cluster_id = c.cluster_id
     WHERE f.valid_to IS NULL
@@ -63,7 +63,7 @@ def _fetch_memory(q_vec: list) -> str:
     conflict_ids = unresolved_conflict_fact_ids(conn)
     now = time.time()
     scored = []
-    for fact_id, text, embedding, cluster_id, label, description, source, valid_from, created_at in fact_rows:
+    for fact_id, text, embedding, cluster_id, label, description, source, valid_from, created_at, last_confirmed, scope in fact_rows:
         if not embedding:
             continue
         sim = cosine_similarity(q_vec, json.loads(embedding))
@@ -76,6 +76,8 @@ def _fetch_memory(q_vec: list) -> str:
                 cluster_label=label,
                 in_unresolved_conflict=fact_id in conflict_ids,
                 now=now,
+                last_confirmed=last_confirmed,
+                scope=scope,
             )
             score = combined_score(sim, fresh)
             scored.append((score, sim, fresh, text, cluster_id, label, description))

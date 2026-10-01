@@ -558,6 +558,11 @@ def summarizer_loop():
                 )
 
             _refresh_vision_enriched_sessions()
+            try:
+                from core.memory_consolidation import maybe_consolidate
+                maybe_consolidate()
+            except Exception as exc:
+                print(f"  [MEMORY] consolidation skipped: {exc}")
 
         except Exception as e:
             print(f"  [SUMMARIZER] Error: {e}")
