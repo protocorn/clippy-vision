@@ -2,7 +2,6 @@ import json
 import os
 import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -404,9 +403,11 @@ def screenshot_search(
 
 @app.get("/screenshots/{filename}")
 def screenshot_file(filename: str):
+    from core.screenshot_files import resolve_screenshot_file
+
     root = get_screenshots_dir().resolve()
-    candidate = (root / filename).resolve()
-    if Path(filename).name != filename or candidate.parent != root or not candidate.is_file():
+    candidate = resolve_screenshot_file(root, filename)
+    if candidate is None:
         raise HTTPException(status_code=404, detail="Screenshot not found.")
     return FileResponse(candidate, media_type="image/jpeg")
 

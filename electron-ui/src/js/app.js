@@ -227,29 +227,36 @@ export async function init() {
   window.clippy.onLoadingStatus((data) => {
     if (data?.sub && loadingSub) loadingSub.textContent = describeWait(data.sub)
   })
+  if (loadingSub && loadingSub.textContent.trim() === 'Opening Clippy Vision') {
+    loadingSub.textContent = 'Starting the local server on this machine'
+  }
 
   try {
-    if (typeof window.clippy.waitForApiReady === 'function') {
-      await window.clippy.waitForApiReady()
-    } else {
-      await new Promise((resolve) => {
-        let settled = false
-        const done = () => {
-          if (settled) return
-          settled = true
-          resolve()
-        }
-        const poll = () => {
-          if (settled) return
-          window.clippy.checkHealth().then((ok) => {
-            if (ok) done()
-            else setTimeout(poll, 1000)
-          }).catch(() => setTimeout(poll, 1000))
-        }
-        poll()
-        window.clippy.onApiReady(done)
-      })
-    }
+    await new Promise((resolve, reject) => {
+      let settled = false
+      const done = () => {
+        if (settled) return
+        settled = true
+        resolve()
+      }
+      const fail = (error) => {
+        if (settled) return
+        settled = true
+        reject(error)
+      }
+      const poll = () => {
+        if (settled) return
+        window.clippy.checkHealth().then((ok) => {
+          if (ok) done()
+          else setTimeout(poll, 1000)
+        }).catch(() => setTimeout(poll, 1000))
+      }
+      if (typeof window.clippy.waitForApiReady === 'function') {
+        window.clippy.waitForApiReady().then(done).catch(fail)
+      }
+      if (typeof window.clippy.onApiReady === 'function') window.clippy.onApiReady(done)
+      poll()
+    })
   } catch (error) {
     clearInterval(quipTimer)
     if (loadingError) {

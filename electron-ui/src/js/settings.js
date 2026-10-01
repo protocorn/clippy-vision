@@ -1,4 +1,4 @@
-﻿import {
+import {
  settingsView, settingsName, settingsIntro,
  identityFields, identityNewKey, identityNewVal, identityAddBtn, memoryFacts, profileStatus,
  updateCheckToggle, updatesStatus, aboutVersion, aboutPlatform, aboutModel, aboutMemory,
@@ -469,6 +469,7 @@ export async function saveUpdateCheck() {
 }
 
 export async function loadMcpSettings() {
+ wireOtherMcpApps()
  if (!window.clippy?.mcp?.getLaunchConfig) {
  mcpReadyLabel.textContent = 'Unavailable'
  mcpReadyDetail.textContent = 'Restart Clippy Vision to load MCP helpers.'
@@ -515,6 +516,69 @@ export function appendSettingsRowIcon(parent, src, alt) {
  icon.alt = alt || ''
  icon.loading = 'lazy'
  parent.appendChild(icon)
+}
+
+// Paste-the-JSON apps. icon is filled in when the asset exists.
+const OTHER_MCP_APPS = [
+ { id: 'devin', label: 'Devin Desktop', hint: 'Paste the copied JSON into Devin\u2019s mcp_config.json. This app was Windsurf.', docs: 'https://docs.devin.ai/cli/extensibility/mcp/configuration', icon: '../assets/devin_desktop.png' },
+ { id: 'claude-code', label: 'Claude Code', hint: 'Add the copied JSON with the command in the docs.', docs: 'https://code.claude.com/docs/en/mcp#option-3-add-a-local-stdio-server', icon: '../assets/claude_code.png' },
+ { id: 'cline', label: 'Cline', hint: 'Paste the copied JSON into Cline\u2019s MCP settings.', docs: 'https://docs.cline.bot/mcp/mcp-overview#local-server-stdio', icon: '../assets/cline.png' },
+ { id: 'roo-code', label: 'Roo Code', hint: 'Paste the copied JSON into Roo\u2019s MCP config.', docs: 'https://roocodeinc.github.io/Roo-Code/features/mcp/using-mcp-in-roo/#stdio-transport', icon: '../assets/roo_code.png' },
+ { id: 'continue', label: 'Continue', hint: 'Drop the copied JSON into .continue/mcpServers.', docs: 'https://docs.continue.dev/customize/deep-dives/mcp#how-to-use-standard-inputoutput-stdio', icon: '../assets/continue.png' },
+ { id: 'jetbrains', label: 'JetBrains', hint: 'Paste the copied JSON into AI Assistant\u2019s MCP dialog.', docs: 'https://www.jetbrains.com/help/ai-assistant/mcp.html#connect-to-an-mcp-server', icon: '../assets/jetbrains.png' },
+ { id: 'kiro', label: 'Kiro', hint: 'Paste the copied JSON into Kiro\u2019s MCP config.', docs: 'https://kiro.dev/docs/mcp/', icon: '../assets/kiro.png' },
+ { id: 'lm-studio', label: 'LM Studio', hint: 'Paste the copied JSON into mcp.json.', docs: 'https://lmstudio.ai/docs/app/mcp', icon: '../assets/lm_studio.png' },
+]
+
+function renderOtherMcpApps(list) {
+ list.innerHTML = ''
+ for (const app of OTHER_MCP_APPS) {
+  const row = document.createElement('div')
+  row.className = 'privacy-row'
+  const main = document.createElement('div')
+  main.className = 'privacy-row-main'
+  if (app.icon) {
+   appendSettingsRowIcon(main, app.icon, app.label)
+  } else {
+   const mark = document.createElement('span')
+   mark.className = 'privacy-row-icon mcp-app-mark'
+   mark.setAttribute('aria-hidden', 'true')
+   mark.textContent = app.label.trim().charAt(0).toUpperCase()
+   main.appendChild(mark)
+  }
+  const textWrap = document.createElement('div')
+  textWrap.className = 'privacy-row-text'
+  const title = document.createElement('strong')
+  title.textContent = app.label
+  const detail = document.createElement('span')
+  detail.textContent = app.hint
+  textWrap.appendChild(title)
+  textWrap.appendChild(detail)
+  main.appendChild(textWrap)
+  const link = document.createElement('a')
+  link.className = 'header-btn'
+  link.href = app.docs
+  link.target = '_blank'
+  link.rel = 'noopener noreferrer'
+  link.textContent = 'View documentation'
+  row.appendChild(main)
+  row.appendChild(link)
+  list.appendChild(row)
+ }
+}
+
+function wireOtherMcpApps() {
+ const toggle = document.getElementById('mcp-other-apps-toggle')
+ const list = document.getElementById('mcp-other-apps')
+ if (!toggle || !list || toggle.dataset.wired === '1') return
+ toggle.dataset.wired = '1'
+ toggle.addEventListener('click', () => {
+  const open = list.hidden
+  if (open && !list.childElementCount) renderOtherMcpApps(list)
+  list.hidden = !open
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false')
+  toggle.textContent = open ? 'Hide other apps' : 'Also connect with other apps'
+ })
 }
 
 export function renderMcpClients(clients, ready) {

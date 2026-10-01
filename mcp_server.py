@@ -42,10 +42,10 @@ _WITHHELD = "Cloud result withheld. The privacy filter did not finish."
 
 
 def _call_tool(function, *args, **kwargs):
-    """Run a tool, then scrub the reply before it reaches a cloud client.
+    """Run a tool, then scrub the reply before it reaches a connected client.
 
-    Capture has already stored its own copy. This pass does not change the
-    database. If scrubbing fails, the raw reply is not returned.
+    Connecting the app is what allows these tools. Capture has already stored
+    its own copy. If scrubbing fails, the raw reply is not returned.
     """
     with redirect_stdout(sys.stderr):
         result = function(*args, **kwargs)
@@ -103,7 +103,7 @@ def search_bounded_tool(
                 offset=offset,
                 table=table if table in ("events", "sessions") else "events",
             )
-        )
+        ),
     )
 
 
@@ -122,7 +122,7 @@ def list_sessions_tool(
             list_sessions_range(
                 start or None, end or None, limit=limit, offset=offset
             )
-        )
+        ),
     )
 
 
@@ -138,7 +138,7 @@ def activity_coverage_tool(
     return _call_tool(
         lambda: dumps(
             activity_coverage(start, end or None, bucket_hours=bucket_hours)
-        )
+        ),
     )
 
 
@@ -147,7 +147,7 @@ def app_time_summary_tool(start: str, end: str = "") -> str:
     """Approximate per-app foreground time from event gaps in a window.
     start/end: epoch or YYYY-MM-DD. Durations are approximate (gaps capped at 5 min)."""
     return _call_tool(
-        lambda: dumps(app_time_summary(start, end or None))
+        lambda: dumps(app_time_summary(start, end or None)),
     )
 
 
@@ -168,7 +168,7 @@ def list_urls_tool(
                 end=end or None,
                 limit=limit,
             )
-        )
+        ),
     )
 
 
@@ -179,7 +179,7 @@ def list_screenshots_tool(start: str = "", end: str = "", limit: int = 30) -> st
     return _call_tool(
         lambda: dumps(
             list_screenshots(start or None, end or None, limit=limit)
-        )
+        ),
     )
 
 
@@ -190,7 +190,7 @@ def get_screenshot_tool(filename: str = "", timestamp: float = 0.0) -> str:
     Screenshots use adaptive TTL (important frames kept longer, capped)."""
     ts = timestamp if timestamp and timestamp > 0 else None
     return _call_tool(
-        lambda: dumps(get_screenshot(filename=filename, timestamp=ts))
+        lambda: dumps(get_screenshot(filename=filename, timestamp=ts)),
     )
 
 
@@ -202,7 +202,7 @@ def recall_memory_tool(
 ) -> str:
     """List long-term memory clusters ranked by freshness score.
     Pass query to run semantic recall instead of listing.
-    Stale/recovered clusters are hidden unless include_stale=true."""
+    Clusters below min_freshness are hidden unless include_stale=true."""
     return _call_tool(
         recall_memory,
         query=query,

@@ -1,4 +1,4 @@
-﻿/* Warm charcoal + amber — settings mockup language */
+/* Warm charcoal + amber — settings mockup language */
  :root {
  --bg: #0c0b0a;
  --panel: #141210;
@@ -1886,6 +1886,45 @@
  min-width: 0;
  }
 
+ .mcp-other-apps-toggle {
+ display: inline-block;
+ margin-top: 10px;
+ background: none;
+ border: none;
+ padding: 0;
+ cursor: pointer;
+ font: inherit;
+ font-size: 13px;
+ color: var(--accent);
+ }
+
+ .mcp-other-apps-toggle:hover {
+ text-decoration: underline;
+ }
+
+ #mcp-other-apps {
+ margin-top: 10px;
+ }
+
+ #mcp-other-apps[hidden] {
+ display: none;
+ }
+
+ #mcp-other-apps a.header-btn {
+ text-decoration: none;
+ white-space: nowrap;
+ flex-shrink: 0;
+ }
+
+ .mcp-app-mark {
+ display: inline-flex;
+ align-items: center;
+ justify-content: center;
+ font-size: 14px;
+ font-weight: 650;
+ color: var(--text);
+ }
+
  button.mcp-copy-btn {
  background: none;
  border: none;
@@ -2509,6 +2548,53 @@
  font-weight: 500;
  color: var(--muted);
  margin-top: 2px;
+ }
+
+ .timeline-group {
+ display: flex;
+ flex-direction: column;
+ gap: 8px;
+ }
+
+ .timeline-group-top {
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ gap: 8px;
+ width: 100%;
+ }
+
+ .timeline-group-chevron {
+ width: 0;
+ height: 0;
+ border-top: 4px solid transparent;
+ border-bottom: 4px solid transparent;
+ border-left: 5px solid var(--muted);
+ flex-shrink: 0;
+ }
+
+ .timeline-group.is-open .timeline-group-chevron {
+ border-left: 4px solid transparent;
+ border-right: 4px solid transparent;
+ border-top: 5px solid var(--muted);
+ border-bottom: 0;
+ }
+
+ .timeline-group-items {
+ display: none;
+ flex-direction: column;
+ gap: 8px;
+ margin-left: 10px;
+ padding-left: 8px;
+ border-left: 1px solid var(--border);
+ }
+
+ .timeline-group.is-open > .timeline-group-items {
+ display: flex;
+ }
+
+ .timeline-group-items .timeline-session::before {
+ display: none;
  }
 
  .timeline-load-more-wrap {

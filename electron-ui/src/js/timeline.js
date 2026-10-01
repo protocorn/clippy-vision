@@ -3,6 +3,7 @@ import { showView, startOfDay, formatConversationTime } from './utils.js'
 import { confirmDialog } from './dialogs.js'
 
 const shotUrls = []
+const groupToggle = new Map()
 
 function releaseShotUrls() {
  while (shotUrls.length) {
@@ -360,6 +361,81 @@ export function createTimelineSessionButton(session) {
  return btn
 }
 
+function clusterSimilarSessions(items) {
+ const runs = []
+ for (const session of items) {
+  const groupId = session.group_id || null
+  const last = runs[runs.length - 1]
+  if (groupId && last && last.groupId === groupId) {
+   last.sessions.push(session)
+  } else {
+   runs.push({ groupId, sessions: [session] })
+  }
+ }
+ return runs
+}
+
+function isGroupOpen(groupId, sessions) {
+ if (groupToggle.has(groupId)) return groupToggle.get(groupId)
+ if (store.timelineQuery) return true
+ return sessions.some((session) => session.summary_id === store.timelineSelectedId)
+}
+
+function createTimelineGroup(run) {
+ const wrap = document.createElement('div')
+ wrap.className = 'timeline-group'
+ const open = isGroupOpen(run.groupId, run.sessions)
+ if (open) wrap.classList.add('is-open')
+
+ const newest = run.sessions[0]
+ const start = Math.min(...run.sessions.map((session) => session.window_start || session.window_end || 0))
+ const end = Math.max(...run.sessions.map((session) => session.window_end || session.window_start || 0))
+
+ const toggle = document.createElement('button')
+ toggle.type = 'button'
+ toggle.className = 'timeline-session timeline-group-toggle'
+ toggle.setAttribute('aria-expanded', open ? 'true' : 'false')
+
+ const top = document.createElement('span')
+ top.className = 'timeline-group-top'
+ const meta = document.createElement('span')
+ meta.className = 'timeline-session-meta'
+ meta.textContent = formatSessionClockRange(start, end)
+ const chevron = document.createElement('span')
+ chevron.className = 'timeline-group-chevron'
+ chevron.setAttribute('aria-hidden', 'true')
+ top.appendChild(meta)
+ top.appendChild(chevron)
+
+ const title = document.createElement('span')
+ title.className = 'timeline-session-title'
+ title.textContent = sessionCardTitle(newest)
+
+ const badge = document.createElement('span')
+ badge.className = 'timeline-session-badge'
+ badge.textContent = `${run.sessions.length} similar sessions`
+
+ toggle.appendChild(top)
+ toggle.appendChild(title)
+ toggle.appendChild(badge)
+ toggle.addEventListener('click', () => {
+  const next = !wrap.classList.contains('is-open')
+  wrap.classList.toggle('is-open', next)
+  toggle.setAttribute('aria-expanded', next ? 'true' : 'false')
+  groupToggle.set(run.groupId, next)
+ })
+
+ const items = document.createElement('div')
+ items.className = 'timeline-group-items'
+ for (const session of run.sessions) {
+  items.appendChild(createTimelineSessionButton(session))
+ }
+
+ wrap.appendChild(toggle)
+ wrap.appendChild(items)
+ return wrap
+}
+
 export function renderTimelineList() {
  if (!store.timelineSessions.length) {
   const emptyText = store.timelineQuery
@@ -394,8 +470,12 @@ export function renderTimelineList() {
 
   const itemsWrap = document.createElement('div')
   itemsWrap.className = 'timeline-section-items'
-  for (const session of group.items) {
-   itemsWrap.appendChild(createTimelineSessionButton(session))
+  for (const run of clusterSimilarSessions(group.items)) {
+   if (run.sessions.length > 1) {
+    itemsWrap.appendChild(createTimelineGroup(run))
+   } else {
+    itemsWrap.appendChild(createTimelineSessionButton(run.sessions[0]))
+   }
   }
   section.appendChild(itemsWrap)
   timelineList.appendChild(section)

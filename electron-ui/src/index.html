@@ -212,8 +212,7 @@
             <section class="settings-panel" id="mcp-section" data-settings-panel="mcp" hidden>
               <h2 class="settings-panel-title">Connect apps</h2>
               <p class="settings-hint">
-                Let Cursor, Claude, and other MCP clients search what Clippy saw on this machine.
-                Your screen data stays local — these apps only talk to Clippy through a local launcher.
+                Connect an app to let it use Clippy's tools. A cloud model receives the replies those tools return. Disconnect the app to stop.
               </p>
               <div class="privacy-list">
                 <div class="privacy-row">
@@ -233,7 +232,11 @@
                 </div>
                 <textarea id="mcp-config-preview" readonly rows="8" spellcheck="false"
                   placeholder="Paths appear when Settings opens."></textarea>
+                <button type="button" id="mcp-other-apps-toggle" class="mcp-other-apps-toggle" aria-expanded="false" aria-controls="mcp-other-apps">
+                  Also connect with other apps
+                </button>
               </div>
+              <div class="privacy-list" id="mcp-other-apps" hidden></div>
               <div class="privacy-list" id="mcp-client-list" style="margin-top: 14px;"></div>
             </section>
 

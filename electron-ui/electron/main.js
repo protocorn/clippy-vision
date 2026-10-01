@@ -278,7 +278,14 @@ app.whenReady().then(async () => {
         await api.startServer()
         api.pollUntilAlive(api.apiUrl('/health'), 1000, 90)
             .then(async () => {
-                console.log('[app] API server healthy — warming text model...')
+                console.log('[app] API server healthy — opening window')
+                // Open the window before the text-model warm. That warm can
+                // take minutes and must not leave the splash up.
+                state.apiReady = true
+                for (const resolve of state.apiReadyWaiters.splice(0)) resolve(true)
+                if (state.mainWindow && !state.mainWindow.isDestroyed()) {
+                    state.mainWindow.webContents.send('api-ready')
+                }
                 windows.sendLoadingStatus(null, 'Loading text model…')
                 try {
                     const warm = await api.httpPost(api.apiUrl('/residency/startup'), {}, 120000)
@@ -298,13 +305,6 @@ app.whenReady().then(async () => {
                         return
                     }
                     console.log('[app] residency warm skipped:', e.message)
-                }
-                // Always flip the ready flag so renderer waiters unblock even if
-                // the BrowserWindow was hidden/recreated during warmup.
-                state.apiReady = true
-                for (const resolve of state.apiReadyWaiters.splice(0)) resolve(true)
-                if (state.mainWindow && !state.mainWindow.isDestroyed()) {
-                    state.mainWindow.webContents.send('api-ready')
                 }
             })
             .catch(() => {

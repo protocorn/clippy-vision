@@ -202,9 +202,15 @@ function createWindows({ paths, state, api, updates, shell, app }) {
 
     function waitForMainWindowLoad() {
         return new Promise((resolve) => {
-            if (!state.mainWindow || state.mainWindow.isDestroyed()) return resolve()
-            if (!state.mainWindow.webContents.isLoading()) return resolve()
-            state.mainWindow.webContents.once('did-finish-load', () => resolve())
+            const win = state.mainWindow
+            if (!win || win.isDestroyed()) return resolve()
+            const contents = win.webContents
+            // loadFile() has not started navigation yet when isLoading() is
+            // still false. Treating that as "already loaded" drops every
+            // loading-status message and the splash never changes.
+            const url = contents.getURL() || ''
+            if (!contents.isLoading() && url.startsWith('file:')) return resolve()
+            contents.once('did-finish-load', () => resolve())
         })
     }
 
