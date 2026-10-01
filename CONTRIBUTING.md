@@ -11,19 +11,25 @@ Thanks for your interest in contributing! Clippy Vision is an open-source projec
 - **Testing**: Test the software on different systems and report issues
 - **Design / ideas / reviews**: UI polish, architecture notes, thoughtful PR reviews — all count
 
-Every merged contribution is credited on the README [Contributors](README.md#contributors) wall (avatar, profile, contribution types, and lines of code). We follow the [All Contributors](https://allcontributors.org/) spec so non-code work is celebrated too.
+Every merged contribution is credited on the README [Contributors](README.md#contributors) wall (avatar, profile, and contribution types). We follow the [All Contributors](https://allcontributors.org/) spec so non-code work is celebrated too.
+
+### Contribution types
+
+Code is one way in, but not the only one:
+
+💻 `code` · 📦 `platform` · 📖 `doc` · 🐛 `bug` · 🤔 `ideas` · 🎨 `design` · ⚠️ `test` · 👀 `review` · 🚧 `maintenance`
+
+See the full [emoji key](https://allcontributors.org/docs/en/emoji-key).
 
 ### Getting credited
 
 After your PR merges (or you’ve helped in another way), ask for credit on the PR or any issue:
 
 ```text
-@all-contributors please add @your-username for code
+@all-contributors please add @your-username for code, doc
 ```
 
-Valid types include `code`, `doc`, `bug`, `ideas`, `design`, `test`, `review`, `maintenance`, and more — see the [emoji key](https://allcontributors.org/docs/en/emoji-key).
-
-Maintainers: install the [All Contributors GitHub App](https://github.com/apps/allcontributors) on this repo so those comments open a credit PR automatically. Line-of-code stats refresh via `.github/workflows/update-contributors.yml`.
+Maintainers: install the [All Contributors GitHub App](https://github.com/apps/allcontributors) on this repo so those comments open a credit PR automatically. Contributor stats refresh via `.github/workflows/update-contributors.yml`.
 
 ## Issue Format
 
@@ -66,6 +72,23 @@ Clippy Vision supports Windows and macOS. The app lives in `electron-ui/` and st
    The setup wizard runs on first launch (Python, Ollama, models, `requirements.txt`).
 4. Create a branch: `git checkout -b feature/your-feature-name`
 
+### Building from source
+
+```powershell
+# Python dependencies (optional for Python-only work outside the app)
+pip install -r requirements.txt
+
+# Run the desktop app
+cd electron-ui
+npm install
+npm start
+
+# Build the installer
+npm run dist
+```
+
+The built installer appears at `electron-ui/dist/ClippyVision-Windows-Setup-{version}.exe` (or `ClippyVision-macOS-{arch}-{version}.dmg` when building on macOS).
+
 ### Dev app vs installed app
 
 `npm start` launches **Clippy Vision (dev)** — a separate app from the installer build.
@@ -78,9 +101,17 @@ Clippy Vision supports Windows and macOS. The app lives in `electron-ui/` and st
 
 Both can run at the same time. If `npm start` exits immediately, a previous **dev** instance is still in the system tray — right-click it → Quit, then start again. The terminal prints which instance is running (`[clippy] starting Clippy Vision (dev)`).
 
-For Python-only work outside the app, you can also install deps with `pip install -r requirements.txt` from the repo root.
+### Docs to update with behavioral changes
 
-See [QUICKSTART.md](QUICKSTART.md) for installer and troubleshooting details.
+| Guide | Covers |
+|-------|--------|
+| [docs/usage.md](docs/usage.md) | Capture, privacy, accessibility, install troubleshooting |
+| [docs/mcp.md](docs/mcp.md) | Connect apps, Copy JSON, tool reference |
+| [docs/architecture.md](docs/architecture.md) | Capture pipeline, summarization, distillation, schema |
+| [QUICKSTART.md](QUICKSTART.md) | Short installer walkthrough |
+| [README.md](README.md) | Product overview |
+
+When a change alters setup, connect, privacy, or the timeline, update the matching guide in the same pull request so the docs match the app.
 
 ### Lower-spec machines
 
@@ -105,7 +136,7 @@ Before submitting a PR:
 
 ## Pull Request Process
 
-1. Update the README.md or QUICKSTART.md if needed
+1. Update README.md and/or the matching guide under `docs/` (and QUICKSTART.md if the installer path changed)
 2. Update requirements.txt if you added dependencies
 3. Write a clear PR description explaining:
    - What problem does this solve?
