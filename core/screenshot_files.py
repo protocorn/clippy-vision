@@ -70,13 +70,42 @@ def artifact_paths(path: Path) -> list[Path]:
         folder / f"{stem}.a11y.txt",
         folder / f"{stem}.a11y.tmp",
         folder / f"{stem}.ocr-crop.json",
+        folder / f"{stem}.window.json",
         folder / f"{stem}.tmp",
     ]
 
 
+def write_frame_window(screenshot_path: Path, process_name: str, title: str) -> None:
+    """Remember which window the pixels came from. The walk may run later."""
+    import json
+
+    target = screenshot_path.parent / f"{capture_stem(screenshot_path)}.window.json"
+    payload = json.dumps({
+        "process_name": process_name or "",
+        "title": title or "",
+    })
+    temporary = target.with_suffix(".json.tmp")
+    temporary.write_text(payload, encoding="utf-8")
+    temporary.replace(target)
+
+
+def read_frame_window(screenshot_path: Path) -> tuple[str, str]:
+    """Process and title captured with this JPEG. Empty when the file is missing."""
+    import json
+
+    target = screenshot_path.parent / f"{capture_stem(screenshot_path)}.window.json"
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return "", ""
+    if not isinstance(payload, dict):
+        return "", ""
+    return str(payload.get("process_name") or ""), str(payload.get("title") or "")
+
+
 # Oldest orphaned accessibility files removed on one sweep. A sweep runs
-# about once a minute, so this drains leftovers without a delete per frame
-# and without clearing the folder in one pass.
+# with screenshot purge, about once an hour, so this drains leftovers
+# without a delete per frame and without clearing the folder in one pass.
 _A11Y_SWEEP_BATCH = 32
 # Leave the text files in place so a capture can be read after the image
 # moves or a session is deleted. The batch sweep below stays for later.
@@ -114,20 +143,151 @@ def release_text_sidecars(path: Path) -> None:
             pass
 
 
-def retarget_screenshot_filename(old_names: list[str], new_name: str) -> None:
-    names = [name for name in old_names if name and name != new_name]
-    if not names or not new_name:
-        return
+# Same cap as screenshot enrichment. A later sidecar write replaces a shorter
+# stored string, so the completed accessibility text is what the database keeps.
+_SCREEN_TEXT_LIMIT = 4000
+_NO_SCREEN_TEXT = "No accessibility or OCR text was available"
+_SCREEN_TEXT_READY = "Local accessibility and OCR text capture completed"
+
+
+def _db():
     try:
         from core.storage import conn
     except ImportError:
         from storage import conn
-    placeholders = ",".join("?" for _ in names)
+    return conn
+
+
+def _stored_screen_text(text: str) -> str:
+    from core.secret_patterns import redact_secrets
+
+    body = str(text or "").strip()
+    if not body:
+        return ""
+    return redact_secrets(body)[:_SCREEN_TEXT_LIMIT]
+
+
+def sidecar_text(path: Path) -> str:
+    """Read the accessibility file for this image, raw or processed."""
+    target = path.parent / f"{capture_stem(path)}.a11y.txt"
+    try:
+        return target.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def record_accessibility_text(screenshot_path: Path, text: str) -> None:
+    """Copy sidecar text onto the event for this frame.
+
+    The screenshot processor often reads the file before the walk finishes, and
+    then stores an empty string. A later write fills that gap. A longer useful
+    walk also replaces a short first read of the same frame. A short follow-up
+    does not replace text that is already longer.
+    """
+    body = _stored_screen_text(text)
+    if not body:
+        return
+    from core.accessibility_text import is_useful_accessibility_text
+
+    raw_name, processed_name = image_names(capture_stem(screenshot_path))
+    conn = _db()
+    rows = conn.execute(
+        """SELECT event_id, vision_ocr_text, interest_reason
+           FROM events
+           WHERE screenshot_filename IN (?, ?)""",
+        (raw_name, processed_name),
+    ).fetchall()
+    useful = is_useful_accessibility_text(body)
+    for event_id, current, reason in rows:
+        stored = (current or "").strip()
+        if stored == body:
+            continue
+        if stored and not (useful and len(body) > len(stored)):
+            continue
+        next_reason = _SCREEN_TEXT_READY if reason == _NO_SCREEN_TEXT else reason
+        conn.execute(
+            """UPDATE events
+               SET vision_ocr_text = ?, interest_reason = ?
+               WHERE event_id = ?""",
+            (body, next_reason, event_id),
+        )
+    if rows:
+        conn.commit()
+
+
+def adopt_processed_filename(raw_name: str, processed_name: str) -> None:
+    """Point the event at the renamed JPEG. The raw name is deleted by the rename."""
+    if not raw_name or not processed_name or raw_name == processed_name:
+        return
+    conn = _db()
     conn.execute(
-        f"UPDATE events SET screenshot_filename = ? WHERE screenshot_filename IN ({placeholders})",
-        [new_name, *names],
+        "UPDATE events SET screenshot_filename = ? WHERE screenshot_filename = ?",
+        (processed_name, raw_name),
     )
     conn.commit()
+
+
+def retarget_screenshot_filename(old_names: list[str], new_name: str) -> None:
+    names = [name for name in old_names if name and name != new_name]
+    if not names or not new_name:
+        return
+    conn = _db()
+    placeholders = ",".join("?" for _ in names)
+    if new_name.endswith(f"{_PROCESSED}.jpg"):
+        # This image will not be enriched again. Its sidecar is the screen text.
+        from core.paths import get_screenshots_dir
+
+        body = _stored_screen_text(sidecar_text(get_screenshots_dir() / new_name))
+        if body:
+            conn.execute(
+                f"""UPDATE events
+                    SET screenshot_filename = ?,
+                        vision_ocr_text = ?,
+                        interest_reason = CASE
+                            WHEN interest_reason IS NULL OR interest_reason = ?
+                            THEN ?
+                            ELSE interest_reason
+                        END
+                    WHERE screenshot_filename IN ({placeholders})""",
+                [new_name, body, _NO_SCREEN_TEXT, _SCREEN_TEXT_READY, *names],
+            )
+        else:
+            conn.execute(
+                f"""UPDATE events
+                    SET screenshot_filename = ?,
+                        vision_ocr_text = NULL,
+                        interest_reason = CASE
+                            WHEN interest_reason = ?
+                            THEN ?
+                            ELSE interest_reason
+                        END
+                    WHERE screenshot_filename IN ({placeholders})""",
+                [new_name, _SCREEN_TEXT_READY, _NO_SCREEN_TEXT, *names],
+            )
+    else:
+        conn.execute(
+            f"UPDATE events SET screenshot_filename = ? WHERE screenshot_filename IN ({placeholders})",
+            [new_name, *names],
+        )
+    conn.commit()
+
+
+def resolve_screenshot_file(directory: Path, filename: str) -> Path | None:
+    """Find a stored JPEG. The event may still name the file from before processing."""
+    if not filename or Path(filename).name != filename:
+        return None
+    candidate = (directory / filename).resolve()
+    root = directory.resolve()
+    if candidate.parent == root and candidate.is_file():
+        return candidate
+    stem = Path(filename).stem
+    if stem.endswith(_PROCESSED):
+        alternate = root / f"{capture_stem(Path(filename))}.jpg"
+    else:
+        alternate = root / f"{stem}{_PROCESSED}.jpg"
+    if alternate.parent == root and alternate.is_file():
+        return alternate
+    return None
 
 
 def sweep_screenshot_sidecars(directory: Path) -> None:

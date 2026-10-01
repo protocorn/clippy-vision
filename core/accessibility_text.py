@@ -122,7 +122,8 @@ def strip_ui_chrome(text: str) -> str:
     return "\n".join(lines)
 
 
-def normalize_accessibility_text(*values: object) -> str:
+def accessibility_lines(*values: object) -> list[str]:
+    """Unique content lines, in first-seen order. No character cap."""
     seen = set()
     lines = []
     for value in values:
@@ -135,7 +136,11 @@ def normalize_accessibility_text(*values: object) -> str:
                 continue
             seen.add(key)
             lines.append(line)
-    return "\n".join(lines)[:MAX_TEXT_CHARS]
+    return lines
+
+
+def normalize_accessibility_text(*values: object) -> str:
+    return "\n".join(accessibility_lines(*values))[:MAX_TEXT_CHARS]
 
 
 def _nonempty_lines(text: str) -> list[str]:
@@ -1164,7 +1169,7 @@ def collect_redaction(hwnd: int | None = None) -> dict | None:
                     row_nodes.append({"text": value, "bounds": bounds})
 
     # Pattern text below still locates secret rectangles. The stored string
-    # is the active tile only, and that tile's rectangle is the OCR crop.
+    # is every pane that was read, and the active tile's rectangle is the OCR crop.
     choice = _screen_text_from_root(root, focused, document, window=str(target), visit=_visit)
     if focused is not None:
         _note_edit(focused, edit_rects, edit_values, seen_edits)
@@ -1262,35 +1267,44 @@ def collect_edit_snapshots(hwnd: int | None = None) -> list[dict] | None:
     return nodes
 
 
-def _run_with_timeout(func, timeout: float, *args, **kwargs):
-    """Run ``func`` on a helper thread and abandon it past ``timeout``.
+def _run_with_timeout(func, timeout: float, *args, on_late=None, **kwargs):
+    """Run ``func`` on a helper thread and stop waiting past ``timeout``.
 
     UIA COM calls can hang indefinitely against certain apps. Python cannot
-    kill a thread, so on timeout we return the fallback immediately and let
-    the stuck worker thread die on its own; it only ever touches its own
-    locals, never shared state, so an abandoned thread is harmless.
+    kill a thread, so on timeout we return immediately and let the worker
+    finish on its own. A finished late result is handed to ``on_late`` when
+    the caller still wants it; the capture thread does not wait.
 
     UI Automation has to be initialized on that helper thread. Without it
     every walk fails with CoInitialize and the frame is stored with no text.
     """
     box: list = [None]
+    abandoned = threading.Event()
 
     def _target():
+        result = None
         try:
             if IS_WINDOWS:
                 import uiautomation as auto
 
                 with auto.UIAutomationInitializerInThread():
-                    box[0] = func(*args, **kwargs)
+                    result = func(*args, **kwargs)
             else:
-                box[0] = func(*args, **kwargs)
+                result = func(*args, **kwargs)
+            box[0] = result
         except Exception:
-            box[0] = None
+            result = None
+        if abandoned.is_set() and on_late is not None:
+            try:
+                on_late(result)
+            except Exception:
+                pass
 
     thread = threading.Thread(target=_target, daemon=True)
     thread.start()
     thread.join(timeout)
     if thread.is_alive():
+        abandoned.set()
         return None
     return box[0]
 
@@ -1311,6 +1325,9 @@ def collect_edit_snapshots_safe(
     return _run_with_timeout(collect_edit_snapshots, timeout, hwnd)
 
 
-def collect_redaction_safe(hwnd: int | None = None, timeout: float = 1.5) -> dict | None:
-    """Timeout-guarded redaction targets. None means the walk did not finish."""
-    return _run_with_timeout(collect_redaction, timeout, hwnd)
+def collect_redaction_safe(hwnd: int | None = None, timeout: float = 1.5, on_late=None) -> dict | None:
+    """Timeout-guarded redaction targets. None means the walk did not finish.
+
+    ``on_late`` receives the dict if the walk finishes after ``timeout``.
+    """
+    return _run_with_timeout(collect_redaction, timeout, hwnd, on_late=on_late)

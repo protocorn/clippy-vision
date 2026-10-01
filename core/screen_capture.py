@@ -21,20 +21,22 @@ try:
     from core.events import Event, WindowMetadata, generate_summary, get_session_id
     from core.storage import purge_expired, store_event
     from core.screenshot_scheduler import (
-        begin_typing_capture,
+        checkpoint_typing_capture,
         finish_typing_capture,
         on_activity_event,
         start_screenshot_daemon,
+        _foreground_hwnd,
     )
 except ImportError:
     from baseline import compute_deviation, update_baseline
     from events import Event, WindowMetadata, generate_summary, get_session_id
     from storage import purge_expired, store_event
     from screenshot_scheduler import (
-        begin_typing_capture,
+        checkpoint_typing_capture,
         finish_typing_capture,
         on_activity_event,
         start_screenshot_daemon,
+        _foreground_hwnd,
     )
 import uuid
 from datetime import datetime
@@ -72,7 +74,6 @@ try:
 except ImportError:
     from capture_state import set_capture_status
 from core.performance_metrics import start_performance_monitor
-from core.uia_worker import start_uia_worker
 
 
 def _capture_shutdown() -> None:
@@ -98,18 +99,18 @@ purge_expired()
 # Deferred Tier-2 catch-up, summarizer, screenshot OCR, and distil run in the
 # API process so backlog drains even when capture is paused.
 start_worker()
-start_uia_worker()
 start_screenshot_daemon()
 # Electron waits for this line before telling the user capture is on.
 # Imports and the scheduler are done; later OCR loads on the first frame.
 print("CAPTURE_READY", flush=True)
 
 
-# A burst ends after a short pause; grouping keystrokes keeps activity records
-# useful without writing one event per key press.
+# A burst ends after a short pause. A long run of typing also saves a frame
+# every hundred characters, while that window is still the one being typed
+# in, so a tab switch cannot drop the whole draft.
 BURST_PAUSE_THRESHOLD_MS = 2000
 MIN_KEYS_FOR_BURST = 3
-TYPING_SNAPSHOT_CHARS = 5
+TYPING_CHECKPOINT_CHARS = 100
 WINDOW_POLL_INTERVAL_SECONDS = 2.0
 
 class TypingEvent(TypedDict):
@@ -169,8 +170,8 @@ class BurstDetection:
         self._on_paste_event = on_paste_event
         self.window_metadata: WindowMetadata | None = None
         self._modifiers: set[str] = set()
-        self._start_taken = False
-        self._generation = 0
+        self._checkpoint_chars = 0
+        self._hwnd: int | None = None
 
     @staticmethod
     def _key_string(key) -> str:
@@ -186,8 +187,7 @@ class BurstDetection:
 
     def on_key_press(self, key):
         paste_job = None
-        need_start = False
-        generation = 0
+        need_checkpoint = False
         with self._lock:
             key_str = self._key_string(key)
             modifier = self._modifier_name(key_str)
@@ -200,20 +200,18 @@ class BurstDetection:
                 paste_job = self._take_flush_job()
             else:
                 self._events.append(TypingEvent(timestamp=time.time(), event_type="key_press", key=key_str))
-                generation = self._generation
-                need_start = (
-                    not self._start_taken
-                    and _printable_chars(self._events) >= TYPING_SNAPSHOT_CHARS
-                )
-                if need_start:
-                    self._start_taken = True
+                self._hwnd = _foreground_hwnd() or self._hwnd
+                typed = _printable_chars(self._events)
+                if typed - self._checkpoint_chars >= TYPING_CHECKPOINT_CHARS:
+                    self._checkpoint_chars = typed
+                    need_checkpoint = True
                 self._reset_timer()
         if paste_job is not None:
             self._run_flush_job(paste_job)
             self._on_paste_event(PasteEvent(timestamp=time.time(), window_context=self.window_metadata))
             return
-        if need_start:
-            begin_typing_capture(lambda: generation == self._generation)
+        if need_checkpoint:
+            checkpoint_typing_capture()
 
     def on_key_release(self, key):
         with self._lock:
@@ -248,27 +246,28 @@ class BurstDetection:
             job = self._take_flush_job()
         self._run_flush_job(job)
 
-    def _take_flush_job(self) -> tuple[list[TypingEvent], bool]:
+    def _take_flush_job(self) -> tuple[list[TypingEvent], int | None]:
         if self._timer:
             self._timer.cancel()
             self._timer = None
         events = self._events[:]
+        hwnd = self._hwnd
         self._events.clear()
-        had_start = self._start_taken
-        self._start_taken = False
-        self._generation += 1
-        return events, had_start
+        self._checkpoint_chars = 0
+        self._hwnd = None
+        return events, hwnd
 
-    def _run_flush_job(self, job: tuple[list[TypingEvent], bool]) -> None:
-        events, had_start = job
-        if had_start:
-            finish_typing_capture()
+    def _run_flush_job(self, job: tuple[list[TypingEvent], int | None]) -> None:
+        events, hwnd = job
+        if not events:
+            return
+        saved = finish_typing_capture(hwnd)
         press_count = sum(1 for event in events if event["event_type"] == "key_press")
         if press_count < MIN_KEYS_FOR_BURST:
             return
         metrics = compute_burst_metrics(events, self.window_metadata)
         if metrics:
-            self._on_burst_completed(metrics, skip_screenshot=had_start)
+            self._on_burst_completed(metrics, skip_screenshot=saved)
 
     def flush_events(self):
         # Kept for callers that already hold no timer. Prefer _run_flush_job.
@@ -513,7 +512,6 @@ def _printable_chars(events: list[TypingEvent]) -> int:
         if event["event_type"] == "key_press"
         and len(event["key"] or "") == 1
         and (event["key"] or "").isprintable()
-        and event["key"] not in (" ",)
     )
 
 

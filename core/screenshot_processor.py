@@ -76,9 +76,10 @@ def _screenshot_timestamp_ms(path: Path) -> int | None:
 # ─────────────────────────────────────────────────────────────
 # DB helpers
 # ─────────────────────────────────────────────────────────────
-def _get_nearest_event(screenshot_ts: float) -> dict | None:
-    row = conn.execute(
-        """SELECT event_id, timestamp, event_type,
+def _get_nearest_event(screenshot_ts: float, process_name: str = "") -> dict | None:
+    """Nearest event in the same app. A Cursor paste must not take a Chrome frame."""
+    process = (process_name or "").strip()
+    query = """SELECT event_id, timestamp, event_type,
                   process_name, current_window_title, active_url,
                   summary, payload
            FROM events
@@ -86,11 +87,14 @@ def _get_nearest_event(screenshot_ts: float) -> dict | None:
            AND classification_status IN ('done', 'screenshot_only')
            AND vision_ocr_text IS NULL
            AND vision_activity IS NULL
-           AND vision_suggested_action IS NULL
-           ORDER BY ABS(timestamp - ?) ASC
-           LIMIT 1""",
-        (screenshot_ts, NEAREST_EVENT_WINDOW_SECS, screenshot_ts)
-    ).fetchone()
+           AND vision_suggested_action IS NULL"""
+    params: list = [screenshot_ts, NEAREST_EVENT_WINDOW_SECS]
+    if process:
+        query += " AND lower(process_name) = lower(?)"
+        params.append(process)
+    query += " ORDER BY ABS(timestamp - ?) ASC LIMIT 1"
+    params.append(screenshot_ts)
+    row = conn.execute(query, params).fetchone()
 
     if not row:
         return None
@@ -131,8 +135,21 @@ def _get_window_context_at(screenshot_ts: float) -> dict:
     return {"process_name": "unknown", "current_window_title": "", "active_url": None}
 
 
-def _create_screenshot_event(screenshot_ts: float) -> dict:
+def _create_screenshot_event(
+    screenshot_ts: float,
+    process_name: str = "",
+    title: str = "",
+) -> dict:
     window_ctx = _get_window_context_at(screenshot_ts)
+    # The JPEG recorded its own window. A context_change from another app
+    # must not become this frame's title.
+    if (process_name or "").strip():
+        same_app = (window_ctx.get("process_name") or "").strip().lower() == process_name.strip().lower()
+        window_ctx = {
+            "process_name": process_name,
+            "current_window_title": title,
+            "active_url": window_ctx.get("active_url") if same_app else None,
+        }
     event_id = str(uuid.uuid4())
     event = Event(
         event_id=event_id,
@@ -213,10 +230,14 @@ def _mark_as_processed(path: Path):
     if not path.exists():
         return False
     target = path.parent / f"{path.stem}_processed.jpg"
+    from core.screenshot_files import adopt_processed_filename
+
     if target.exists():
         path.unlink(missing_ok=True)
+        adopt_processed_filename(path.name, target.name)
         return True
     path.rename(target)
+    adopt_processed_filename(path.name, target.name)
     return True
 
 
@@ -336,25 +357,32 @@ def _group_by_similarity(
 # Processing
 # ─────────────────────────────────────────────────────────────
 def _process_group(group: list[Path]) -> bool:
-    """
-    Keep the newest frame in a lookalike group. Older images are deleted so
-    they do not become a second event or a second summary of the same screen.
+    """Store every frame in the group. Text coverage decides which one stays.
 
-    Returns True if the newest frame was stored.
-    Returns False if that frame could not be stored (nothing is deleted).
+    Image similarity used to delete the older JPEGs here, before their
+    accessibility text existed, so a later frame could not be compared with them.
     """
-    representative = group[-1]  # most recent = best context
+    completed = False
+    for path in group:
+        if _process_frame(path):
+            completed = True
+    return completed
+
+
+def _process_frame(representative: Path) -> bool:
+    """Store one frame. Returns True when the event was written."""
     rep_ts = (_screenshot_timestamp_ms(representative) or 0) / 1000.0
+    from core.screenshot_files import read_frame_window
 
-    rep_event = _get_nearest_event(rep_ts)
+    process_name, window_title = read_frame_window(representative)
+    rep_event = _get_nearest_event(rep_ts, process_name=process_name)
     if rep_event is None:
         print(f"  [screenshot_processor] No nearby event for {representative.name} — creating screenshot_analysis event")
-        rep_event = _create_screenshot_event(rep_ts)
+        rep_event = _create_screenshot_event(rep_ts, process_name=process_name, title=window_title)
     else:
         print(
             f"  [screenshot_processor] {representative.name} -> attaching to "
             f"{rep_event['event_type']} [{rep_event['event_id'][:8]}]"
-            + (f" | group of {len(group)}" if len(group) > 1 else "")
         )
 
     try:
@@ -384,11 +412,6 @@ def _process_group(group: list[Path]) -> bool:
         return False
     activity = verdict.get("user_activity", "")[:80]
     print(f"  [screenshot_processor] {verdict['verdict']} | {activity}")
-
-
-    for path in group[:-1]:
-        delete_screenshot_files(path, include_text=False)
-        print(f"  [screenshot_processor] dropped similar screenshot {path.name}")
     release_text_sidecars(representative)
     return _mark_as_processed(representative)
 
@@ -449,16 +472,6 @@ def screenshot_processor_loop():
         # when OCR specifically is skipped.
         time.sleep(POLL_SECS * load_backoff_multiplier())
 
-        saved = [
-            path for path in _SCREENSHOT_DIR.glob("*.jpg")
-            if _screenshot_timestamp_ms(path) is not None
-        ]
-        if len(saved) > 1:
-            with timed("processor.hash_backlog"):
-                saved_hashes = _compute_all_hashes(saved)
-            with timed("processor.group_backlog"):
-                _collapse_saved_lookalikes(saved, saved_hashes)
-
         all_unprocessed = _get_unprocessed_screenshots()
         depth = len(all_unprocessed)
         set_gauge("screenshot_queue.depth", depth)
@@ -474,10 +487,9 @@ def screenshot_processor_loop():
                     f"backlogged — processing is falling behind capture rate"
                 )
 
-        with timed("processor.hash_backlog"):
-            hashes = _compute_all_hashes(all_unprocessed)
-        with timed("processor.group_backlog"):
-            groups = _group_by_similarity(all_unprocessed, hashes)
+        # Each file is its own frame. Covered frames are marked once their
+        # text is in, and deleted later. Looking the same is not enough.
+        groups = [[path] for path in all_unprocessed]
         set_gauge("screenshot_queue.groups", len(groups))
 
 

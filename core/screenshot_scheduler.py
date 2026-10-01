@@ -54,14 +54,16 @@ ACTIVITY_DEBOUNCE_SECONDS = 2.0
 IDLE_STRETCH_AFTER_SECS = 120.0
 IDLE_BACKGROUND_GAP_SECS = 300.0
 BACKGROUND_POLL_SECS = 10.0
-PURGE_EVERY_SECS = 60.0
+# Retention is measured in days. Scanning every image and its event once a
+# minute stalls the capture thread for work that can wait an hour.
+PURGE_EVERY_SECS = 3600.0
 
 
 try:
-    from core.privacy_settings import is_clippy_window, should_redact_window
+    from core.privacy_settings import dev_electron_is_clippy, hides_screen_text, is_clippy_window, should_redact_window
 except ImportError:
     # Redaction rules (Clippy window + user privacy toggles) live in privacy_settings.
-    from privacy_settings import is_clippy_window, should_redact_window
+    from privacy_settings import dev_electron_is_clippy, hides_screen_text, is_clippy_window, should_redact_window
 try:
     from core.secret_fields import paint_screen_rects
     from core.secret_patterns import auth_page_label, paint_secret_text
@@ -69,29 +71,24 @@ except ImportError:
     from secret_fields import paint_screen_rects
     from secret_patterns import auth_page_label, paint_secret_text
 try:
-    from core.accessibility_text import collect_redaction_safe, extract_accessibility_text
+    from core.accessibility_text import collect_redaction, extract_accessibility_text
     from core.app_settings import get_capture_settings, should_watch_process
     from core.ocr_crop import save_crop_metadata
-    from core.uia_worker import submit_uia_job
 except ImportError:
-    from accessibility_text import collect_redaction_safe, extract_accessibility_text
+    from accessibility_text import collect_redaction, extract_accessibility_text
     from app_settings import get_capture_settings, should_watch_process
     from ocr_crop import save_crop_metadata
-    from uia_worker import submit_uia_job
 
 _lock = threading.Lock()
-_typing_lock = threading.Lock()
+_walk_lock = threading.Lock()
 _last_capture_ms = 0
-_last_capture_hash = None
 _last_capture_path: Path | None = None
-_last_redaction_key = ""
-_last_redaction: dict | None = None
-_last_redaction_at = 0.0
-# Same window: paint the rects we already found instead of walking UIA again.
-_REDACTION_REUSE_SECS = 30.0
 _activity_timer: threading.Timer | None = None
-_typing_active = False
-_typing_frames: list[dict] = []
+# Frames whose text has been stored. A covered frame is marked, then deleted
+# on a later sweep, so a walk still in flight is not removed out from under itself.
+_kept_frames: list[dict] = []
+_FRAME_MEMORY = 200
+DISCARD_AFTER_SECONDS = 90.0
 _TITLE_NOISE = re.compile(r"(\s+[-–—*].*|\s+\*)$")
 
 
@@ -122,12 +119,14 @@ def same_typing_surface(earlier_key: str, later_key: str) -> bool:
 
 
 def is_text_continuation(earlier: str, later: str) -> bool:
-    """True when the later screen text still contains the earlier draft."""
+    """True when the later screen text still contains the earlier draft.
+
+    An empty earlier read is not a draft. Covering it would delete a frame
+    whose walk failed.
+    """
     old = " ".join((earlier or "").split()).casefold()
     new = " ".join((later or "").split()).casefold()
-    if not old:
-        return True
-    if not new:
+    if not old or not new:
         return False
     if old in new:
         return True
@@ -138,8 +137,26 @@ def is_text_continuation(earlier: str, later: str) -> bool:
     return shared >= max(12, int(len(old) * 0.8))
 
 
+def text_covers(earlier: str, later: str) -> bool:
+    """True when every line of the earlier text is still in the later text.
+
+    Order can change when a later walk puts the edit first. A line that
+    scrolled off the screen is not covered, so that frame stays.
+    """
+    if is_text_continuation(earlier, later):
+        return True
+    old = [line.casefold() for line in (earlier or "").splitlines() if line.strip()]
+    new = "\n".join(line.casefold() for line in (later or "").splitlines() if line.strip())
+    if not old or not new:
+        return False
+    return all(line in new for line in old)
+
+
 def superseded_typing_paths(frames: list[dict]) -> list[Path]:
-    """Earlier frames fully covered by the latest shot on the same tab."""
+    """Earlier frames fully covered by the latest shot on the same tab.
+
+    This only names them. Capture marks those frames and deletes them later.
+    """
     if len(frames) < 2:
         return []
     latest = frames[-1]
@@ -147,7 +164,7 @@ def superseded_typing_paths(frames: list[dict]) -> list[Path]:
         return []
     drop: list[Path] = []
     for earlier in frames[:-1]:
-        if same_typing_surface(str(earlier.get("window_key") or ""), str(latest.get("window_key") or "")) and is_text_continuation(
+        if same_typing_surface(str(earlier.get("window_key") or ""), str(latest.get("window_key") or "")) and text_covers(
             str(earlier.get("text") or ""), str(latest.get("text") or "")
         ):
             path = earlier.get("path")
@@ -156,65 +173,133 @@ def superseded_typing_paths(frames: list[dict]) -> list[Path]:
     return drop
 
 
-def _delete_screenshot(path: Path) -> None:
-    from core.screenshot_files import delete_screenshot_files
-
-    delete_screenshot_files(path, include_text=False)
-
-
-def _forget_typing_frame(path: Path) -> None:
-    global _typing_frames
-    _typing_frames = [frame for frame in _typing_frames if Path(frame.get("path")) != path]
-
-
-def _replace_similar_screenshot(previous: Path, path: Path) -> Path:
-    """Drop the older lookalike and keep ``path``.
-
-    If the older frame was already stored on an event, point that event at the
-    new image and mark the new file processed so it does not become a second event.
-    """
-    global _last_capture_path
-    from core.screenshot_files import (
-        capture_stem,
-        delete_screenshot_files,
-        retarget_screenshot_filename,
-    )
-
-    stem = capture_stem(previous)
-    was_processed = (previous.parent / f"{stem}_processed.jpg").is_file()
-    old_names = [f"{stem}.jpg", f"{stem}_processed.jpg"]
-    delete_screenshot_files(previous, include_text=False)
-    _forget_typing_frame(previous)
-    increment("screenshots.deduplicated")
-    kept = path
-    if was_processed:
-        kept = path.with_name(f"{path.stem}_processed.jpg")
-        try:
-            path.replace(kept)
-        except OSError:
-            kept = path
-        retarget_screenshot_filename(old_names, kept.name)
-        for frame in _typing_frames:
-            if Path(frame.get("path")) == path:
-                frame["path"] = kept
+def _note_frame(path: Path, key: str, text: str, *, pending: bool) -> None:
     with _lock:
-        _last_capture_path = kept
-    print(f"[capture] replaced similar screenshot {previous.name} with {kept.name}")
-    return kept
+        found = None
+        for frame in _kept_frames:
+            if Path(frame.get("path")) == path:
+                found = frame
+                break
+        if found is None:
+            _kept_frames.append(
+                {
+                    "path": path,
+                    "window_key": key,
+                    "text": text,
+                    "pending": pending,
+                    "marked_at": None,
+                }
+            )
+        else:
+            found["window_key"] = key or found.get("window_key") or ""
+            if text.strip():
+                found["text"] = text
+            found["pending"] = pending
+        while len(_kept_frames) > _FRAME_MEMORY:
+            drop_at = next(
+                (index for index, frame in enumerate(_kept_frames) if not frame.get("marked_at")),
+                None,
+            )
+            if drop_at is None:
+                break
+            _kept_frames.pop(drop_at)
 
 
-def _discard_superseded_typing_frames() -> None:
-    drop = superseded_typing_paths(_typing_frames)
-    for path in drop:
-        _delete_screenshot(path)
-        increment("screenshots.typing_superseded")
-        print(f"[capture] discarded superseded typing frame {path.name}")
+def _mark_covered_frames() -> None:
+    """Mark an earlier frame when a later one on the same tab still contains it."""
+    with _lock:
+        for index, earlier in enumerate(_kept_frames):
+            if earlier.get("marked_at") or earlier.get("pending"):
+                continue
+            earlier_text = str(earlier.get("text") or "")
+            if not earlier_text.strip():
+                continue
+            for later in _kept_frames[index + 1 :]:
+                if later.get("pending"):
+                    continue
+                later_text = str(later.get("text") or "")
+                if not later_text.strip():
+                    continue
+                if not same_typing_surface(str(earlier.get("window_key") or ""), str(later.get("window_key") or "")):
+                    continue
+                if text_covers(earlier_text, later_text):
+                    earlier["marked_at"] = time.time()
+                    break
 
 
-def _remember_typing_frame(path: Path, key: str, text: str) -> None:
-    if not _typing_active:
-        return
-    _typing_frames.append({"path": path, "window_key": key, "text": text})
+def _delete_marked_frame(path: Path) -> None:
+    from core.screenshot_files import capture_stem, delete_screenshot_files, image_names
+
+    raw_name, processed_name = image_names(capture_stem(path))
+    delete_screenshot_files(path, include_text=True)
+    try:
+        from core.storage import conn
+
+        conn.execute(
+            "UPDATE events SET screenshot_filename = NULL WHERE screenshot_filename IN (?, ?)",
+            (raw_name, processed_name),
+        )
+        conn.commit()
+    except Exception:
+        pass
+    increment("screenshots.typing_superseded")
+    print(f"[capture] deleted covered frame {path.name}")
+
+
+def sweep_discarded_frames() -> None:
+    """Delete frames that were marked covered long enough ago to be finished."""
+    now = time.time()
+    due: list[Path] = []
+    with _lock:
+        kept: list[dict] = []
+        for frame in _kept_frames:
+            marked = frame.get("marked_at")
+            path = frame.get("path")
+            if (
+                marked
+                and not frame.get("pending")
+                and path is not None
+                and now - float(marked) >= DISCARD_AFTER_SECONDS
+            ):
+                due.append(Path(path))
+                continue
+            kept.append(frame)
+        _kept_frames[:] = kept
+    for path in due:
+        _delete_marked_frame(path)
+
+
+def _commit_frame_text(
+    path: Path,
+    key: str,
+    redaction: dict,
+    *,
+    monitor: dict | None = None,
+    image_size: tuple[int, int] | None = None,
+) -> None:
+    """Store this walk on the frame that started it, then mark what it covers."""
+    from core.uia_worker import _write_accessibility_text
+
+    text = str(redaction.get("redacted_text") or "")
+    bounds = redaction.get("content_bounds")
+    if (
+        monitor
+        and image_size
+        and isinstance(bounds, (list, tuple))
+        and len(bounds) == 4
+        and path.is_file()
+    ):
+        save_crop_metadata(
+            path,
+            image_width=image_size[0],
+            image_height=image_size[1],
+            monitor=monitor,
+            a11y_bounds=tuple(int(value) for value in bounds),
+        )
+    if text.strip():
+        _write_accessibility_text(path, text)
+    _note_frame(path, key, text, pending=False)
+    _mark_covered_frames()
 
 
 def _foreground_accessibility_text() -> str:
@@ -224,7 +309,12 @@ def _foreground_accessibility_text() -> str:
         return ""
     process_name = metadata.get("process_name", "")
     title = metadata.get("current_window_title", "")
-    if is_clippy_window(process_name, title) or should_redact_window(process_name, title):
+    executable = _process_executable(_foreground_hwnd())
+    if (
+        is_clippy_window(process_name, title)
+        or should_redact_window(process_name, title)
+        or dev_electron_is_clippy(process_name, executable)
+    ):
         return ""
     from core.private_windows import window_is_private
 
@@ -242,7 +332,11 @@ def _foreground_accessibility_text() -> str:
     )
     if current_key != original_key:
         return ""
-    if is_clippy_window(current_key[0], current_key[1]) or should_redact_window(current_key[0], current_key[1]):
+    if (
+        is_clippy_window(current_key[0], current_key[1])
+        or should_redact_window(current_key[0], current_key[1])
+        or dev_electron_is_clippy(current_key[0], "")
+    ):
         return ""
     return captured_text
 
@@ -282,8 +376,16 @@ def _redact_clippy_windows(img: Image.Image, monitor: dict) -> None:
             from core.private_windows import window_is_private
 
             private_window = window_is_private(hwnd, name)
-            if is_clippy_window(name, title):
-                # Only obscure Clippy when the user is actually looking at it
+            executable = ""
+            from core.process_names import process_key
+
+            if process_key(name) == "electron":
+                try:
+                    executable = psutil.Process(pid).exe() or ""
+                except Exception:
+                    executable = ""
+            if is_clippy_window(name, title) or dev_electron_is_clippy(name, executable):
+                # Only obscure Clippy when the user is actually looking at it.
                 # A hidden or minimized window does not occupy the saved pixels.
                 if hwnd != foreground_hwnd:
                     return
@@ -340,6 +442,53 @@ def _redact_clippy_windows(img: Image.Image, monitor: dict) -> None:
             paint_screen_rects(img, monitor, [tuple(bounds)], allow_large=True)
 
 
+def _process_executable(hwnd: int | None) -> str:
+    """Path of the foreground process. Empty when it cannot be read."""
+    if not hwnd or not IS_WINDOWS:
+        return ""
+    try:
+        import psutil
+        import win32process
+
+        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        return psutil.Process(pid).exe() or ""
+    except Exception:
+        return ""
+
+
+def _hwnd_title(hwnd: int) -> str:
+    if not IS_WINDOWS:
+        return ""
+    try:
+        import win32gui
+
+        return win32gui.GetWindowText(int(hwnd)) or ""
+    except Exception:
+        return ""
+
+
+def _walk_still_matches(job: dict) -> bool:
+    """True when this walk is still the window the JPEG was taken from.
+
+    A queued walk can run after the person has switched apps or tabs.
+    That tree belongs to the new window, so it must not be stored on this frame.
+    Jobs without a captured title are the older callers and still run.
+    """
+    if "title" not in job and "process" not in job:
+        return True
+    hwnd = job.get("hwnd")
+    if not isinstance(hwnd, int):
+        return False
+    current = _foreground_hwnd()
+    if isinstance(current, int) and int(current) != int(hwnd):
+        return False
+    title = str(job.get("title") or "")
+    if not title:
+        return True
+    live = _hwnd_title(hwnd)
+    return not live or live == title
+
+
 def _foreground_hwnd() -> int | None:
     """Cheap window handle for the UIA worker to target later — no UIA involved.
 
@@ -356,58 +505,204 @@ def _foreground_hwnd() -> int | None:
         return None
 
 
+def _empty_redaction(**flags) -> dict:
+    found = {
+        "edit_rects": [],
+        "secret_rects": [],
+        "redacted_text": "",
+        "content_bounds": None,
+    }
+    found.update(flags)
+    return found
+
+
 def _field_redaction(hwnd: int | None, frame_window_key: str, timeout: float) -> dict:
-    """Rects to black out before the JPEG is saved.
+    """Walk this window once. The text is stored on the frame that started the walk.
 
-    The same window reuses the last finished walk for a short while. A walk
-    that does not finish still returns a dict, so the frame is kept.
+    A second capture does not start another walk, and it does not copy the
+    previous walk's text onto a new picture. ``frame_window_key`` is recorded
+    when the JPEG exists, so a slow walk cannot land on a later frame.
     """
-    global _last_redaction_key, _last_redaction, _last_redaction_at
-    now = time.time()
-    with _lock:
-        if (
-            frame_window_key
-            and frame_window_key == _last_redaction_key
-            and _last_redaction is not None
-            and (now - _last_redaction_at) < _REDACTION_REUSE_SECS
-        ):
-            increment("screenshots.redaction_reused")
-            return _last_redaction
+    del frame_window_key
+    if not _walk_lock.acquire(blocking=False):
+        increment("screenshots.walk_busy")
+        return _empty_redaction(busy=True)
 
-    redaction = collect_redaction_safe(hwnd, timeout=timeout)
-    if redaction is None:
+    slot = {
+        "result": None,
+        "path": None,
+        "key": "",
+        "monitor": None,
+        "image_size": None,
+        "walked": threading.Event(),
+        "saved": threading.Event(),
+    }
+
+    def _walker() -> None:
+        try:
+            if IS_WINDOWS:
+                import uiautomation as auto
+
+                with auto.UIAutomationInitializerInThread():
+                    slot["result"] = collect_redaction(hwnd)
+            else:
+                slot["result"] = collect_redaction(hwnd)
+        except Exception:
+            slot["result"] = None
+        finally:
+            slot["walked"].set()
+            slot["saved"].wait(30)
+            path = slot.get("path")
+            result = slot.get("result")
+            try:
+                if isinstance(path, Path) and isinstance(result, dict):
+                    size = slot.get("image_size")
+                    _commit_frame_text(
+                        path,
+                        str(slot.get("key") or ""),
+                        result,
+                        monitor=slot.get("monitor") if isinstance(slot.get("monitor"), dict) else None,
+                        image_size=size if isinstance(size, tuple) else None,
+                    )
+            finally:
+                _walk_lock.release()
+
+    worker = threading.Thread(target=_walker, daemon=True, name="a11y-walk")
+    try:
+        worker.start()
+    except Exception:
+        _walk_lock.release()
+        return _empty_redaction()
+    if not slot["walked"].wait(timeout):
         increment("screenshots.secret_scan_timeout")
         print("[capture] field scan did not finish; keeping frame")
-        with _lock:
-            if (
-                frame_window_key
-                and frame_window_key == _last_redaction_key
-                and _last_redaction is not None
-            ):
-                redaction = _last_redaction
-            else:
-                redaction = {"edit_rects": [], "secret_rects": [], "redacted_text": ""}
-            if frame_window_key:
-                _last_redaction_key = frame_window_key
-                _last_redaction = redaction
-                _last_redaction_at = time.time()
-        return redaction
-
-    with _lock:
-        if frame_window_key:
-            _last_redaction_key = frame_window_key
-            _last_redaction = redaction
-            _last_redaction_at = time.time()
-    return redaction
+        return _empty_redaction(pending=True, slot=slot)
+    result = slot["result"]
+    if not isinstance(result, dict):
+        return _empty_redaction(slot=slot)
+    found = dict(result)
+    found["slot"] = slot
+    return found
 
 
-def capture_screenshot(timestamp_ms: int, *, ignore_dedup: bool = False) -> Path | None:
-    """Save a frame. A similar frame from the last few minutes is replaced by this one.
+_WALK_QUEUE_MAX = 3
+_walk_jobs: list[dict] = []
+_walk_cv = threading.Condition()
+_walker_thread: threading.Thread | None = None
 
-    Typing captures pass ``ignore_dedup`` so a burst is not dropped entirely.
-    Those frames still collapse: the newest lookalike replaces the previous one.
-    """
-    del ignore_dedup
+
+def _ensure_walk_worker() -> None:
+    global _walker_thread
+    with _walk_cv:
+        if _walker_thread is not None and _walker_thread.is_alive():
+            return
+        _walker_thread = threading.Thread(target=_walk_loop, daemon=True, name="a11y-walk")
+        _walker_thread.start()
+
+
+def _enqueue_walk(job: dict) -> None:
+    """Queue this frame's tree walk. The JPEG is already on disk."""
+    dropped: list[dict] = []
+    with _walk_cv:
+        while len(_walk_jobs) >= _WALK_QUEUE_MAX:
+            dropped.append(_walk_jobs.pop(0))
+        _walk_jobs.append(job)
+        _walk_cv.notify()
+    for old in dropped:
+        path = old.get("path")
+        if isinstance(path, Path):
+            _note_frame(path, str(old.get("key") or ""), "", pending=False)
+    _ensure_walk_worker()
+
+
+def _walk_loop() -> None:
+    while True:
+        with _walk_cv:
+            while not _walk_jobs:
+                _walk_cv.wait()
+            job = _walk_jobs.pop(0)
+        try:
+            _run_walk_job(job)
+        except Exception as exc:
+            print(f"[capture] field scan failed: {exc}")
+            path = job.get("path")
+            if isinstance(path, Path):
+                _note_frame(path, str(job.get("key") or ""), "", pending=False)
+
+
+def _run_walk_job(job: dict) -> None:
+    """Walk the window that was in front when this JPEG was taken."""
+    path = job.get("path")
+    if not isinstance(path, Path) or not path.is_file():
+        return
+    if not _walk_still_matches(job):
+        print(f"[capture] skipped text for {path.name}; the window changed")
+        _note_frame(path, str(job.get("key") or ""), "", pending=False)
+        return
+    hwnd = job.get("hwnd")
+    try:
+        if IS_WINDOWS:
+            import uiautomation as auto
+
+            with auto.UIAutomationInitializerInThread():
+                result = collect_redaction(hwnd if isinstance(hwnd, int) else None)
+        else:
+            result = collect_redaction(hwnd if isinstance(hwnd, int) else None)
+    except Exception:
+        result = None
+    if not isinstance(result, dict):
+        _note_frame(path, str(job.get("key") or ""), "", pending=False)
+        return
+    monitor = job.get("monitor")
+    _paint_walk_onto_frame(path, result, monitor if isinstance(monitor, dict) else None)
+    size = job.get("image_size")
+    _commit_frame_text(
+        path,
+        str(job.get("key") or ""),
+        result,
+        monitor=monitor if isinstance(monitor, dict) else None,
+        image_size=size if isinstance(size, tuple) else None,
+    )
+
+
+def _paint_walk_onto_frame(path: Path, redaction: dict, monitor: dict | None) -> None:
+    """Black out secret fields once the walk knows where they are."""
+    edit_rects = redaction.get("edit_rects") or []
+    secret_rects = redaction.get("secret_rects") or []
+    text = str(redaction.get("redacted_text") or "")
+    if not edit_rects and not secret_rects and not text.strip():
+        return
+    if not isinstance(monitor, dict):
+        return
+    try:
+        img = Image.open(path).convert("RGB")
+        if edit_rects:
+            paint_screen_rects(img, monitor, edit_rects)
+        if secret_rects:
+            paint_screen_rects(img, monitor, secret_rects, allow_large=True)
+        if text.strip():
+            paint_secret_text(img, text)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+        path.write_bytes(buf.getvalue())
+    except Exception as exc:
+        print(f"[capture] could not paint fields on {path.name}: {exc}")
+
+
+def _release_walk_slot(slot: dict | None, path: Path | None, key: str, monitor: dict, image_size: tuple[int, int]) -> None:
+    """Hand the finished JPEG to the walk, or let the walk exit if there is no file."""
+    if not slot:
+        return
+    if path is not None:
+        slot["path"] = path
+        slot["key"] = key
+        slot["monitor"] = monitor
+        slot["image_size"] = image_size
+    slot["saved"].set()
+
+
+def capture_screenshot(timestamp_ms: int) -> Path | None:
+    """Save the JPEG now. Walk that window afterwards, without blocking the next frame."""
     settings = get_capture_settings()
     if not settings["capture_screenshots"]:
         return None
@@ -415,31 +710,54 @@ def capture_screenshot(timestamp_ms: int, *, ignore_dedup: bool = False) -> Path
     process_name = (foreground or {}).get("process_name") or ""
     if process_name and not should_watch_process(process_name):
         return None
+    # Cursor and VS Code hide the open file until this setting is on.
+    from core.editor_accessibility import ensure_screen_reader_support
+
+    ensure_screen_reader_support(process_name)
     try:
         with timed("screenshot.total"):
             # monitor 0 is the virtual desktop; monitor 1 is the primary display.
             # The setting keeps the default capture cost low for multi-monitor Macs.
+            hwnd_before = _foreground_hwnd()
+            metadata_before = get_window_metadata()
             with timed("screenshot.grab"):
                 with mss.mss() as sct:
                     settings = get_capture_settings()
-                    monitor = sct.monitors[0] if settings["capture_all_monitors"] else (sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0])
+                    monitor = dict(
+                        sct.monitors[0]
+                        if settings["capture_all_monitors"]
+                        else (sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0])
+                    )
                     screenshot = sct.grab(monitor)
                     img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
 
-            hwnd = _foreground_hwnd()
-            metadata = get_window_metadata()
+            hwnd_after = _foreground_hwnd()
+            window_changed = (
+                isinstance(hwnd_before, int)
+                and isinstance(hwnd_after, int)
+                and int(hwnd_before) != int(hwnd_after)
+            )
+            hwnd = hwnd_before or hwnd_after
+            metadata = metadata_before or get_window_metadata()
             from core.private_windows import window_is_private
 
             foreground_private = window_is_private(
                 hwnd, (metadata or {}).get("process_name") or ""
             )
+            foreground_process = (metadata or {}).get("process_name") or ""
+            foreground_title = (metadata or {}).get("current_window_title") or ""
+            hide_text = foreground_private or hides_screen_text(
+                foreground_process,
+                foreground_title,
+                _process_executable(hwnd),
+            )
             page_label = auth_page_label((metadata or {}).get("active_url") or "")
             redacted_text = ""
-            content_bounds = None
+            defer_walk = False
             with timed("screenshot.redaction"):
                 _redact_clippy_windows(img, monitor)
-                if foreground_private:
-                    # The window is already black. Do not read its page.
+                if hide_text:
+                    # The window is already black. Do not read its tree.
                     redacted_text = ""
                 elif page_label:
                     # The address is the auth page. Black that window.
@@ -462,88 +780,51 @@ def capture_screenshot(timestamp_ms: int, *, ignore_dedup: bool = False) -> Path
                     paint_screen_rects(img, monitor, [rect], allow_large=True)
                     redacted_text = page_label
                 else:
-                    with timed("screenshot.secret_fields"):
-                        redaction = _field_redaction(
-                            hwnd,
-                            window_key(metadata) if metadata else "",
-                            float(settings["uia_timeout_seconds"]),
-                        )
-                    paint_screen_rects(img, monitor, redaction.get("edit_rects") or [])
-                    paint_screen_rects(
-                        img,
-                        monitor,
-                        redaction.get("secret_rects") or [],
-                        allow_large=True,
-                    )
-                    redacted_text = redaction.get("redacted_text") or ""
-                    content_bounds = redaction.get("content_bounds")
-                if not foreground_private:
+                    # The pixels are the window from before the grab. A switch
+                    # during the grab means the tree would describe the new one.
+                    defer_walk = not window_changed
+                if redacted_text and not foreground_private:
                     with timed("screenshot.secret_text"):
                         paint_secret_text(img, redacted_text)
-
-            # Hash after redaction so privacy changes are reflected in the
-            # duplicate-frame decision. A similar recent frame is replaced by
-            # this one so the newest image is the one that stays.
-            with timed("screenshot.hash"):
-                from core.screenshot_files import (
-                    PHASH_SIMILAR_DISTANCE,
-                    SIMILAR_FRAME_WINDOW_MS,
-                    perceptual_hash,
-                    screenshot_stamp_ms,
-                )
-
-                digest = perceptual_hash(img)
-            global _last_capture_hash, _last_capture_path
-
-            with _lock:
-                previous = _last_capture_path
-                previous_ms = screenshot_stamp_ms(previous) if previous is not None else None
-                similar = (
-                    previous is not None
-                    and previous_ms is not None
-                    and abs(timestamp_ms - previous_ms) <= SIMILAR_FRAME_WINDOW_MS
-                    and _last_capture_hash is not None
-                    and (digest - _last_capture_hash) <= PHASH_SIMILAR_DISTANCE
-                )
 
             path = _SCREENSHORT_DIR / f"{timestamp_ms}.jpg"
             with timed("screenshot.jpeg_write"):
                 buf = io.BytesIO()
                 img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
                 path.write_bytes(buf.getvalue())
-            # Secret text was already removed above. The active tile found
-            # during that walk is the OCR crop; the worker stores the text.
             with timed("screenshot.crop_metadata"):
                 save_crop_metadata(
                     path,
                     image_width=img.width,
                     image_height=img.height,
                     monitor=monitor,
-                    a11y_bounds=content_bounds,
+                    a11y_bounds=None,
                 )
-            if metadata:
-                process_name = metadata.get("process_name", "")
-                title = metadata.get("current_window_title", "")
-                if not foreground_private and not (
-                    is_clippy_window(process_name, title) or should_redact_window(process_name, title)
-                ):
-                    with timed("screenshot.uia_submit"):
-                        submit_uia_job(
-                            path,
-                            hwnd=hwnd,
-                            expected_window_key=window_key(metadata),
-                            image_width=img.width,
-                            image_height=img.height,
-                            monitor=monitor,
-                            redacted_text=redacted_text,
-                            content_bounds=content_bounds,
-                        )
+            frame_key = window_key(metadata) if metadata else ""
+            from core.screenshot_files import write_frame_window
+
+            write_frame_window(path, foreground_process, foreground_title)
+            if defer_walk:
+                _note_frame(path, frame_key, "", pending=True)
+                _enqueue_walk(
+                    {
+                        "hwnd": hwnd,
+                        "path": path,
+                        "key": frame_key,
+                        "monitor": monitor,
+                        "image_size": (img.width, img.height),
+                        "process": foreground_process,
+                        "title": foreground_title,
+                    }
+                )
+            elif str(redacted_text).strip():
+                from core.uia_worker import _write_accessibility_text
+
+                _write_accessibility_text(path, redacted_text)
+                _note_frame(path, frame_key, redacted_text, pending=False)
+                _mark_covered_frames()
             with _lock:
-                _last_capture_hash = digest
                 _last_capture_path = path
-                _remember_typing_frame(path, window_key(metadata) if metadata else "unknown", redacted_text)
-            if similar and previous is not None:
-                path = _replace_similar_screenshot(previous, path)
             increment("screenshots.captured")
             return path
     except Exception as e:
@@ -552,66 +833,90 @@ def capture_screenshot(timestamp_ms: int, *, ignore_dedup: bool = False) -> Path
         return None
 
 
-def _capture_if_not_recent() -> None:
+def _reserve_capture(ignore_gap: bool = False) -> tuple[int, int] | None:
+    """Claim a capture timestamp. Returns (now_ms, previous_ms), or None if too soon."""
     global _last_capture_ms
+    settings = get_capture_settings()
+    with _lock:
+        now_ms = int(time.time() * 1000)
+        previous = _last_capture_ms
+        if not ignore_gap and now_ms - previous < settings["min_gap_seconds"] * 1000:
+            return None
+        _last_capture_ms = now_ms
+        return now_ms, previous
+
+
+def _restore_capture_clock(now_ms: int, previous: int) -> None:
+    global _last_capture_ms
+    with _lock:
+        if _last_capture_ms == now_ms:
+            _last_capture_ms = previous
+
+
+def _capture_if_not_recent() -> None:
     settings = get_capture_settings()
     if not settings["capture_screenshots"]:
         return
-    # Reserve the timestamp before image work so concurrent activity callbacks
-    # cannot start overlapping captures.
-    with _lock:
-        now_ms = int(time.time() * 1000)
-        if now_ms - _last_capture_ms < settings["min_gap_seconds"] * 1000:
-            return
-        _last_capture_ms = now_ms
+    reserved = _reserve_capture()
+    if reserved is None:
+        return
+    now_ms, previous = reserved
+    if capture_screenshot(now_ms) is None:
+        _restore_capture_clock(now_ms, previous)
 
-
-    capture_screenshot(now_ms)
 
 def _capture_typing_frame() -> Path | None:
-    """A typing frame ignores the idle gap and the near-duplicate check.
-
-    Five new characters often do not move the image hash, and the closing
-    frame has to be stored before the opening one can be judged redundant.
-    """
-    global _last_capture_ms
+    """Save the screen for a typing pause or a character checkpoint."""
     settings = get_capture_settings()
     if not settings["capture_screenshots"]:
         return None
-    with _lock:
-        now_ms = int(time.time() * 1000)
-        _last_capture_ms = now_ms
-    return capture_screenshot(now_ms, ignore_dedup=True)
+    reserved = _reserve_capture(ignore_gap=True)
+    if reserved is None:
+        return None
+    now_ms, previous = reserved
+    path = capture_screenshot(now_ms)
+    if path is None:
+        _restore_capture_clock(now_ms, previous)
+    return path
 
 
-def begin_typing_capture(still_current=None) -> None:
-    """Save the screen once a burst has enough typed characters to matter."""
-    global _typing_active
-    with _typing_lock:
-        if still_current is not None and not still_current():
-            return
-        if _typing_active:
-            return
-        _typing_active = True
-        _capture_typing_frame()
+def checkpoint_typing_capture() -> None:
+    """Save the screen in the background after a long run of typing.
+
+    The keyboard listener must not wait on the accessibility walk.
+    """
+    threading.Thread(target=_capture_typing_frame, daemon=True, name="typing-checkpoint").start()
 
 
-def finish_typing_capture() -> None:
-    """Save the screen when the burst ends, then drop frames the latest one covers."""
-    global _typing_active
-    with _typing_lock:
-        saved = _capture_typing_frame()
-        if saved is not None:
-            _discard_superseded_typing_frames()
-        _typing_active = False
-        _typing_frames.clear()
+def finish_typing_capture(hwnd: int | None = None) -> bool:
+    """Save the screen when a burst pauses, while that window is still in front.
+
+    A tab change has already dropped the previous document from the tree.
+    The checkpoint taken while typing is what keeps that text.
+    """
+    current = _foreground_hwnd()
+    if hwnd and current and int(hwnd) != int(current):
+        return False
+    return _capture_typing_frame() is not None
 
 
 def purge_expired_screenshots() -> None:
     # Filenames begin with epoch milliseconds. Base retention is short; frames
     # linked to high-signal events get an adaptive TTL (see screenshot_ttl).
     # OCR remains on events.vision_ocr_text after the JPEG is deleted.
+    # Expired event and session rows are deleted on this same pass. Capture
+    # used to do that only once, at startup.
     from core.screenshot_ttl import should_purge_screenshot
+    from core.storage import purge_expired
+
+    try:
+        purge_expired()
+    except Exception as e:
+        print(f"Error purging expired events: {e}")
+    try:
+        sweep_discarded_frames()
+    except Exception as e:
+        print(f"Error sweeping covered frames: {e}")
 
     settings = get_capture_settings()
     now_ms = int(time.time() * 1000)
@@ -736,6 +1041,8 @@ def start_background_capture() -> None:
                     flush=True,
                 )
             _capture_if_not_recent()
+
+        sweep_discarded_frames()
 
         now = time.time()
         if now - last_purge_at >= PURGE_EVERY_SECS:

@@ -1,9 +1,13 @@
-"""Divide a window into tiles from its accessibility tree and keep the active one.
+"""Divide a window into tiles from its accessibility tree.
 
 An accessibility tree is a map. Wrapper nodes repeat the window rectangle;
 the panes below them tile it: a sidebar, an editor, a terminal, a chat
-column. Text is stored from the tile where activity happened since the
-last walk of the same window. A denser tile is not a substitute.
+column. The active tile still decides the rectangle sent to OCR. Stored
+text is every pane that was read, with the active pane first, plus a
+text-holder buffer when that buffer is longer than the pane's labels.
+On a later walk of the same window, lines that changed come first, so the
+character cap keeps the edit instead of the file tree and the terminal.
+A full-window document is a wrapper and is not a second copy of the screen.
 
 The rules use geometry and control type only, so they hold for Electron,
 browsers, Office, and native apps alike.
@@ -28,6 +32,7 @@ from core.accessibility_text import (
     _pointer_inside,
     _resolve_activity_box,
     _text_from_control,
+    accessibility_lines,
     normalize_accessibility_text,
     prefer_active_text,
     rank_text_by_point,
@@ -47,8 +52,11 @@ MAX_TILE_NODES = 320
 MAX_TILE_DEPTH = 26
 # Text nodes read per tile. Small so twelve tiles still fit one walk.
 TILE_TEXT_NODES = 60
-# The caret's tile is the only one read when a caret exists.
+# The caret's tile is read more deeply. The other panes are still read.
 CARET_TILE_NODES = 160
+# One pass over text holders, shared by every tile. Pattern queries are
+# slower than reading a name, so the walk stays bounded.
+HOLDER_NODE_BUDGET = 800
 
 # Bars are never tiles. Their labels are not what the user is working on.
 BAR_CONTROL_TYPES = {
@@ -220,11 +228,43 @@ def _tile_pieces(tile: Tile, limit: int, visit) -> list[tuple[str, tuple | None]
     return pieces
 
 
+def _line_id(line: str) -> str:
+    return hashlib.blake2b(line.encode("utf-8", "ignore"), digest_size=8).hexdigest()
+
+
 def _line_set(text: str) -> frozenset[str]:
-    return frozenset(
-        hashlib.blake2b(line.encode("utf-8", "ignore"), digest_size=8).hexdigest()
-        for line in normalize_accessibility_text(text).splitlines()
-    )
+    return frozenset(_line_id(line) for line in normalize_accessibility_text(text).splitlines())
+
+
+def order_stored_text(lines: list[str], previous_ids: set[str]) -> str:
+    """Changed lines first, so the character cap keeps the edit.
+
+    A first look at a window keeps the original order (active pane, then the
+    others). A later look moves lines that were not in the previous walk to
+    the front. Unchanged file-tree and chrome lines fall off the end of the cap.
+    When nothing changed, the order stays put so a duplicate frame still reads
+    the same way.
+    """
+    if not previous_ids:
+        return "\n".join(lines)[:MAX_TEXT_CHARS]
+    fresh: list[str] = []
+    repeated: list[str] = []
+    for line in lines:
+        if _line_id(line) in previous_ids:
+            repeated.append(line)
+        else:
+            fresh.append(line)
+    if not fresh:
+        return "\n".join(lines)[:MAX_TEXT_CHARS]
+    return "\n".join(fresh + repeated)[:MAX_TEXT_CHARS]
+
+
+def _previous_line_ids(previous: dict) -> set[str]:
+    found: set[str] = set()
+    for entry in previous.values():
+        if entry and entry[0]:
+            found.update(entry[0])
+    return found
 
 
 def _read_tiles(tiles: list[Tile], point: tuple[int, int] | None, limit: int, visit) -> None:
@@ -338,6 +378,57 @@ def _winner_text(tile: Tile, activity_box, center) -> str:
     return tile.text
 
 
+def _holder_buffers(scope) -> list[str]:
+    """TextPattern buffers of edit and document controls that are real panes.
+
+    A document that covers the window is the window again (menus, title,
+    the same labels the tiles already have). Small and mid-size holders
+    are the editor, the terminal, and a canvas whose name is only a label.
+    """
+    frame = _control_bounds(scope)
+    frame_area = _box_area(frame) if frame is not None else 0
+    try:
+        stack = list(scope.GetChildren())
+    except Exception:
+        return []
+    found: list[str] = []
+    seen = 0
+    while stack and seen < HOLDER_NODE_BUDGET:
+        control = stack.pop()
+        seen += 1
+        try:
+            stack.extend(control.GetChildren())
+        except Exception:
+            pass
+        if _control_type_name(control) not in _TEXT_HOLDER_TYPES:
+            continue
+        box = _control_bounds(control)
+        if frame_area and box is not None and _box_area(box) >= frame_area * WRAPPER_SHARE:
+            continue
+        text = _text_from_control(control, patterns=True)
+        if text.strip():
+            found.append(text)
+    return found
+
+
+def _stored_pane_text(
+    winners: list[Tile],
+    tiles: list[Tile],
+    holders: list[str],
+    previous_ids: set[str],
+) -> str:
+    """Active pane first, then the other panes. Later walks lead with what changed."""
+    rest_tiles = [tile for tile in tiles if tile not in winners and tile.text.strip()]
+    rest_tiles.sort(key=lambda tile: len(tile.text), reverse=True)
+    holders_by_length = sorted((text for text in holders if text.strip()), key=len, reverse=True)
+    lines = accessibility_lines(
+        *(tile.text for tile in winners),
+        *(tile.text for tile in rest_tiles),
+        *holders_by_length,
+    )
+    return order_stored_text(lines, previous_ids)
+
+
 def choose_active_tile(
     scope,
     *,
@@ -347,11 +438,12 @@ def choose_active_tile(
     pointer: tuple[int, int] | None = None,
     visit=None,
 ) -> TileChoice:
-    """Text and rectangle of the tile(s) with the most activity.
+    """Text of every pane, and the rectangle of the tile with the most activity.
 
     ``window`` keys the memory of the last walk. The first walk of a window
-    has no text history, so caret, focus, and pointer decide. With a caret,
-    only its tile is read: the other tiles cannot outscore it.
+    has no text history, so caret, focus, and pointer decide which rectangle
+    OCR should use. Every tile is still read. A caret does not discard the
+    editor, the terminal, or a chat column that sits in another pane.
     """
     tiles = discover_tiles(scope)
     if not tiles:
@@ -365,9 +457,16 @@ def choose_active_tile(
     )
     if caret_tiles:
         _read_tiles(caret_tiles, point, CARET_TILE_NODES, visit)
+        others = [tile for tile in tiles if tile not in caret_tiles]
+        if others:
+            _read_tiles(others, point, TILE_TEXT_NODES, visit)
     else:
         limit = max(24, min(TILE_TEXT_NODES, 240 // len(tiles)))
         _read_tiles(tiles, point, limit, visit)
+    for tile in tiles:
+        excerpt = _winner_text(tile, activity_box, center)
+        if excerpt.strip():
+            tile.text = excerpt
     previous = _remember(window, tiles)
     score_tiles(
         tiles,
@@ -377,12 +476,12 @@ def choose_active_tile(
         pointer=pointer,
     )
     winners = pick_winners(tiles)
-    text = normalize_accessibility_text(*(_winner_text(tile, activity_box, center) for tile in winners))
-    return TileChoice(text[:MAX_TEXT_CHARS], _union([tile.bounds for tile in winners]), tiles, winners)
+    text = _stored_pane_text(winners, tiles, _holder_buffers(scope), _previous_line_ids(previous))
+    return TileChoice(text, _union([tile.bounds for tile in winners]), tiles, winners)
 
 
 def active_screen_text(root, focused, document, *, window: str, visit=None) -> TileChoice:
-    """Foreground text limited to the active tile, plus that tile's rectangle."""
+    """Foreground pane text, plus the active tile's rectangle for the OCR crop."""
     scope = document if document is not None else root
     if scope is None:
         return TileChoice("", None, [], [])
