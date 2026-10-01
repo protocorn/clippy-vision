@@ -232,6 +232,32 @@ def is_clippy_window(process_name: str, window_title: str) -> bool:
     return any(pat in title for pat in ALWAYS_REDACT_TITLE_PATTERNS if pat)
 
 
+def dev_electron_is_clippy(process_name: str, executable: str = "") -> bool:
+    """True for ``npm start``, which runs as electron.exe inside this repo.
+
+    The packaged app is ``Clippy Vision.exe`` and matches ``is_clippy_window``
+    by process name. A bare electron.exe is also used by other apps, so the
+    executable path has to be this project's.
+    """
+    from core.process_names import process_key
+
+    if process_key(process_name) != "electron":
+        return False
+    path = (executable or "").replace("/", "\\").casefold()
+    return any(token in path for token in ("clippy vision", "clippy_vision", "clippy-vision"))
+
+
+def hides_screen_text(process_name: str, window_title: str, executable: str = "") -> bool:
+    """True when this window's accessibility text must not be stored.
+
+    The screenshot is already painted black. The tree walk is a separate
+    copy of the same window and has to stop here too.
+    """
+    if is_clippy_window(process_name, window_title) or dev_electron_is_clippy(process_name, executable):
+        return True
+    return should_redact_window(process_name, window_title)
+
+
 def should_redact_window(process_name: str, window_title: str) -> bool:
     """True if this window should be blacked out in screenshots.
 
