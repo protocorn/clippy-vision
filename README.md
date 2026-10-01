@@ -1,6 +1,6 @@
 # Clippy Vision
 
-> **A local, free, auditable memory layer for your AI agents.** It watches your work on-device, stores it privately, and lets Cursor, Claude Desktop, VS Code, or any MCP client search that memory. The desktop app captures, summarizes, and shows the timeline. There is no in-app chat.
+Clippy Vision watches your work on this computer, stores a searchable activity history locally, and lets you ask about it through a connected MCP client such as Cursor, Claude Desktop, or VS Code. The desktop app captures, summarizes, and shows the timeline.
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
@@ -10,58 +10,14 @@
 [![Open Source Helpers](https://www.codetriage.com/protocorn/clippy-vision/badges/users.svg)](https://www.codetriage.com/protocorn/clippy-vision)
 
 <p align="center">
-  <img src="assets/clippy-vision-demo.gif" alt="Clippy Vision demo" width="720" />
+  <img src="assets/clippy_vision_demo.png" alt="Explain less. Ask more. — an agent answering a LeetCode question from remembered screen activity, with nothing pasted into the chat" width="720" />
 </p>
 
----
+Ask in a connected MCP client, for example:
 
-## What is Clippy Vision?
-
-Clippy Vision is **infrastructure for personal context**: it watches your work, remembers it on-device, and answers from that memory.
-
-It passively observes active windows, clipboard, typing patterns, and screenshots, then builds a continuously updating store of what you actually did. A local model summarizes that activity on your machine. You ask questions through **MCP**: connect Cursor, Claude Desktop, VS Code, or any MCP client so that agent can search sessions, events, and long-term memory without you pasting context.
-
-If you never connect a client, Clippy still captures and remembers. The timeline in the app is how you see what was stored.
-
-Capture and the memory database stay on this computer. No API keys are required for that. If you connect a cloud agent, that agent receives the memory it asks for, after Clippy scrubs secrets and windows you marked private.
-
----
-
-## Asking from an agent you already use
-
-Claude, Cursor, and ChatGPT are strong at **reasoning**. They are weak at **knowing what was on your screen** unless you paste it in. Clippy fills that gap: it watches across apps and distills activity into searchable sessions and long-term facts.
-
-Connect once from the app. The agent calls Clippy's tools (`search_sessions`, `search_events`, memory recall, notes) over stdio MCP and pulls that history. Questions are not classified by an in-app router. The agent chooses the tool. Examples:
-
-- "What was I debugging before lunch?"
-- "Which paper URLs did I open while researching X?"
-- "What did I copy from Slack about the deploy?"
-
-| | Per-app history | Cloud chat alone | Clippy Vision |
-|--|--|--|--|
-| Sees | Names and timestamps, one app at a time | Whatever you paste or upload | Screen content across every app |
-| Who queries it | You, manually | You, by pasting | Your agent, through MCP |
-| Needs you to reconstruct context | Yes | Yes | No — already saw it |
-| Runs where | Local | Cloud | On your machine. A cloud agent receives only the replies it requests |
-| Best for | "Which tab did I open?" | "Help me solve / write / explain this" | "Get my real work history back into my agent" |
-
-Clippy does not replace Claude or ChatGPT. It feeds those tools the personal activity history they cannot see on their own.
-
-<p align="center">
-  <img src="assets/demo-product.png" alt="Clippy Vision reconstructing research across apps and files" width="720" />
-</p>
-
-<p align="center"><em>One question. Answer pulled from papers, chat tools, and a local notes file from the same research stretch.</em></p>
-
----
-
-<p align="center">
-  <img src="assets/demo-vs-claude-urls.png" alt="Clippy Vision vs Claude on a personal activity question" width="720" />
-</p>
-
-<p align="center"><em>Same kind of personal question. A connected app can answer from activity Clippy saw on your machine. A cloud chat has no record of that work unless you paste it in.</em></p>
-
-Your work is not stored in one place. It is spread across the browser, your IDE, local PDFs, terminal output, chat apps, notes, spreadsheets, and design tools. Clippy keeps one timeline across them, so you — in the app or via an MCP agent — can search what was on the screen — not just filenames — and reconstruct a whole stretch of work instead of hunting one artifact at a time.
+- "What was I working on before lunch?"
+- "Which hotels did I look at yesterday?"
+- "What was the error I encountered in my terminal?"
 
 ---
 
@@ -85,15 +41,11 @@ Click your platform to download **v1.3.1** directly:
   <a href="https://github.com/protocorn/clippy-vision/releases/latest"><img src="https://img.shields.io/github/release-date/protocorn/clippy-vision?style=flat-square&label=latest%20release" alt="Latest release date" /></a>
 </p>
 
-The installer includes a setup wizard. On Windows it can install Python and Ollama with winget. On macOS it uses Homebrew when Homebrew is already installed; otherwise install Python 3.11+ and Ollama, then retry. macOS also asks for Screen Recording and Accessibility. The installers are unsigned: Windows SmartScreen needs More info → Run anyway, and macOS Gatekeeper needs a right-click → Open the first time.
+The installers are unsigned: on Windows choose **More info → Run anyway**, and on macOS right-click → **Open** the first time. First run needs internet for dependencies and for the chat model you pick in setup (for example `qwen3:8b` is ~4.7 GB).
 
-Clippy Vision is under active development. Windows and macOS share the same capture and privacy path: windows, clipboard, typing metrics, screenshots, password-field painting, and blackout of privacy-listed apps. Bug reports usually get a reply the same day.
+**Trying Clippy?** [Share feedback (5 min)](https://docs.google.com/forms/d/e/1FAIpQLScqsgeWGLdUS_Ba0Me0LPQH8QRrwnIgGiGGHwLElVuqIpfcxQ/viewform).
 
-**Trying Clippy?** [Share feedback (5 min)](https://docs.google.com/forms/d/e/1FAIpQLScqsgeWGLdUS_Ba0Me0LPQH8QRrwnIgGiGGHwLElVuqIpfcxQ/viewform) to help shape what we build next.
-
-### System requirements
-
-Clippy Vision runs a local text model to classify events, summarize sessions, and distill memory. Screen text comes from accessibility APIs plus OCR. There is no vision model on the capture path, and there is no in-app chat.
+### Requirements
 
 | | Minimum | Recommended |
 |--|---------|-------------|
@@ -102,246 +54,95 @@ Clippy Vision runs a local text model to classify events, summarize sessions, an
 | Graphics memory | Not required. Integrated graphics or Apple unified memory is enough | 4 GB+ dedicated on Windows, or 16 GB unified memory on Apple silicon |
 | Free disk | 8 GB | 10 GB+ |
 
-- **First run** needs internet for dependencies and for the chat model you choose in setup (for example `qwen3:8b` is ~4.7 GB). Clippy does not force a specific model.
-- The setup wizard **checks this computer** against these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that summaries may feel slower.
-- Integrated and shared GPUs are allowed at minimum. A dedicated GPU, or more unified memory on a Mac, still helps summary speed.
-- **Lower-spec / contributor machines:** capture uses accessibility + OCR (no vision model in setup). Pick a smaller chat model in setup if needed. Details in [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
+The setup wizard checks these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that summaries may feel slower. Homebrew, dependency, and permission troubleshooting: [docs/usage.md](docs/usage.md#installation-troubleshooting). Lower-spec machines: [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
 
 ---
 
-
 ## Quick Start
 
-### Option A - Installer (recommended)
+1. Download and install Clippy.
+2. Complete the setup wizard and grant required permissions.
+3. Leave Clippy running to build your activity history.
+4. Open **Settings → Connect apps**, connect your agent, and ask about your activity.
 
-1. Use the [Download](#download) buttons above (Windows, macOS Apple Silicon, or macOS Intel)
-2. Follow the setup wizard. It installs the model you picked. Windows can also install Python and Ollama. macOS does that through Homebrew when Homebrew is present, and asks for Screen Recording and Accessibility.
-3. Launch Clippy Vision from the Start Menu on Windows, or from Applications on macOS.
-
-### Option B - Run from source
-
-```powershell
-git clone https://github.com/protocorn/clippy-vision.git
-cd clippy-vision\electron-ui
-npm install
-npm start
-```
-
-The app will open the setup wizard on first launch and walk you through dependencies.
+More detail: [docs/usage.md](docs/usage.md) · [docs/mcp.md](docs/mcp.md)  
+Build from source: [CONTRIBUTING.md](CONTRIBUTING.md#building-from-source)
 
 ---
 
 ## Features
 
-- **MCP memory server** - connect Cursor, Claude Desktop, or VS Code so those agents can search sessions, events, and long-term memory
-- **Passive screen awareness** - captures foreground windows, clipboard, typing bursts, and screenshots in the background
-- **Hierarchical memory** - events roll up into session summaries and long-term facts. Facts stay until you delete them. Events, screenshots, and sessions expire on the schedule in Settings
-- **Privacy layer** - before text or a screenshot is stored, Clippy tries to redact passwords and other sensitive data: password fields are painted out, and keys, tokens, and secret-shaped text are stripped. Clippy's own window is blacked out in every screenshot. This is an effort, not a guarantee.
-- **Three-tier event classification** - rule-based → feature-based → LLM fallback, so only meaningful events are stored
-- **Low-cost screen text** - accessibility/UI text first with RapidOCR fallback; no vision model in capture
-- **Timeline view** - browse captured sessions in the app and drill into exactly what was recorded
-- **Toggle capture** - start/stop data capture from the tray icon or the in-app button, with a desktop notification on change
-- **Per-app redaction** - Instagram, WhatsApp, Telegram, Signal, Slack, and Discord can be blacked out in captures from Settings. Private browsing is on by default for Google Chrome, Microsoft Edge, and Brave on Windows and macOS. Turn capture off when you want nothing stored.
-
----
-
-## Where this is going
-
-Clippy's bet is to be a **local memory layer** that agents query through MCP. The server ships with the packaged app (one-click config for Cursor / Claude Desktop / VS Code) and a timeline view lets you audit what was captured. Next priorities: optional cloud model providers for users who prefer API speed over full locality. Proactive skills come after trust and access are solid.
-
-No dates attached to any of it. [PROJECT_VISION.md](PROJECT_VISION.md) has the current thinking, the priority order, and an honest list of what does not work yet. If you want to shape any of it, the [open issues](https://github.com/protocorn/clippy-vision/issues) are the place to start.
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Desktop UI | Electron |
-| Backend | Python / FastAPI / Uvicorn |
-| Local LLM runtime | [Ollama](https://ollama.com) |
-| Main reasoning model | User-chosen Ollama model (suggested default `qwen3:8b`) |
-| Screenshot text | Accessibility APIs + RapidOCR fallback |
-| Embedding model | `all-MiniLM-L6-v2`, downloaded from Hugging Face on first run (event RAG is opt-in) |
-| Database | SQLite (WAL mode) |
-| Screen capture | `mss`, `pywin32`, `pynput` |
-
----
-
-## Architecture
-
-### Segment 1 - Data Capture
-
-`core/screen_capture.py` runs as a background process and captures:
-
-- Active foreground window (title, process name, active URL)
-- Clipboard contents (copy and paste events)
-- Context switches (window focus changes)
-- Keystroke dynamics with per-app adaptive baseline
-- Screenshots (taken proactively on activity bursts by `core/screenshot_scheduler.py`)
-
-Every captured event passes through a three-tier classification pipeline before being stored:
-
-**Tier 0 - Rule-based** (deterministic, instant)
-Fast rules that immediately flag obvious signals: too few keystrokes → not interesting; known background system process → not interesting; typing deviation from personal baseline → interesting (score 9).
-
-**Tier 1 - Feature-based** (scoring)
-Scoring starts at 5. Multiple features add or subtract: typing deviation, context novelty (how many times this app was seen in 7 days), typing intensity z-score, clipboard content length. Events below 4 are dropped; above 7 are kept; 4-7 go to Tier 2.
-
-**Tier 2 - LLM fallback**
-The last 3 events plus the current event are sent to the chat model you chose in setup for context-aware classification. Output is `INTERESTING` or `NOT_INTERESTING`. Classification never queues a vision model.
-
-**Screen text enrichment**
-Each captured frame records bounded text from the foreground accessibility/UI API. Accessibility-tree walks run on a dedicated background worker (`core/uia_worker.py`), so a slow app can never delay the next capture. RapidOCR runs only when that text is empty or too sparse. A background processor (`core/screenshot_processor.py`) groups visually identical screenshots using perceptual hashing and stores the resulting text with the nearest event (±10 s); if none exists, it creates a `screenshot_analysis` event. Backlog enrichment is throttled under system load and guarantees older screenshots always make progress. Image embeddings and event-level RAG are disabled by default.
-
----
-
-### Segment 2 - Summarization
-
-A background summarizer wakes about every **60 seconds** and turns pending activity events into session summaries with the chat model you chose in setup. That interval is the check cadence, not the session length: each tick looks for unsummarized events, merges them into activity windows (events within a 10-minute gap, capped at 30 minutes), and summarizes groups with at least 3 events (up to 25 per summary). It runs in two passes per tick:
-
-- **Pass 1:** Summarizes pending event windows
-- **Pass 2:** Refreshes sessions when delayed screenshot text becomes available
-
----
-
-### Segment 3 - Distiller
-
-Runs every 5 sessions and extracts high-level behavioral facts from summaries. Each fact is:
-1. Vector-embedded
-2. Compared against existing cluster centroids (threshold: 0.75 cosine similarity)
-3. Routed to the closest cluster or a new one
-4. Processed with a second LLM call: **ADD / UPDATE / NOOP / CONFLICT**
-
-Conflicting facts are preserved in `memory_conflicts` and surfaced to the agent for user resolution. User-provided corrections via `save_identity` automatically close related conflicts.
-
----
-
-### Segment 4 - Asking about your history (MCP)
-
-Clippy Vision is the **capture + memory layer**. Conversational Q&A is meant to happen in a bigger model via **MCP** (Cursor, Claude Desktop, etc.):
-
-| MCP tool | Description |
-|------|-------------|
-| `search_sessions_tool` / `search_events_tool` | NL search (sessions / raw events) |
-| `search_bounded_tool` | Keyword search with explicit `start`/`end` + pagination |
-| `list_sessions_tool` | Chronological deduped sessions for a time window |
-| `activity_coverage_tool` | Hourly event counts (honest capture gaps) |
-| `app_time_summary_tool` | Approximate per-app time in a window |
-| `list_urls_tool` | Distinct URLs (optional pattern filter) |
-| `list_screenshots_tool` / `get_screenshot_tool` | Frames when on disk; OCR backup after adaptive TTL |
-| `recall_memory_tool` / `fetch_cluster_tool` | Long-term memory (freshness-ranked; hides recovered junk by default) |
-| `save_identity_tool` / `save_note_tool` / `delete_note_tool` | Explicit memory writes |
-| `remember_turn_tool` | Local extractor stores facts from the user's own message |
-| `find_files_tool` / `list_workspace_roots_tool` | Trusted filesystem path recall (host opens files/URLs) |
-
-Connect under **Settings → Connect apps**. Timeline, privacy, and capture controls stay in this desktop app. There is no in-app ReAct chat agent.
-
----
-
-### Segment 5 - Database
-
-All data lives in a local SQLite database. A source checkout uses `core/data/events.db`. An installed app uses its own data folder: `%APPDATA%\Clippy Vision\data` on Windows, and `~/Library/Application Support/Clippy Vision/data` on macOS.
-
-| Table | Contents | Retention |
-|-------|----------|-----------|
-| `events` | Raw captured events | 7 days by default (1–30 in Settings) |
-| `sessions` | Summaries of events | 90 days by default (1–180 in Settings) |
-| `memory_clusters` | Cluster metadata | Until you delete it |
-| `memory_facts` | Individual long-term facts | Until you delete it |
-| `memory_conflicts` | Unresolved fact contradictions | Until you delete it |
-| `memory_meta` | Settings and distiller state | Until you clear app data |
-| `conversations` | Leftover rows from the removed in-app chat. The current app does not write a chat here | Until you clear app data |
-| `user_profile` | User name | Until you clear app data |
-
-FTS5 virtual tables on `events` and `sessions` enable full-text search across all stored content.
+- Searchable activity history across apps
+- Local summaries and long-term memory
+- Access through MCP-compatible agents
+- A timeline for reviewing and deleting activity
+- Capture and privacy controls
 
 ---
 
 ## Privacy
 
-- Capture, summarization, and the database stay on this computer. Clippy's own network call is the GitHub update check described below. A connected cloud agent is separate: it receives the tool replies it requests.
-- A privacy layer runs before capture is saved, on Windows and macOS. It tries to paint password fields and other single-line fields, and it removes API keys, tokens, private keys, and other secret-shaped text from what gets stored. Clippy's own window is blacked out while it is in front. Apps you mark private are blacked out whenever they are visible, not only when they are in front. Private browsing is on by default for Google Chrome, Microsoft Edge, and Brave on Windows and macOS: the window is painted black, the address is not stored, and the title is saved as "Private window". Firefox, Opera, and Safari are not covered. This is a best effort. Pause capture when a window must not be stored.
-- The same redactor runs again on every MCP tool reply. Screenshot file paths are left out, and a window you marked private is returned as "This moment was private" with the app and time only. If that filter fails, the tool returns nothing. The copy on this computer is unchanged.
-- You can toggle data capture on/off at any time from the tray icon, and delete one moment, one session, or one day from the timeline.
-- Per-app redaction blacks out windows you choose in Settings, including Instagram, WhatsApp, Telegram, Signal, Slack, and Discord. Private browsing for Google Chrome, Microsoft Edge, and Brave is on unless you turn that toggle off.
+- Clippy captures foreground windows, clipboard, typing metrics, and screenshots.
+- Capture, summarization, and storage run locally on this computer.
+- Connected cloud agents can receive retrieved memory through MCP tool replies.
+- Connected clients have access to all exposed Clippy tools.
+- Redaction is best effort. Private-browsing protection covers only Google Chrome, Microsoft Edge, and Brave.
+- You can pause capture and delete stored activity from the tray or timeline.
+
+Full guide (retention defaults and detailed behavior): [docs/usage.md](docs/usage.md#privacy-settings).
 
 <p align="center">
   <img src="assets/instagram-redaction.jpg" alt="Instagram login with the password field blacked out in a Clippy capture" width="720" />
 </p>
-- Captured data has TTLs: raw events expire after 7 days, session summaries after 90 days. Screenshots default to 1 day; high-signal frames (interesting flag, interest score, URL present, clipboard/paste) can live up to `screenshot_retention_max_days` (default 7). OCR text on events remains after the JPEG is purged.
-- The local API binds to `127.0.0.1` on a port chosen at launch, so it is never reachable from your network.
-
-**The one request Clippy makes by itself:** it checks the public GitHub releases page for a newer version, at most once every 12 hours. That request carries no screen, profile, or account data. Turn it off any time under **Settings → Updates**. Tool replies sent to an MCP client are not this request. They leave the machine only if that client sends them on.
 
 ---
 
-## Building from Source
+## Documentation & Roadmap
 
-```powershell
-# Python dependencies
-pip install -r requirements.txt
+| Guide | Contents |
+|-------|----------|
+| [docs/usage.md](docs/usage.md) | Capture controls, privacy, accessibility, install troubleshooting |
+| [docs/mcp.md](docs/mcp.md) | Supported clients, Copy JSON, tool reference, access permissions |
+| [docs/architecture.md](docs/architecture.md) | Tech stack, capture pipeline, summarization, distillation, schema |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Build from source and contribution guide |
+| [PROJECT_VISION.md](PROJECT_VISION.md) | Roadmap, principles, and known limitations |
 
-# Run the desktop app
-cd electron-ui
-npm install
-npm start
+---
 
-# Build the Windows installer
-npm run dist
-```
+## Contributing
 
-The built installer appears at `electron-ui/dist/ClippyVision-Windows-Setup-{version}.exe` (or `ClippyVision-macOS-{arch}-{version}.dmg` when building on macOS).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup steps, building from source, and good first issues.
+
+---
+
+## Contributors
+
+Thanks to everyone who has shipped code, docs, design, or ideas.
+
+[![All Contributors](https://img.shields.io/github/all-contributors/protocorn/clippy-vision?color=ee8449&style=flat-square)](#contributors)
+[![Contributors](https://img.shields.io/github/contributors/protocorn/clippy-vision?style=flat-square)](https://github.com/protocorn/clippy-vision/graphs/contributors)
+
+<!-- CONTRIBUTORS-STATS:START -->
+
+| | Contributor | What they built |
+| :---: | :--- | :--- |
+| <a href="https://github.com/protocorn"><img src="https://avatars.githubusercontent.com/u/53559317?v=4" width="64" height="64" alt="protocorn"/></a> | <a href="https://github.com/protocorn"><b>@protocorn</b></a><br/><sub>💻 📖 🎨 🤔 🚧</sub> | Designed the core app: agent, vision pipeline, memory system, and the Electron desktop shell. |
+| <a href="https://github.com/rusetiq"><img src="https://avatars.githubusercontent.com/u/234747645?v=4" width="64" height="64" alt="rusetiq"/></a> | <a href="https://github.com/rusetiq"><b>@rusetiq</b></a><br/><sub>💻 📦</sub> | Brought Clippy Vision to macOS: native screen capture, permissions, and Apple Silicon + Intel packaging. |
+| <a href="https://github.com/ABarpanda"><img src="https://avatars.githubusercontent.com/u/145291762?v=4" width="64" height="64" alt="ABarpanda"/></a> | <a href="https://github.com/ABarpanda"><b>@ABarpanda</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=ABarpanda">See their commits →</a> |
+| <a href="https://github.com/vitorparras"><img src="https://avatars.githubusercontent.com/u/43687831?v=4" width="64" height="64" alt="vitorparras"/></a> | <a href="https://github.com/vitorparras"><b>@vitorparras</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=vitorparras">See their commits →</a> |
+| <a href="https://github.com/vaishn4vi"><img src="https://avatars.githubusercontent.com/u/150888364?v=4" width="64" height="64" alt="vaishn4vi"/></a> | <a href="https://github.com/vaishn4vi"><b>@vaishn4vi</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=vaishn4vi">See their commits →</a> |
+| <a href="https://github.com/adity982"><img src="https://avatars.githubusercontent.com/u/59918965?v=4" width="64" height="64" alt="adity982"/></a> | <a href="https://github.com/adity982"><b>@adity982</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=adity982">See their commits →</a> |
+| <a href="https://github.com/Draoui-Haroun"><img src="https://avatars.githubusercontent.com/u/266044395?v=4" width="64" height="64" alt="Draoui-Haroun"/></a> | <a href="https://github.com/Draoui-Haroun"><b>@Draoui-Haroun</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=Draoui-Haroun">See their commits →</a> |
+| <a href="https://github.com/shaurya703"><img src="https://avatars.githubusercontent.com/u/153742516?v=4" width="64" height="64" alt="shaurya703"/></a> | <a href="https://github.com/shaurya703"><b>@shaurya703</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=shaurya703">See their commits →</a> |
+| <a href="https://github.com/cyforkk"><img src="https://avatars.githubusercontent.com/u/165913369?v=4" width="64" height="64" alt="cyforkk"/></a> | <a href="https://github.com/cyforkk"><b>@cyforkk</b></a><br/><sub>💻</sub> | Made errors readable: replaced bare HTTP status codes with real API error messages in chat. |
+| <a href="https://github.com/icn5381"><img src="https://avatars.githubusercontent.com/u/255778606?v=4" width="64" height="64" alt="icn5381"/></a> | <a href="https://github.com/icn5381"><b>@icn5381</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=icn5381">See their commits →</a> |
+
+<!-- CONTRIBUTORS-STATS:END -->
+
+How to get on this wall: [CONTRIBUTING.md](CONTRIBUTING.md#contribution-types).
 
 ---
 
 ## License
 
 AGPL-3.0. See [LICENSE](LICENSE). Releases already published through v1.3.1 stay under MIT. A commercial license for companies that cannot use AGPL is not written yet.
-
----
-
-## Contributors
-
-Every feature in Clippy Vision has a person behind it. This wall is how we say thank you - by name, with what they actually built, backed by real numbers from git history.
-
-[![All Contributors](https://img.shields.io/github/all-contributors/protocorn/clippy-vision?color=ee8449&style=flat-square)](#contributors)
-[![Contributors](https://img.shields.io/github/contributors/protocorn/clippy-vision?style=flat-square)](https://github.com/protocorn/clippy-vision/graphs/contributors)
-
-### Hall of fame
-
-<!-- CONTRIBUTORS-STATS:START -->
-
-| | Contributor | What they built | Commits | Lines |
-| :---: | :--- | :--- | ---: | :---: |
-| <a href="https://github.com/protocorn"><img src="https://avatars.githubusercontent.com/u/53559317?v=4" width="64" height="64" alt="protocorn"/></a> | <a href="https://github.com/protocorn"><b>@protocorn</b></a><br/><sub>💻 📖 🎨 🤔 🚧</sub> | Designed the core app: agent, vision pipeline, memory system, and the Electron desktop shell. | 112 | +121,839&nbsp;/&nbsp;−110,039 |
-| <a href="https://github.com/rusetiq"><img src="https://avatars.githubusercontent.com/u/234747645?v=4" width="64" height="64" alt="rusetiq"/></a> | <a href="https://github.com/rusetiq"><b>@rusetiq</b></a><br/><sub>💻 📦</sub> | Brought Clippy Vision to macOS: native screen capture, permissions, and Apple Silicon + Intel packaging. | 8 | +39,032&nbsp;/&nbsp;−3,226 |
-| <a href="https://github.com/ABarpanda"><img src="https://avatars.githubusercontent.com/u/145291762?v=4" width="64" height="64" alt="ABarpanda"/></a> | <a href="https://github.com/ABarpanda"><b>@ABarpanda</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=ABarpanda">See their commits →</a> | 4 | +278&nbsp;/&nbsp;−217 |
-| <a href="https://github.com/vitorparras"><img src="https://avatars.githubusercontent.com/u/43687831?v=4" width="64" height="64" alt="vitorparras"/></a> | <a href="https://github.com/vitorparras"><b>@vitorparras</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=vitorparras">See their commits →</a> | 1 | +188&nbsp;/&nbsp;−0 |
-| <a href="https://github.com/vaishn4vi"><img src="https://avatars.githubusercontent.com/u/150888364?v=4" width="64" height="64" alt="vaishn4vi"/></a> | <a href="https://github.com/vaishn4vi"><b>@vaishn4vi</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=vaishn4vi">See their commits →</a> | 2 | +120&nbsp;/&nbsp;−41 |
-| <a href="https://github.com/adity982"><img src="https://avatars.githubusercontent.com/u/59918965?v=4" width="64" height="64" alt="adity982"/></a> | <a href="https://github.com/adity982"><b>@adity982</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=adity982">See their commits →</a> | 2 | +98&nbsp;/&nbsp;−18 |
-| <a href="https://github.com/Draoui-Haroun"><img src="https://avatars.githubusercontent.com/u/266044395?v=4" width="64" height="64" alt="Draoui-Haroun"/></a> | <a href="https://github.com/Draoui-Haroun"><b>@Draoui-Haroun</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=Draoui-Haroun">See their commits →</a> | 2 | +68&nbsp;/&nbsp;−7 |
-| <a href="https://github.com/shaurya703"><img src="https://avatars.githubusercontent.com/u/153742516?v=4" width="64" height="64" alt="shaurya703"/></a> | <a href="https://github.com/shaurya703"><b>@shaurya703</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=shaurya703">See their commits →</a> | 1 | +49&nbsp;/&nbsp;−0 |
-| <a href="https://github.com/cyforkk"><img src="https://avatars.githubusercontent.com/u/165913369?v=4" width="64" height="64" alt="cyforkk"/></a> | <a href="https://github.com/cyforkk"><b>@cyforkk</b></a><br/><sub>💻</sub> | Made errors readable: replaced bare HTTP status codes with real API error messages in chat. | 1 | +32&nbsp;/&nbsp;−11 |
-| <a href="https://github.com/icn5381"><img src="https://avatars.githubusercontent.com/u/255778606?v=4" width="64" height="64" alt="icn5381"/></a> | <a href="https://github.com/icn5381"><b>@icn5381</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=icn5381">See their commits →</a> | 1 | +15&nbsp;/&nbsp;−4 |
-
-<sub>Numbers come straight from git history and refresh automatically on every push to <code>main</code>.</sub>
-<!-- CONTRIBUTORS-STATS:END -->
-
-### How to get on this wall
-
-Code is one way in, but not the only one - we follow the [All Contributors](https://allcontributors.org/) spec, so a sharp bug report, a design suggestion that sticks, or a doc fix all count: 💻 `code` · 📦 `platform` · 📖 `doc` · 🐛 `bug` · 🤔 `ideas` · 🎨 `design` · ⚠️ `test` · 👀 `review` · 🚧 `maintenance`
-
-When your contribution lands, comment this on the PR or issue and the bot handles the rest:
-
-```text
-@all-contributors please add @your-username for code, doc
-```
-
-New here? [CONTRIBUTING.md](CONTRIBUTING.md) has setup steps and a list of good first issues.
-
----
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup steps and good first issues, and [PROJECT_VISION.md](PROJECT_VISION.md) for what the project is optimizing for and where it is headed.
