@@ -7,19 +7,19 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing release tag to build and attach installers to (e.g. v1.2.0)'
+        description: 'Existing release tag to build and attach installers to (e.g. v2.0.0)'
         required: true
+      include_macos:
+        description: 'Also build and upload macOS installers (only after Apple Silicon and Intel validation)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+  build-windows:
+    runs-on: windows-latest
     steps:
       # Checkout the ref the workflow was triggered on (tag push or dispatch branch),
       # not the release tag input — so workflow_dispatch from main builds current packaging.
@@ -52,23 +52,61 @@ jobs:
           echo "Building Clippy Vision $VERSION (release tag $TAG)"
 
       - name: Build Windows installer
-        if: matrix.os == 'windows-latest'
         working-directory: electron-ui
         run: npm run dist:win
 
-      - name: Build macOS installer
-        if: matrix.os == 'macos-latest'
-        working-directory: electron-ui
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: npm run dist:mac
-
-      - name: Upload installers to release
+      - name: Upload Windows installer to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
             electron-ui/dist/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Opt-in only. Tag pushes never build or publish macOS installers.
+  build-macos:
+    if: github.event_name == 'workflow_dispatch' && inputs.include_macos
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: electron-ui
+        run: npm ci
+
+      - name: Sync app version from release tag
+        working-directory: electron-ui
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+-].*)?$ ]]; then
+            echo "Invalid version derived from tag '$TAG' (got '$VERSION')"
+            exit 1
+          fi
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          echo "Building Clippy Vision $VERSION (release tag $TAG)"
+
+      - name: Build macOS installer
+        working-directory: electron-ui
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run dist:mac
+
+      - name: Upload macOS installers to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
             electron-ui/dist/*.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

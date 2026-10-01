@@ -23,14 +23,16 @@ Ask in a connected MCP client, for example:
 
 ## Download
 
-Click your platform to download **v1.3.1** directly:
+**Windows is tested for 2.0.** macOS validation is pending, so macOS 2.0 installers are not included yet. macOS downloads below are the previous release (**v1.3.1**). The README describes 2.0; some features differ from 1.3.1.
 
 <p align="center">
-  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.3.1/ClippyVision-Windows-Setup-1.3.1.exe"><img src="https://img.shields.io/badge/Download-Windows%20v1.3.1-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows v1.3.1" /></a>
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v2.0.0/ClippyVision-Windows-Setup-2.0.0.exe"><img src="https://img.shields.io/badge/Download-Windows%20v2.0.0-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows v2.0.0" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.3.1/ClippyVision-macOS-arm64-1.3.1.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Apple%20Silicon%20v1.3.1%20(previous)-555555?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Apple Silicon v1.3.1 (previous release)" /></a>
   &nbsp;
-  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.3.1/ClippyVision-macOS-arm64-1.3.1.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Apple%20Silicon%20v1.3.1-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Apple Silicon v1.3.1" /></a>
-  &nbsp;
-  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.3.1/ClippyVision-macOS-x64-1.3.1.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Intel%20v1.3.1-555555?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Intel v1.3.1" /></a>
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.3.1/ClippyVision-macOS-x64-1.3.1.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Intel%20v1.3.1%20(previous)-555555?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Intel v1.3.1 (previous release)" /></a>
 </p>
 
 <p align="center">

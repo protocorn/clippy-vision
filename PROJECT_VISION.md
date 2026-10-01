@@ -46,13 +46,21 @@ No fixed timeline, ordered by priority rather than by date.
 - [x] Timeline view: browse captured sessions in the app and drill into what was recorded.
 - [x] Electron shell refactor: monolithic `main.js` and `index.html` split into focused main-process modules and ES modules.
 
-**Version 1.3.1 (Current)**
+**Version 1.3.1 (Previous published installer)**
 - [x] Runtime LLM calls respect the chat model chosen in setup (`CLIPPY_CHAT_MODEL` / `llm_config.json`) instead of always requesting hardcoded `qwen3:8b`, which caused Ollama to auto-pull qwen3 even when another model was already configured.
 - [x] Questions go through MCP tools (`search_sessions`, `search_events`, `recall_memory`). The query router and the old prefetch strategies (specific recall, time anchor, topic search) are archived. Semantic memory search stays in `agent/prefetch/memory_query.py`.
 - [x] Privacy layer: an effort to redact passwords and other sensitive data before they are stored, on Windows and macOS. Password fields are painted out of screenshots, visible privacy-listed windows are blacked out, and secret-shaped text is stripped. Not a guarantee.
 - [x] Timeline deletion: one event, one session, or one day, including the screenshot files that nothing else still references.
 
-**Planned next, ordered by priority**
+**Version 2.0.0 (Current — Windows installer)**
+- [x] No in-app chat. The desktop app captures, summarizes, and shows the timeline. Questions are asked in a connected MCP app.
+- [x] Connect is on or off. One click for Cursor, Claude Desktop, and VS Code. Every other app pastes JSON generated on that machine. Settings lists Devin Desktop, Claude Code, Cline, Roo Code, Continue, JetBrains, Kiro, and LM Studio, each with a link to that app's own local-server docs. There is no second allow-cloud switch and no timeline log of replies that left the machine.
+- [x] Every tool reply is scrubbed before a cloud client sees it. Secrets, private windows, and a summary or fact that no longer names its window are withheld. If the filter fails, the tool returns nothing. The local copy is unchanged.
+- [x] When Cursor, VS Code, or another VS Code-based editor is in front, Clippy turns that app's screen-reader accessibility setting on if it is off, so the open file can be read. It does not enable a system screen reader.
+- [x] A screenshot's accessibility text is stored on the event even when the walk finishes after the capture timeout. A longer later read of the same frame replaces a short one. JPEG expiry is checked about once an hour. The text file stays after the image is deleted.
+- [x] License for this release is AGPL-3.0. Releases through v1.3.1 stay MIT. macOS 2.0 installers are held until Apple Silicon and Intel validation.
+
+**Planned next, ordered by priority. None of these ship in the current app.**
 
 *Skills layer, making the agent proactive instead of purely reactive*
 Development happens on the `feat/skills-ui` branch, off main until it is solid. Planned skill 1: a reading/watching mode that quizzes you on material afterward. Planned skill 2: "when you see XYZ, do ABC" — the watcher and matcher already work on the branch; what is left is a stable worker lifecycle and polished settings/alerts UI.
@@ -76,4 +84,4 @@ The next release is AGPL-3.0 (`LICENSE`). Individuals can use, modify, and share
 The ultimate plan for monetizing Clippy Vision is an enterprise version, where an employee could hand off their work context to another employee, using what Clippy already captured, instead of calling and disturbing someone on vacation. There are other use cases beyond this one too. Individual versions stay completely free, regardless of what the enterprise version looks like.
 
 # Contributing
-Want to help build this? See [CONTRIBUTING.md](https://github.com/protocorn/clippy-vision?tab=contributing-ov-file) for setup, and join the Discord server for ongoing discussion, skills architecture, and what's currently being worked on.
+Want to help build this? See [CONTRIBUTING.md](CONTRIBUTING.md) for setup. User-facing steps live in [README.md](README.md#quick-start) and [QUICKSTART.md](QUICKSTART.md). Discussion of what to build next belongs in [GitHub issues](https://github.com/protocorn/clippy-vision/issues).
