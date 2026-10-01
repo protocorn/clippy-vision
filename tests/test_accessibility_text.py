@@ -288,19 +288,22 @@ class TileTests(unittest.TestCase):
         self.assertEqual(len(tiles), 1)
         self.assertEqual(tiles[0].bounds, (0, 0, 800, 600))
 
-    def test_caret_in_the_editor_beats_the_file_tree(self):
+    def test_caret_in_the_editor_keeps_the_other_panes(self):
         document, _parts = _workbench()
         choice = choose_active_tile(document, window="w", activity_box=(480, 190, 482, 208))
         self.assertIn("capture_screenshot", choice.text)
-        self.assertNotIn("sidebar_file_0", choice.text)
+        self.assertIn("sidebar_file_0", choice.text)
+        self.assertIn("npm start", choice.text)
         self.assertNotIn("Agent Stats", choice.text)
         self.assertEqual(choice.bounds, (220, 0, 1400, 600))
+        self.assertLess(choice.text.find("capture_screenshot"), choice.text.find("sidebar_file_0"))
 
-    def test_caret_in_the_sidebar_keeps_the_file_tree(self):
+    def test_caret_in_the_sidebar_keeps_the_editor_too(self):
         document, _parts = _workbench()
         choice = choose_active_tile(document, window="w", activity_box=(40, 80, 42, 96))
         self.assertIn("sidebar_file_0.py", choice.text)
-        self.assertNotIn("capture_screenshot", choice.text)
+        self.assertIn("capture_screenshot", choice.text)
+        self.assertLess(choice.text.find("sidebar_file_0"), choice.text.find("capture_screenshot"))
 
     def test_changed_text_wins_without_a_caret(self):
         first, _parts = _workbench()
@@ -309,7 +312,17 @@ class TileTests(unittest.TestCase):
         choice = choose_active_tile(second, window="w")
         self.assertEqual(choice.bounds, (220, 600, 1400, 872))
         self.assertIn("101 passed", choice.text)
-        self.assertNotIn("sidebar_file_0", choice.text)
+        self.assertIn("capture_screenshot", choice.text)
+        self.assertLess(choice.text.find("101 passed"), choice.text.find("capture_screenshot"))
+
+    def test_changed_lines_lead_the_stored_text(self):
+        from core.screen_tiles import _line_id, order_stored_text
+
+        previous = {_line_id("sidebar_file_0"), _line_id("npm start")}
+        lines = ["sidebar_file_0", "npm start", "the new paragraph the user just typed"]
+        stored = order_stored_text(lines, previous)
+        self.assertTrue(stored.startswith("the new paragraph"))
+        self.assertIn("sidebar_file_0", stored)
 
     def test_focus_decides_a_first_capture(self):
         document, parts = _workbench()
@@ -328,7 +341,8 @@ class TileTests(unittest.TestCase):
     def test_empty_editor_stays_empty_and_keeps_its_rectangle(self):
         document, _parts = _workbench(editor_lines=())
         choice = choose_active_tile(document, window="w", activity_box=(700, 400, 702, 418))
-        self.assertEqual(choice.text, "")
+        self.assertIn("npm start", choice.text)
+        self.assertNotIn("capture_screenshot", choice.text)
         self.assertEqual(choice.bounds, (220, 0, 1400, 600))
 
     def test_caret_text_survives_the_cap(self):
@@ -374,6 +388,23 @@ class UiaThreadTests(unittest.TestCase):
         else:
             self.assertEqual(result, "ready")
             self.assertNotIn("thread", entered)
+
+
+class LateAccessibilityTests(unittest.TestCase):
+    def test_result_after_the_timeout_is_delivered(self):
+        import time
+
+        def slow():
+            time.sleep(0.3)
+            return {"redacted_text": "editor text"}
+
+        delivered = []
+        result = _run_with_timeout(slow, 0.05, on_late=delivered.append)
+        self.assertIsNone(result)
+        deadline = time.time() + 2
+        while not delivered and time.time() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(delivered, [{"redacted_text": "editor text"}])
 
 
 class SecretPaintTests(unittest.TestCase):

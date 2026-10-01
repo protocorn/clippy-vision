@@ -4,6 +4,8 @@ import json
 import os
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -19,9 +21,13 @@ from core.screenshot_enrichment import extract_screenshot_ocr
 from core.screenshot_processor import _collapse_saved_lookalikes, _compute_all_hashes
 from core.screenshot_files import (
     PHASH_SIMILAR_DISTANCE,
+    adopt_processed_filename,
     capture_stem,
     delete_screenshot_files,
     perceptual_hash,
+    record_accessibility_text,
+    resolve_screenshot_file,
+    retarget_screenshot_filename,
     sweep_screenshot_sidecars,
 )
 from core.uia_worker import a11y_text_path
@@ -136,24 +142,134 @@ class ScreenshotArtifactTests(unittest.TestCase):
             self.assertIn("paragraph", text)
             self.assertEqual(extract.call_count, 2)
 
-    def test_field_scan_timeout_keeps_the_frame(self):
+    def _release_walk(self, scheduler, redaction: dict) -> None:
+        slot = redaction.get("slot") if isinstance(redaction, dict) else None
+        if slot is not None:
+            slot["saved"].set()
+        for _ in range(100):
+            if scheduler._walk_lock.acquire(blocking=False):
+                scheduler._walk_lock.release()
+                return
+            time.sleep(0.01)
+
+    def test_field_scan_failure_does_not_invent_text(self):
         from core import screenshot_scheduler as scheduler
 
-        self._reset_redaction_cache(scheduler)
-        with patch("core.screenshot_scheduler.collect_redaction_safe", return_value=None):
+        with patch("core.screenshot_scheduler.collect_redaction", return_value=None):
             redaction = scheduler._field_redaction(1, "browser\x1fgmail", 1.5)
+        self.addCleanup(lambda: self._release_walk(scheduler, redaction))
+        self.assertEqual(redaction["redacted_text"], "")
+        self.assertFalse(redaction.get("busy"))
+
+    def test_field_scan_failure_keeps_the_frame_rects_empty(self):
+        from core import screenshot_scheduler as scheduler
+
+        with patch("core.screenshot_scheduler.collect_redaction", return_value=None):
+            redaction = scheduler._field_redaction(1, "browser\x1fgmail", 1.5)
+        self.addCleanup(lambda: self._release_walk(scheduler, redaction))
         self.assertEqual(redaction["edit_rects"], [])
         self.assertEqual(redaction["secret_rects"], [])
 
-    def test_same_window_reuses_the_field_scan(self):
+    def test_same_window_walks_again_instead_of_reusing_text(self):
         from core import screenshot_scheduler as scheduler
 
-        self._reset_redaction_cache(scheduler)
         found = {"edit_rects": [(1, 2, 30, 40)], "secret_rects": [], "redacted_text": "secret"}
-        with patch("core.screenshot_scheduler.collect_redaction_safe", return_value=found) as walk:
-            self.assertEqual(scheduler._field_redaction(1, "same-window", 1.5), found)
-            self.assertEqual(scheduler._field_redaction(1, "same-window", 1.5), found)
-        self.assertEqual(walk.call_count, 1)
+        with patch("core.screenshot_scheduler.collect_redaction", return_value=found) as walk:
+            first = scheduler._field_redaction(1, "same-window", 1.5)
+            self._release_walk(scheduler, first)
+            second = scheduler._field_redaction(1, "same-window", 1.5)
+            self._release_walk(scheduler, second)
+        self.assertEqual(first["redacted_text"], "secret")
+        self.assertEqual(second["redacted_text"], "secret")
+        self.assertEqual(walk.call_count, 2)
+
+    def test_a_busy_walk_does_not_copy_text_onto_the_next_frame(self):
+        from core import screenshot_scheduler as scheduler
+
+        started = threading.Event()
+        release = threading.Event()
+
+        def _slow(_hwnd):
+            started.set()
+            release.wait(2)
+            return {"edit_rects": [], "secret_rects": [], "redacted_text": "first document", "content_bounds": None}
+
+        with patch("core.screenshot_scheduler.collect_redaction", side_effect=_slow):
+            holder: dict = {}
+
+            def _run():
+                holder["first"] = scheduler._field_redaction(1, "same-window", 2.0)
+
+            worker = threading.Thread(target=_run)
+            worker.start()
+            self.assertTrue(started.wait(1))
+            second = scheduler._field_redaction(1, "same-window", 0.2)
+            release.set()
+            worker.join(3)
+        self.addCleanup(lambda: self._release_walk(scheduler, holder.get("first") or {}))
+        self.assertTrue(second.get("busy"))
+        self.assertEqual(second["redacted_text"], "")
+        self.assertIn("first document", holder["first"]["redacted_text"])
+
+    def test_walk_skips_text_when_the_window_changed(self):
+        from core import screenshot_scheduler as scheduler
+
+        job = {"hwnd": 5, "title": "ChatGPT", "process": "chrome.exe"}
+        with patch.object(scheduler, "_foreground_hwnd", return_value=9):
+            self.assertFalse(scheduler._walk_still_matches(job))
+        with patch.object(scheduler, "_foreground_hwnd", return_value=5), patch.object(
+            scheduler, "_hwnd_title", return_value="A job posting"
+        ):
+            self.assertFalse(scheduler._walk_still_matches(job))
+        with patch.object(scheduler, "_foreground_hwnd", return_value=5), patch.object(
+            scheduler, "_hwnd_title", return_value="ChatGPT"
+        ):
+            self.assertTrue(scheduler._walk_still_matches(job))
+        self.assertTrue(scheduler._walk_still_matches({"hwnd": 1}))
+
+    def test_queued_walks_keep_a_jpeg_for_each_frame(self):
+        from core import screenshot_scheduler as scheduler
+        from core.uia_worker import read_persisted_accessibility_text
+
+        started = threading.Event()
+        release = threading.Event()
+
+        def _slow(hwnd):
+            if hwnd == 1:
+                started.set()
+                release.wait(2)
+            return {
+                "edit_rects": [],
+                "secret_rects": [],
+                "redacted_text": "first document" if hwnd == 1 else "second document",
+                "content_bounds": None,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            first = folder / "1000.jpg"
+            second = folder / "2000.jpg"
+            Image.new("RGB", (40, 40), "white").save(first, format="JPEG")
+            Image.new("RGB", (40, 40), "white").save(second, format="JPEG")
+            monitor = {"left": 0, "top": 0, "width": 40, "height": 40}
+            with patch("core.screenshot_scheduler.collect_redaction", side_effect=_slow):
+                scheduler._enqueue_walk(
+                    {"hwnd": 1, "path": first, "key": "one", "monitor": monitor, "image_size": (40, 40)}
+                )
+                self.assertTrue(started.wait(1))
+                scheduler._enqueue_walk(
+                    {"hwnd": 2, "path": second, "key": "two", "monitor": monitor, "image_size": (40, 40)}
+                )
+                release.set()
+                deadline = time.time() + 10
+                while time.time() < deadline:
+                    if "second document" in read_persisted_accessibility_text(second):
+                        break
+                    time.sleep(0.05)
+            self.assertTrue(first.is_file())
+            self.assertTrue(second.is_file())
+            self.assertIn("first document", read_persisted_accessibility_text(first))
+            self.assertIn("second document", read_persisted_accessibility_text(second))
 
     def _frame_with_crop(self, folder: Path, box: list[int]) -> Path:
         path = folder / "1000.jpg"
@@ -164,7 +280,109 @@ class ScreenshotArtifactTests(unittest.TestCase):
         )
         return path
 
-    def _reset_redaction_cache(self, scheduler) -> None:
-        scheduler._last_redaction_key = ""
-        scheduler._last_redaction = None
-        scheduler._last_redaction_at = 0.0
+    def test_late_accessibility_text_fills_an_empty_event(self):
+        from core.paths import get_screenshots_dir
+        from core.storage import conn
+
+        event_id = "late-a11y-fill"
+        conn.execute(
+            """INSERT INTO events (
+                   event_id, session_id, timestamp, event_type, summary,
+                   screenshot_filename, vision_ocr_text, interest_reason,
+                   expires_at, classification_status
+               ) VALUES (?, 'test-session', 1, 'screenshot_analysis', 'shot',
+                         '1790710686569.jpg', '', 'No accessibility or OCR text was available',
+                         9999999999, 'done')""",
+            (event_id,),
+        )
+        conn.commit()
+        self.addCleanup(lambda: (conn.execute("DELETE FROM events WHERE event_id=?", (event_id,)), conn.commit()))
+        folder = get_screenshots_dir()
+        path = folder / "1790710686569.jpg"
+        text = "okay it works. the agent message should be stored with the screenshot."
+        record_accessibility_text(path, text)
+        row = conn.execute(
+            "SELECT vision_ocr_text, interest_reason, screenshot_filename FROM events WHERE event_id=?",
+            (event_id,),
+        ).fetchone()
+        self.assertEqual(row[0], text)
+        self.assertEqual(row[1], "Local accessibility and OCR text capture completed")
+
+        adopt_processed_filename("1790710686569.jpg", "1790710686569_processed.jpg")
+        renamed = conn.execute(
+            "SELECT screenshot_filename FROM events WHERE event_id=?",
+            (event_id,),
+        ).fetchone()
+        self.assertEqual(renamed[0], "1790710686569_processed.jpg")
+        record_accessibility_text(folder / "1790710686569_processed.jpg", text + " more of the same walk")
+        grown = conn.execute(
+            "SELECT vision_ocr_text FROM events WHERE event_id=?",
+            (event_id,),
+        ).fetchone()
+        self.assertEqual(grown[0], text + " more of the same walk")
+        record_accessibility_text(path, "Review")
+        kept = conn.execute(
+            "SELECT vision_ocr_text FROM events WHERE event_id=?",
+            (event_id,),
+        ).fetchone()
+        self.assertEqual(kept[0], text + " more of the same walk")
+
+    def test_processed_lookalike_takes_the_kept_sidecar_text(self):
+        from core.storage import conn
+
+        event_id = "lookalike-retarget"
+        conn.execute(
+            """INSERT INTO events (
+                   event_id, session_id, timestamp, event_type, summary,
+                   screenshot_filename, vision_ocr_text, interest_reason,
+                   expires_at, classification_status
+               ) VALUES (?, 'test-session', 2, 'screenshot_analysis', 'shot',
+                         '100.jpg', 'old frame text that should not stay',
+                         'Local accessibility and OCR text capture completed',
+                         9999999999, 'done')""",
+            (event_id,),
+        )
+        conn.commit()
+        self.addCleanup(lambda: (conn.execute("DELETE FROM events WHERE event_id=?", (event_id,)), conn.commit()))
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            kept = folder / "200_processed.jpg"
+            (folder / "200.a11y.txt").write_text("the kept frame text", encoding="utf-8")
+            with patch("core.paths.get_screenshots_dir", return_value=folder):
+                retarget_screenshot_filename(["100.jpg", "100_processed.jpg"], kept.name)
+        row = conn.execute(
+            "SELECT screenshot_filename, vision_ocr_text FROM events WHERE event_id=?",
+            (event_id,),
+        ).fetchone()
+        self.assertEqual(row, (kept.name, "the kept frame text"))
+
+    def test_resolve_screenshot_file_accepts_the_processed_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            image = folder / "1790710876077_processed.jpg"
+            Image.new("RGB", (2, 2), "white").save(image, format="JPEG")
+            self.assertEqual(resolve_screenshot_file(folder, "1790710876077.jpg"), image)
+            self.assertIsNone(resolve_screenshot_file(folder, "../secret.jpg"))
+
+    def test_covered_text_is_marked_and_deleted_on_a_later_sweep(self):
+        from core import screenshot_scheduler as scheduler
+
+        scheduler._kept_frames.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            earlier = folder / "100.jpg"
+            later = folder / "200.jpg"
+            Image.new("RGB", (8, 8), "white").save(earlier)
+            Image.new("RGB", (8, 8), "white").save(later)
+            tab = "editor.exe\x1fnotes\x1f"
+            draft = "hello there friend this is the draft"
+            scheduler._note_frame(earlier, tab, draft, pending=False)
+            scheduler._note_frame(later, tab, draft + " and the rest of the paragraph", pending=False)
+            scheduler._mark_covered_frames()
+            self.assertIsNotNone(scheduler._kept_frames[0]["marked_at"])
+            self.assertTrue(earlier.exists())
+            scheduler._kept_frames[0]["marked_at"] = time.time() - scheduler.DISCARD_AFTER_SECONDS - 1
+            scheduler.sweep_discarded_frames()
+            self.assertFalse(earlier.exists())
+            self.assertTrue(later.exists())
+        scheduler._kept_frames.clear()

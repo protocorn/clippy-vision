@@ -47,6 +47,7 @@ from core.memory_store import save_identity_field, set_introduction
 from core.paths import get_data_dir, get_screenshots_dir
 from core.privacy_settings import (
     get_privacy_enabled,
+    hides_screen_text,
     set_privacy_enabled,
     should_redact_window,
 )
@@ -381,6 +382,31 @@ class RuntimeRegressionTests(unittest.TestCase):
         finally:
             set_privacy_enabled(original)
 
+    def test_accessibility_text_is_withheld_for_clippy_and_redacted_apps(self):
+        self.assertTrue(hides_screen_text("Clippy Vision.exe", "Timeline"))
+        self.assertTrue(hides_screen_text("electron.exe", "Clippy Vision"))
+        self.assertTrue(
+            hides_screen_text(
+                "electron.exe",
+                "",
+                r"C:\Users\proto\Clippy_Vision\electron-ui\node_modules\electron\dist\electron.exe",
+            )
+        )
+        self.assertFalse(
+            hides_screen_text(
+                "electron.exe",
+                "Notes",
+                r"C:\Tools\SomeApp\electron.exe",
+            )
+        )
+        self.assertFalse(hides_screen_text("Cursor.exe", "screen_tiles.py - Clippy_Vision - Cursor"))
+        original = get_privacy_enabled()
+        try:
+            set_privacy_enabled({"slack": True})
+            self.assertTrue(hides_screen_text("Slack", "Workspace"))
+        finally:
+            set_privacy_enabled(original)
+
     def test_fts_tracks_event_and_session_changes(self):
         stamp = time.time()
         event = make_event("fts-event", timestamp=stamp)
@@ -504,24 +530,58 @@ class RuntimeRegressionTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row, (1, 9.0, "important typing", "project alpha"))
 
-    def test_phash_group_keeps_latest_frame_and_drops_older(self):
+    def test_screenshot_stays_off_a_different_apps_event(self):
+        stamp = 54321.0
+        cursor = make_event("sync-cursor-paste", event_type="paste", timestamp=stamp)
+        chrome = make_event("sync-chrome-frame", event_type="context_change", timestamp=stamp + 2)
+        store_event(cursor)
+        store_event(chrome)
+        conn.execute(
+            "UPDATE events SET process_name = ? WHERE event_id = ?",
+            ("Cursor.exe", cursor["event_id"]),
+        )
+        conn.execute(
+            "UPDATE events SET process_name = ? WHERE event_id = ?",
+            ("chrome.exe", chrome["event_id"]),
+        )
+        conn.commit()
+
+        def cleanup():
+            conn.execute(
+                "DELETE FROM events WHERE event_id IN (?, ?)",
+                (cursor["event_id"], chrome["event_id"]),
+            )
+            conn.commit()
+
+        self.addCleanup(cleanup)
+        for event_id in (cursor["event_id"], chrome["event_id"]):
+            apply_verdict(event_id, {"verdict": "interesting", "score": 5, "reason": "test"})
+        self.assertEqual(
+            _get_nearest_event(stamp + 1, process_name="chrome.exe")["event_id"],
+            chrome["event_id"],
+        )
+        self.assertEqual(
+            _get_nearest_event(stamp + 1, process_name="Cursor.exe")["event_id"],
+            cursor["event_id"],
+        )
+
+    def test_phash_group_keeps_every_frame_until_text_says_otherwise(self):
         group = [Path("1000.jpg"), Path("2000.jpg")]
         events = [
+            {"event_id": "old", "event_type": "screenshot_analysis", "process_name": "App", "window_context": {}, "summary": "old"},
             {"event_id": "new", "event_type": "screenshot_analysis", "process_name": "App", "window_context": {}, "summary": "new"},
         ]
         with patch("core.screenshot_processor._get_nearest_event", side_effect=events), patch(
             "core.screenshot_processor.enrich_screenshot",
-            return_value=("new frame text", [1.0], "clip:test"),
-        ) as enrich, patch("core.screenshot_processor.apply_vision_verdict", return_value=True) as apply, patch(
+            side_effect=[("old frame text", [1.0], "clip:test"), ("new frame text", [1.0], "clip:test")],
+        ) as enrich, patch("core.screenshot_processor.apply_vision_verdict", return_value=True), patch(
             "core.screenshot_processor._mark_as_processed", return_value=True
         ), patch("core.screenshot_processor.delete_screenshot_files") as delete, patch(
             "core.screenshot_processor.release_text_sidecars"
-        ) as release:
+        ):
             self.assertTrue(_process_group(group))
-        self.assertEqual(enrich.call_count, 1)
-        self.assertEqual(apply.call_args_list[0].args[1]["ocr_text"], "new frame text")
-        delete.assert_called_once_with(group[0], include_text=False)
-        release.assert_called_once_with(group[-1])
+        self.assertEqual(enrich.call_count, 2)
+        delete.assert_not_called()
 
     def test_phash_bursts_do_not_chain_past_the_time_window(self):
         paths = [Path("1000.jpg"), Path("21000.jpg"), Path("250000.jpg")]
@@ -1358,7 +1418,7 @@ class WorkspaceRootsAndFindFilesTests(unittest.TestCase):
 
 
 class MemoryFreshnessTests(unittest.TestCase):
-    def test_agent_fact_outranks_recovered_placeholder(self):
+    def test_agent_fact_outranks_placeholder(self):
         from core.memory_freshness import fact_freshness
 
         now = time.time()
@@ -1375,14 +1435,14 @@ class MemoryFreshnessTests(unittest.TestCase):
             source="distiller",
             valid_from=now - 86400 * 40,
             created_at=now - 86400 * 40,
-            cluster_label="recovered_ocr_dump",
+            cluster_label="notes",
             now=now,
         )
         self.assertGreater(agent, 0.5)
         self.assertLess(junk, 0.05)
         self.assertGreater(agent, junk * 10)
 
-    def test_recall_hides_recovered_by_default(self):
+    def test_recall_lists_a_fresh_fact_regardless_of_label(self):
         from agent.memory import recall_memory
         from core.storage import conn
 
@@ -1397,7 +1457,7 @@ class MemoryFreshnessTests(unittest.TestCase):
             """INSERT OR REPLACE INTO memory_clusters
                (cluster_id, label, description, centroid, created_at, updated_at, fact_count)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            ("junk-c", "recovered_noise", "junk", "[]", stamp, stamp, 1),
+            ("old-c", "recovered_noise", "old label, real fact", "[]", stamp, stamp, 1),
         )
         conn.execute(
             """INSERT OR REPLACE INTO memory_facts
@@ -1409,15 +1469,13 @@ class MemoryFreshnessTests(unittest.TestCase):
             """INSERT OR REPLACE INTO memory_facts
                (fact_id, cluster_id, text, vector_embedding, valid_from, source, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            ("junk-f", "junk-c", "unknown", "[]", stamp - 86400 * 60, "distiller", stamp - 86400 * 60),
+            ("old-f", "old-c", "Sahil writes Python tools for job applications", "[]", stamp, "agent", stamp),
         )
         conn.commit()
 
         listed = recall_memory(include_stale=False)
         self.assertIn("job_search", listed)
-        self.assertNotIn("recovered_noise", listed)
-        stale = recall_memory(include_stale=True)
-        self.assertIn("recovered_noise", stale)
+        self.assertIn("recovered_noise", listed)
 
 
 class AdaptiveScreenshotTTLTests(unittest.TestCase):

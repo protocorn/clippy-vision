@@ -156,3 +156,39 @@ class TimelineSessionsTests(unittest.TestCase):
         ]
         self.assertEqual(len(matching), 1)
         self.assertEqual(matching[0]["summary_id"], newer_id)
+
+    def test_endpoint_groups_similar_neighbors_without_sending_embeddings(self):
+        now = 1_700_000_000.0
+        same = [1.0, 0.0]
+        other = [0.0, 1.0]
+        early_id = f"{self.summary_id_prefix}-group-early"
+        next_id = f"{self.summary_id_prefix}-group-next"
+        far_id = f"{self.summary_id_prefix}-group-far"
+        for summary_id, start, vector in (
+            (early_id, now, same),
+            (next_id, now + 120, same),
+            (far_id, now + 3600, other),
+        ):
+            store_summary(
+                {
+                    "session_id": f"session-{summary_id}",
+                    "summary_id": summary_id,
+                    "created_at": start + 30,
+                    "window_start": start,
+                    "window_end": start + 60,
+                    "summary": f"Summary for {summary_id}",
+                    "active_task": "same stretch",
+                    "event_count": 2,
+                },
+                embedding=vector,
+            )
+
+        response = self.client.get("/timeline/sessions", params={"limit": 40, "offset": 0})
+        self.assertEqual(response.status_code, 200)
+        by_id = {
+            session["summary_id"]: session
+            for session in response.json()["sessions"]
+        }
+        self.assertEqual(by_id[early_id]["group_id"], by_id[next_id]["group_id"])
+        self.assertIsNone(by_id[far_id]["group_id"])
+        self.assertNotIn("summary_embedding", by_id[early_id])

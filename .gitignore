@@ -7,6 +7,7 @@ core/data/events.db*
 
 # Screenshots (contains private user data)
 core/data/screenshots/
+tools/a11y_ocr_probe/out/
 
 # All generated/runtime data under core/data
 # (baseline.json, capture status, events db, etc.)
