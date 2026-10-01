@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   schedule:
-    # Refresh weekly so LOC stays honest even without merges that week
+    # Refresh weekly so new contributors appear even without merges that week
     - cron: "0 12 * * 1"
   workflow_dispatch:
 

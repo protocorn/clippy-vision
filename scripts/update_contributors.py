@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the README contributors stats table (avatars, profiles, LOC).
+"""Regenerate the README contributors wall (avatars, profiles, highlights).
 
 Fills the block between:
   <!-- CONTRIBUTORS-STATS:START -->
@@ -11,7 +11,8 @@ Sources of truth (union — never rely on only one):
   3. .all-contributorsrc (manual badges + discovered people)
 
 Anyone with real commits who resolves to a GitHub login is always included,
-even when the Contributors API has not caught up yet.
+even when the Contributors API has not caught up yet. Commit and line counts
+are used only for sort order; they are not shown in the README table.
 """
 
 from __future__ import annotations
@@ -210,10 +211,6 @@ def load_contribution_types() -> dict[str, list[str]]:
     return out
 
 
-def format_int(n: int) -> str:
-    return f"{n:,}"
-
-
 def looks_like_login(value: str) -> bool:
     return bool(value) and LOGIN_RE.fullmatch(value) is not None and "[" not in value
 
@@ -320,8 +317,8 @@ def build_table(
 ) -> str:
     lines = [
         "",
-        "| | Contributor | What they built | Commits | Lines |",
-        "| :---: | :--- | :--- | ---: | :---: |",
+        "| | Contributor | What they built |",
+        "| :---: | :--- | :--- |",
     ]
 
     profiles: dict[str, dict] = {}
@@ -362,7 +359,7 @@ def build_table(
 
     rows.sort(key=lambda r: (-r[2]["added"], -r[2]["commits"], r[0].lower()))
 
-    for login, c, s in rows:
+    for login, c, _s in rows:
         avatar = c.get("avatar_url") or f"https://github.com/{login}.png"
         profile = c.get("html_url") or f"https://github.com/{login}"
         avatar_md = (
@@ -375,17 +372,9 @@ def build_table(
             f'<sub>{types_cell(types.get(login, ["code"]))}</sub>'
         )
         lines.append(
-            "| "
-            f"{avatar_md} | {name_md} | {highlight_cell(login)} | "
-            f"{format_int(s['commits'])} | "
-            f"+{format_int(s['added'])}&nbsp;/&nbsp;−{format_int(s['deleted'])} |"
+            f"| {avatar_md} | {name_md} | {highlight_cell(login)} |"
         )
 
-    lines.append("")
-    lines.append(
-        "<sub>Numbers come straight from git history and refresh automatically "
-        "on every push to <code>main</code>.</sub>"
-    )
     lines.append("")
     return "\n".join(lines)
 
