@@ -14,6 +14,17 @@ The installer's built-in setup wizard will:
 
 After setup completes, click **Launch**. Closing the window leaves the tray icon running. Launch at login is not turned on for you.
 
+## Using the app
+
+The home screen is the timeline. Open a session to see the events Clippy stored. There is no chat box in the app.
+
+- **Capture** starts with the app. Pause for a set time, or stop until you turn it back on, from the button in the window or the tray icon.
+- **Settings → Connect apps** is how an agent reads that memory. Cursor, Claude Desktop, and VS Code have a Connect button. **Copy JSON** builds the config from this computer. **Also connect with other apps** opens docs for Devin Desktop, Claude Code, Cline, Roo Code, Continue, JetBrains, Kiro, and LM Studio. Paste the same JSON there.
+- Connecting lets that app call Clippy's tools. A cloud model receives those replies. Disconnect the app to stop.
+- **Settings** is also where you black out apps, turn private-browsing capture off, and change how long events, screenshots, and summaries are kept.
+
+Ask your questions in the connected app. Clippy does not answer them inside its own window.
+
 **Requirements:** Windows 10/11 (64-bit) or macOS 12+. Internet is needed on first run for the text model. Screen capture uses accessibility APIs and local OCR. It does not load a vision model.
 
 On macOS, allow Screen Recording and Accessibility when Clippy asks. Both are required for screenshots, window titles, and password-field painting. If a prompt is dismissed, turn them on in System Settings → Privacy & Security.
@@ -42,64 +53,12 @@ The setup wizard runs automatically on first launch.
 | The Ollama model you pick (suggested `qwen3:8b`) | about 4.7 GB for `qwen3:8b` | Classification, session summaries, and long-term memory |
 | `all-MiniLM-L6-v2` | about 90 MB, downloaded from Hugging Face on first run | Optional local semantic retrieval. It is not bundled in the installer |
 
----
-
-## Troubleshooting
-
-### Setup wizard fails at a step
-Click **Retry** on the failed step. If it keeps failing, check the log panel in the wizard for the specific error.
-
-### App stuck on loading screen
-The API server takes 30–60s on first launch while models load into RAM. Wait for the spinner to clear. If it stays stuck, close the app, reopen it — it will re-run preflight checks and redirect to setup if anything is broken.
-
-### "Windows protected your PC" on install
-The installer is unsigned. Click **More info → Run anyway**.
-
-### macOS says the app cannot be opened
-The disk image is unsigned. Right-click Clippy Vision and choose **Open**, then confirm. Grant Screen Recording and Accessibility when asked.
-
-### Ollama not found after install
-Open a new terminal and run `ollama --version`. If not found, re-run setup or install it from [ollama.com](https://ollama.com/download). On macOS, `brew install ollama` is the same step the wizard tries.
-
-### Reset setup / reinstall
-Delete `setup_complete.json` from the app data folder below. The setup wizard runs again on the next launch.
-
-### Check if everything is working
-The API listens on `127.0.0.1` at the port recorded in `api_process.json` next to the app data. It is not fixed at port 8000.
-
-```powershell
-# Windows
-$state = Get-Content "$env:APPDATA\Clippy Vision\api_process.json" | ConvertFrom-Json
-Invoke-RestMethod "http://127.0.0.1:$($state.port)/health"
-python -c "import sqlite3, os; db=os.path.join(os.environ['APPDATA'],'Clippy Vision','data','events.db'); print(sqlite3.connect(db).execute('SELECT COUNT(*) FROM events').fetchone()[0], 'events')"
-```
-
-On macOS, in Terminal:
-
-```bash
-python3 -c "import json,urllib.request,pathlib; p=pathlib.Path.home()/'Library/Application Support/Clippy Vision/api_process.json'; port=json.loads(p.read_text())['port']; print(urllib.request.urlopen(f'http://127.0.0.1:{port}/health').read().decode())"
-```
+Pipeline details: [docs/architecture.md](docs/architecture.md).
 
 ---
 
-## File Locations (installed)
+## Troubleshooting, file locations, and uninstall
 
-| Item | Windows | macOS |
-|------|---------|-------|
-| App data (DB, screenshots) | `%APPDATA%\Clippy Vision\data\` | `~/Library/Application Support/Clippy Vision/data/` |
-| Setup flag | `%APPDATA%\Clippy Vision\setup_complete.json` | `~/Library/Application Support/Clippy Vision/setup_complete.json` |
-| API port | `%APPDATA%\Clippy Vision\api_process.json` | `~/Library/Application Support/Clippy Vision/api_process.json` |
-| Ollama models | `%USERPROFILE%\.ollama\models\` | `~/.ollama/models/` |
-| App install | `%LOCALAPPDATA%\Programs\Clippy Vision\` | `/Applications/Clippy Vision.app` |
+Full install troubleshooting (Homebrew, permissions, health checks), file locations, and uninstall steps: [docs/usage.md](docs/usage.md#installation-troubleshooting).
 
-A source run (`npm start`) stores the database in `core/data` inside the checkout, not in the installed-app folder.
-
----
-
-## Uninstall
-
-Windows: **Settings → Apps → Clippy Vision → Uninstall**, or run the uninstaller in `%LOCALAPPDATA%\Programs\Clippy Vision\`.
-
-macOS: drag **Clippy Vision** out of Applications.
-
-To remove captured data, delete the app data folder in the table above. To remove Ollama models, delete the Ollama models folder in that table.
+MCP connect and tool reference: [docs/mcp.md](docs/mcp.md). Build from source: [CONTRIBUTING.md](CONTRIBUTING.md#building-from-source).
