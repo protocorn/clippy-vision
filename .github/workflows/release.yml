@@ -1,5 +1,14 @@
 name: Build & Publish Release
 
+# Triggers:
+# - pull_request: dry-run Windows + Linux packaging (no GitHub Release)
+# - push of tags matching v*: same packaging dry-run; does NOT create or update a GitHub Release
+# - workflow_dispatch: dry-run if tag is empty; create/update a *draft* GitHub Release only when
+#   tag is set. That is the only path that attaches installers to a GitHub Release.
+#
+# Tag pushes never publish or clobber a GitHub Release. Publishing requires a manual
+# Actions run (workflow_dispatch) with a tag input.
+
 on:
   push:
     tags:
@@ -13,14 +22,14 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to build (e.g. v2.0.1). Leave empty for dry-run without creating a release.'
+        description: 'Release tag to attach artifacts to (e.g. v2.0.1). Leave empty for dry-run without creating a release.'
         required: false
       include_macos:
         description: 'Also build unsigned macOS installers (opt-in, manual validation required)'
         type: boolean
         default: false
       include_linux:
-        description: 'Build Linux AppImage (enabled by default for tag pushes)'
+        description: 'Build Linux AppImage (enabled by default for tag pushes and PRs)'
         type: boolean
         default: true
 
@@ -381,26 +390,26 @@ jobs:
           retention-days: 14
 
       - name: Ensure release notes file exists
-        if: (github.event.inputs.tag != '' || github.ref_type == 'tag') && github.event_name != 'pull_request'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
         shell: bash
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          TAG="${{ github.event.inputs.tag }}"
           NOTES="docs/release-notes/${TAG}.md"
           if [[ ! -f "$NOTES" ]]; then
             echo "::error::Release notes file not found: $NOTES"
-            echo "Looked up from tag/ref '$TAG' (workflow_dispatch input, else github.ref_name)."
+            echo "Looked up from workflow_dispatch tag input '$TAG'."
             ls -la docs/release-notes/ || true
             exit 1
           fi
           echo "Using release notes: $NOTES"
 
       - name: Upload Windows installer to release
-        # Only upload to release if we have a tag (not a dry-run or PR)
-        if: (github.event.inputs.tag != '' || github.ref_type == 'tag') && github.event_name != 'pull_request'
+        # Manual only: workflow_dispatch with a tag. Tag pushes and PRs never create/update a release.
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          body_path: docs/release-notes/${{ github.event.inputs.tag || github.ref_name }}.md
+          tag_name: ${{ github.event.inputs.tag }}
+          body_path: docs/release-notes/${{ github.event.inputs.tag }}.md
           files: |
             electron-ui/dist/*.exe
           draft: true
@@ -476,7 +485,7 @@ jobs:
           echo "Using release notes: $NOTES"
 
       - name: Upload macOS installers to release
-        # Only upload to release if we have a tag (not a dry-run or PR)
+        # Manual only: workflow_dispatch with a tag. Tag pushes never run this job.
         if: github.event.inputs.tag != '' && github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
@@ -806,26 +815,26 @@ jobs:
           retention-days: 14
 
       - name: Ensure release notes file exists
-        if: (github.event.inputs.tag != '' || github.ref_type == 'tag') && github.event_name != 'pull_request'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
         shell: bash
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          TAG="${{ github.event.inputs.tag }}"
           NOTES="docs/release-notes/${TAG}.md"
           if [[ ! -f "$NOTES" ]]; then
             echo "::error::Release notes file not found: $NOTES"
-            echo "Looked up from tag/ref '$TAG' (workflow_dispatch input, else github.ref_name)."
+            echo "Looked up from workflow_dispatch tag input '$TAG'."
             ls -la docs/release-notes/ || true
             exit 1
           fi
           echo "Using release notes: $NOTES"
 
       - name: Upload Linux AppImage to release
-        # Only upload to release if we have a tag (not a dry-run or PR)
-        if: (github.event.inputs.tag != '' || github.ref_type == 'tag') && github.event_name != 'pull_request'
+        # Manual only: workflow_dispatch with a tag. Tag pushes and PRs never create/update a release.
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          body_path: docs/release-notes/${{ github.event.inputs.tag || github.ref_name }}.md
+          tag_name: ${{ github.event.inputs.tag }}
+          body_path: docs/release-notes/${{ github.event.inputs.tag }}.md
           files: |
             electron-ui/dist/*.AppImage
           draft: true
