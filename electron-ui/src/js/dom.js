@@ -98,6 +98,7 @@ export const wideLayoutMq = window.matchMedia('(min-width: 800px)')
 export const APP_PANELS = [chatView, settingsView, timelineView]
 
 export const USER_MESSAGE_MAX_CHARS = 4000
+export const CHAR_COUNT_SHOW_AT = Math.floor(USER_MESSAGE_MAX_CHARS * 0.7)
 
 export const store = {
  searchTimer: null,

@@ -27,6 +27,26 @@ jobs:
         working-directory: electron-ui
         run: node --test electron/lib/mcp.test.js electron/lib/setup.test.js
 
+  electron-renderer-lint:
+    name: Electron renderer lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Electron UI deps
+        working-directory: electron-ui
+        run: npm install --no-fund --no-audit
+
+      - name: Lint renderer modules (no-undef)
+        working-directory: electron-ui
+        run: npm run lint:renderer
+
   test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

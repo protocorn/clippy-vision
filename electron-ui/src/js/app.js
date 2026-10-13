@@ -1,6 +1,6 @@
 import {
-  nameInput, nameSubmit, nameError, nameView, loadingView, loadingSub,
-  appBrand, homeBtn, homeMenuBtn, settingsBtn, captureBtn, captureLabel,
+  nameInput, nameSubmit, nameError, nameView, loadingView, loadingSub, loadingError,
+  appBrand, homeBtn, homeMenuBtn, chatBtn, chatMenuBtn, settingsBtn, captureBtn,
   pauseBtn, pauseMenu, pauseMenuPanel, connectBtn,
   timelineSearch, timelineHint, timelineHintDismiss, timelineLoadMore,
   timelineDetailBack, updateBanner, updateBannerText, updateBannerLink,
@@ -191,15 +191,28 @@ function wireUi() {
   on(timelineDetailBack, 'click', closeTimelineDetail)
 }
 
+function reportStartupFailure(error) {
+  console.error('[clippy-ui] startup failed:', error)
+  if (loadingError) {
+    loadingError.textContent = `UI failed to start: ${error?.message || error}`
+  }
+}
+
 export async function init() {
   showView(loadingView)
   const loadingTitle = document.getElementById('loading-title')
-  const loadingError = document.getElementById('loading-error')
 
   if (!window.clippy) {
     if (loadingError) {
       loadingError.textContent = 'Desktop bridge failed to load. Restart Clippy Vision.'
     }
+    return
+  }
+
+  try {
+    wireUi()
+  } catch (error) {
+    reportStartupFailure(error)
     return
   }
 
@@ -270,6 +283,7 @@ export async function init() {
     })
   } catch (error) {
     clearInterval(quipTimer)
+    console.error('[clippy-ui] API startup failed:', error)
     if (loadingError) {
       loadingError.textContent = `Startup failed: ${error.message || error}`
     }
@@ -296,8 +310,4 @@ export async function init() {
   }
 }
 
-wireUi()
-init().catch((error) => {
-  const loadingError = document.getElementById('loading-error')
-  if (loadingError) loadingError.textContent = `UI failed to start: ${error.message || error}`
-})
+init().catch(reportStartupFailure)
