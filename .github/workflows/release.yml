@@ -8,11 +8,6 @@ name: Build & Publish Release
 #
 # Tag pushes never publish or clobber a GitHub Release. Publishing requires a manual
 # Actions run (workflow_dispatch) with a tag input.
-#
-# electron-builder must be invoked with --publish never on every path (including tag
-# pushes). With repository.url set in electron-ui/package.json, a git tag makes
-# electron-builder implicitly publish to GitHub and fail without GH_TOKEN. Installer
-# upload is only via softprops/action-gh-release on workflow_dispatch with a tag.
 
 on:
   push:
@@ -87,8 +82,7 @@ jobs:
 
       - name: Build Windows installer (unsigned)
         working-directory: electron-ui
-        # --publish never: tag checkouts must not make electron-builder upload to GitHub.
-        run: npm run dist:win -- --publish never
+        run: npm run dist:win
 
       - name: Smoke check Windows installer
         shell: bash
@@ -467,8 +461,7 @@ jobs:
         working-directory: electron-ui
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
-        # --publish never: tag checkouts must not make electron-builder upload to GitHub.
-        run: npm run dist:mac -- --publish never
+        run: npm run dist:mac
 
       - name: Upload macOS installers artifact
         uses: actions/upload-artifact@v4
@@ -549,8 +542,7 @@ jobs:
 
       - name: Build Linux AppImage (unsigned)
         working-directory: electron-ui
-        # --publish never: tag checkouts must not make electron-builder upload to GitHub.
-        run: npm run dist:linux -- --publish never
+        run: npm run dist:linux
 
       - name: Smoke check Linux AppImage
         working-directory: electron-ui/dist

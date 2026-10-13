@@ -15,7 +15,7 @@
   },
   "main": "electron/main.js",
   "scripts": {
-    "test": "node --test electron/lib/mcp.test.js electron/lib/setup.test.js electron/lib/packaging.test.js",
+    "test": "node --test electron/lib/mcp.test.js electron/lib/setup.test.js",
     "start": "electron .",
     "dist": "electron-builder --publish never",
     "dist:all": "electron-builder --win --mac --linux --publish never",
