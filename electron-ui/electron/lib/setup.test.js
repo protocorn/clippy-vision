@@ -22,6 +22,9 @@ const {
     looksLikeMissingZstd,
     formatMissingZstdMessage,
     summarizeCommandFailure,
+    isIgnorablePipNotice,
+    summarizePipFailure,
+    linuxPynputInstallArgs,
     LINUX_OLLAMA_INSTALL_COMMAND,
     LINUX_OLLAMA_DOWNLOAD_URL,
     OLLAMA_DOWNLOAD_URL,
@@ -338,4 +341,37 @@ test('summarizeCommandFailure surfaces stderr and exit code', () => {
         summarizeCommandFailure({ code: 2, stdout: '', stderr: '' }, 'Ollama install failed'),
         'Ollama install failed (exit 2)',
     )
+})
+
+test('ignorable pip notices skip environment-marker Ignoring lines', () => {
+    assert.equal(
+        isIgnorablePipNotice("Ignoring pywin32: markers 'platform_system == \"Windows\"' don't match your environment"),
+        true,
+    )
+    assert.equal(isIgnorablePipNotice('ERROR: Failed to build evdev'), false)
+})
+
+test('summarizePipFailure prefers ERROR lines over Ignoring notices', () => {
+    const log = [
+        "Ignoring pywin32: markers 'platform_system == \"Windows\"' don't match your environment",
+        "Ignoring uiautomation: markers 'platform_system == \"Windows\"' don't match your environment",
+        'Collecting evdev',
+        'ERROR: Failed building wheel for evdev',
+        'error: subprocess-exited-with-error',
+    ].join('\n')
+    assert.equal(
+        summarizePipFailure({ code: 1, stderr: log }, 'pip install failed'),
+        'ERROR: Failed building wheel for evdev (exit 1)',
+    )
+})
+
+test('summarizePipFailure falls back when no ERROR line exists', () => {
+    assert.equal(
+        summarizePipFailure({ code: 1, stderr: '', stdout: '' }, 'pip install failed. Check the log.'),
+        'pip install failed. Check the log. (exit 1)',
+    )
+})
+
+test('linux pynput install uses --no-deps to skip evdev', () => {
+    assert.deepEqual(linuxPynputInstallArgs(), ['install', '--no-deps', 'pynput'])
 })

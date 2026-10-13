@@ -50,6 +50,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest
           pip install -r requirements.txt
+          # Linux: pynput is excluded from requirements.txt (evdev has no cp313 wheel).
+          # Install with --no-deps so the X11/python-xlib backend is used without compiling evdev.
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            pip install --no-deps pynput
+          fi
+        shell: bash
       
       - name: Install Linux Xvfb test dependencies
         if: runner.os == 'Linux'
