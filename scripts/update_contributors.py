@@ -13,6 +13,10 @@ Sources of truth (union — never rely on only one):
 Anyone with real commits who resolves to a GitHub login is always included,
 even when the Contributors API has not caught up yet. Commit and line counts
 are used only for sort order; they are not shown in the README table.
+
+GitHub logins are case-insensitive, so Furox-Art and furox-art are one person.
+Sources are merged that way, keeping GitHub's canonical spelling and any
+custom All Contributors fields (name, badges, avatar, profile).
 """
 
 from __future__ import annotations
@@ -143,12 +147,152 @@ def fetch_commit_login_map() -> dict[str, str]:
 
 def parse_noreply_login(email: str) -> str | None:
     # 123456+login@users.noreply.github.com or login@users.noreply.github.com
+    # Keep the mailbox spelling — GitHub's canonical login case lives there.
     m = re.match(
         r"^(?:\d+\+)?([A-Za-z0-9-]+)@users\.noreply\.github\.com$",
-        email,
+        email.strip(),
         re.I,
     )
     return m.group(1) if m else None
+
+
+def prefer_login_spelling(current: str | None, candidate: str) -> str:
+    """Prefer GitHub's mixed-case login over a lowercased copy of the same name."""
+    if not candidate:
+        return current or ""
+    if current is None:
+        return candidate
+    if current.lower() != candidate.lower():
+        return current
+    if current == current.lower() and candidate != candidate.lower():
+        return candidate
+    return current
+
+
+def lookup_ci(mapping: dict, login: str):
+    """Case-insensitive dict lookup; exact key wins, then any case variant."""
+    if login in mapping:
+        return mapping[login]
+    key = login.lower()
+    if key in mapping:
+        return mapping[key]
+    for existing, value in mapping.items():
+        if existing.lower() == key:
+            return value
+    return None
+
+
+def unique_extend(base: list[str], extra: list[str]) -> list[str]:
+    seen = set(base)
+    out = list(base)
+    for item in extra:
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def resolve_commit_login(name: str, email: str, login_map: dict[str, str]) -> str:
+    """Map a git author to a GitHub login, preserving noreply mailbox case."""
+    name_l = name.strip().lower()
+    email_raw = email.strip()
+    email_l = email_raw.lower()
+    return (
+        login_map.get(email_l)
+        or login_map.get(f"name:{name_l}")
+        or parse_noreply_login(email_raw)
+        or name.strip()
+    )
+
+
+def fold_stats_by_login(
+    loc: dict[str, dict[str, int]],
+    canonical: dict[str, str] | None = None,
+) -> dict[str, dict[str, int]]:
+    """Merge commit stats for logins that differ only by letter case."""
+    display: dict[str, str] = dict(canonical or {})
+    for login in loc:
+        key = login.lower()
+        display[key] = prefer_login_spelling(display.get(key), login)
+    folded: dict[str, dict[str, int]] = {}
+    for login, stats in loc.items():
+        preferred = display[login.lower()]
+        bucket = folded.setdefault(preferred, {"commits": 0, "added": 0, "deleted": 0})
+        bucket["commits"] += stats.get("commits", 0)
+        bucket["added"] += stats.get("added", 0)
+        bucket["deleted"] += stats.get("deleted", 0)
+    return folded
+
+
+def merge_contributor_records(
+    people: list[dict],
+    canonical: dict[str, str] | None = None,
+) -> list[dict]:
+    """Collapse case-variant GitHub logins, keeping custom fields.
+
+    The first record for a login keeps name/avatar/profile when those are
+    custom; contribution types are unioned. Login (and name when it was just
+    the old login) is rewritten to the preferred GitHub spelling.
+    """
+    preferred_by_key: dict[str, str] = dict(canonical or {})
+    for person in people:
+        login = person.get("login") or ""
+        if login:
+            key = login.lower()
+            preferred_by_key[key] = prefer_login_spelling(
+                preferred_by_key.get(key), login
+            )
+
+    merged: list[dict] = []
+    index_by_lower: dict[str, int] = {}
+    for person in people:
+        login = person.get("login")
+        if not login:
+            merged.append(dict(person))
+            continue
+        key = login.lower()
+        preferred = preferred_by_key.get(key, login)
+        if key in index_by_lower:
+            existing = merged[index_by_lower[key]]
+            existing["contributions"] = unique_extend(
+                list(existing.get("contributions") or []),
+                list(person.get("contributions") or []),
+            )
+            for field in ("name", "avatar_url", "profile"):
+                if not existing.get(field) and person.get(field):
+                    existing[field] = person[field]
+            continue
+        record = dict(person)
+        record["login"] = preferred
+        if (record.get("name") or "").lower() == key:
+            record["name"] = preferred
+        profile = record.get("profile") or ""
+        if profile.rstrip("/").lower().endswith("/" + key):
+            record["profile"] = f"https://github.com/{preferred}"
+        avatar = record.get("avatar_url") or ""
+        if avatar.lower() == f"https://github.com/{key}.png":
+            record["avatar_url"] = f"https://github.com/{preferred}.png"
+        index_by_lower[key] = len(merged)
+        merged.append(record)
+    return merged
+
+
+def rewrite_all_contributors(canonical: dict[str, str] | None = None) -> bool:
+    """Dedupe .all-contributorsrc case-insensitively. Returns True if changed."""
+    if not ALL_CONTRIBUTORS_PATH.exists():
+        return False
+    data = json.loads(ALL_CONTRIBUTORS_PATH.read_text(encoding="utf-8"))
+    people = list(data.get("contributors") or [])
+    merged = merge_contributor_records(people, canonical)
+    if merged == people:
+        return False
+    data["contributors"] = merged
+    ALL_CONTRIBUTORS_PATH.write_text(
+        json.dumps(data, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    return True
 
 
 def compute_loc_by_login(login_map: dict[str, str]) -> dict[str, dict[str, int]]:
@@ -172,15 +316,7 @@ def compute_loc_by_login(login_map: dict[str, str]) -> dict[str, dict[str, int]]
         line = raw.rstrip("\n")
         if "|" in line and "\t" not in line:
             name, _, email = line.partition("|")
-            name_l = name.strip().lower()
-            email_l = email.strip().lower()
-            login = (
-                login_map.get(email_l)
-                or login_map.get(f"name:{name_l}")
-                or parse_noreply_login(email_l)
-                or name.strip()
-            )
-            current_login = login
+            current_login = resolve_commit_login(name, email, login_map)
             stats[current_login]["commits"] += 1
             continue
 
@@ -196,7 +332,7 @@ def compute_loc_by_login(login_map: dict[str, str]) -> dict[str, dict[str, int]]
             stats[current_login]["added"] += added
             stats[current_login]["deleted"] += deleted
 
-    return stats
+    return fold_stats_by_login(dict(stats))
 
 
 def load_contribution_types() -> dict[str, list[str]]:
@@ -204,10 +340,19 @@ def load_contribution_types() -> dict[str, list[str]]:
         return {}
     data = json.loads(ALL_CONTRIBUTORS_PATH.read_text(encoding="utf-8"))
     out: dict[str, list[str]] = {}
+    key_to_login: dict[str, str] = {}
     for person in data.get("contributors") or []:
         login = person.get("login")
-        if login:
-            out[login] = list(person.get("contributions") or [])
+        if not login:
+            continue
+        key = login.lower()
+        contribs = list(person.get("contributions") or [])
+        if key in key_to_login:
+            existing = key_to_login[key]
+            out[existing] = unique_extend(out[existing], contribs)
+            continue
+        key_to_login[key] = login
+        out[login] = contribs
     return out
 
 
@@ -222,7 +367,7 @@ def types_cell(types: list[str]) -> str:
 
 
 def highlight_cell(login: str) -> str:
-    note = HIGHLIGHTS.get(login)
+    note = lookup_ci(HIGHLIGHTS, login)
     if note:
         return note
     commits_url = f"https://github.com/{OWNER}/{REPO}/commits?author={login}"
@@ -259,7 +404,11 @@ def discover_logins_from_git(
     return found
 
 
-def ensure_all_contributors_entries(logins: list[str], types: dict[str, list[str]]) -> bool:
+def ensure_all_contributors_entries(
+    logins: list[str],
+    types: dict[str, list[str]],
+    canonical: dict[str, str] | None = None,
+) -> bool:
     """Persist newly discovered logins into .all-contributorsrc so they stick.
 
     Returns True if the file was updated.
@@ -280,6 +429,7 @@ def ensure_all_contributors_entries(logins: list[str], types: dict[str, list[str
             "contributors": [],
         }
 
+    canonical = canonical or {}
     existing = {
         (person.get("login") or "").lower()
         for person in (data.get("contributors") or [])
@@ -288,18 +438,21 @@ def ensure_all_contributors_entries(logins: list[str], types: dict[str, list[str
     for login in logins:
         if login.lower() in existing:
             continue
+        preferred = prefer_login_spelling(canonical.get(login.lower()), login)
+        contribs = lookup_ci(types, preferred) or lookup_ci(types, login) or ["code"]
         data.setdefault("contributors", []).append(
             {
-                "login": login,
-                "name": login,
-                "avatar_url": f"https://github.com/{login}.png",
-                "profile": f"https://github.com/{login}",
-                "contributions": types.get(login) or ["code"],
+                "login": preferred,
+                "name": preferred,
+                "avatar_url": f"https://github.com/{preferred}.png",
+                "profile": f"https://github.com/{preferred}",
+                "contributions": list(contribs),
             }
         )
-        types.setdefault(login, ["code"])
+        types.setdefault(preferred, list(contribs))
+        existing.add(preferred.lower())
         changed = True
-        print(f"Discovered new contributor @{login} — added to .all-contributorsrc")
+        print(f"Discovered new contributor @{preferred} — added to .all-contributorsrc")
 
     if changed:
         ALL_CONTRIBUTORS_PATH.write_text(
@@ -314,6 +467,7 @@ def build_table(
     contributors: list[dict],
     loc: dict[str, dict[str, int]],
     types: dict[str, list[str]],
+    canonical: dict[str, str] | None = None,
 ) -> str:
     lines = [
         "",
@@ -321,16 +475,32 @@ def build_table(
         "| :---: | :--- | :--- |",
     ]
 
+    canonical = canonical or {}
+    skip = {b.lower() for b in SKIP_LOGINS}
+    # Keyed by lowercase login so GitHub's case-insensitive identities collapse.
     profiles: dict[str, dict] = {}
+
+    def add_profile(login: str, payload: dict) -> None:
+        if not login or login.lower() in skip:
+            return
+        key = login.lower()
+        if key in profiles:
+            return
+        preferred = prefer_login_spelling(canonical.get(key), login)
+        profile = dict(payload)
+        profile["login"] = preferred
+        if profile.get("html_url") in (None, "", f"https://github.com/{login}"):
+            profile["html_url"] = f"https://github.com/{preferred}"
+        if profile.get("avatar_url") in (None, "", f"https://github.com/{login}.png"):
+            profile["avatar_url"] = f"https://github.com/{preferred}.png"
+        profiles[key] = profile
+
     for c in contributors:
-        login = c["login"]
-        if login.lower() in {b.lower() for b in SKIP_LOGINS}:
-            continue
-        profiles[login] = c
+        add_profile(c["login"], c)
 
     # Git history is authoritative when the Contributors API lags after a merge.
-    for login in discover_logins_from_git(loc, {k.lower() for k in profiles}):
-        profiles.setdefault(
+    for login in discover_logins_from_git(loc, set(profiles)):
+        add_profile(
             login,
             {
                 "login": login,
@@ -341,9 +511,7 @@ def build_table(
 
     # Keep manually listed people even before their first counted commit lands.
     for login in types:
-        if login.lower() in {b.lower() for b in SKIP_LOGINS}:
-            continue
-        profiles.setdefault(
+        add_profile(
             login,
             {
                 "login": login,
@@ -353,8 +521,11 @@ def build_table(
         )
 
     rows: list[tuple[str, dict, dict[str, int]]] = []
-    for login, c in profiles.items():
-        s = loc_for_login(login, loc, fallback_commits=int(c.get("contributions") or 0))
+    for c in profiles.values():
+        login = c.get("login") or ""
+        fallback = c.get("contributions")
+        fallback_commits = fallback if isinstance(fallback, int) else 0
+        s = loc_for_login(login, loc, fallback_commits=fallback_commits)
         rows.append((login, c, s))
 
     rows.sort(key=lambda r: (-r[2]["added"], -r[2]["commits"], r[0].lower()))
@@ -367,9 +538,10 @@ def build_table(
             f'<img src="{avatar}" width="{AVATAR_SIZE}" height="{AVATAR_SIZE}" '
             f'alt="{login}"/></a>'
         )
+        contrib_types = lookup_ci(types, login) or ["code"]
         name_md = (
             f'<a href="{profile}"><b>@{login}</b></a><br/>'
-            f'<sub>{types_cell(types.get(login, ["code"]))}</sub>'
+            f'<sub>{types_cell(contrib_types)}</sub>'
         )
         lines.append(
             f"| {avatar_md} | {name_md} | {highlight_cell(login)} |"
@@ -400,14 +572,34 @@ def main() -> int:
         return 1
 
     login_map = fetch_commit_login_map()
-    loc = compute_loc_by_login(login_map)
+    canonical: dict[str, str] = {}
+    for person in contributors:
+        login = person.get("login") or ""
+        if login:
+            canonical[login.lower()] = prefer_login_spelling(
+                canonical.get(login.lower()), login
+            )
+    for login in login_map.values():
+        canonical[login.lower()] = prefer_login_spelling(
+            canonical.get(login.lower()), login
+        )
+
+    loc = fold_stats_by_login(compute_loc_by_login(login_map), canonical)
+    for login in loc:
+        canonical[login.lower()] = prefer_login_spelling(
+            canonical.get(login.lower()), login
+        )
+
+    config_changed = rewrite_all_contributors(canonical)
     types = load_contribution_types()
 
     api_logins = {c["login"].lower() for c in contributors}
     discovered = discover_logins_from_git(loc, api_logins)
-    ensure_all_contributors_entries(discovered, types)
+    discovered_changed = ensure_all_contributors_entries(
+        discovered, types, canonical
+    )
 
-    table = build_table(contributors, loc, types)
+    table = build_table(contributors, loc, types, canonical)
 
     readme = README_PATH.read_text(encoding="utf-8")
     updated = replace_section(readme, table)
@@ -416,7 +608,7 @@ def main() -> int:
         README_PATH.write_text(updated, encoding="utf-8", newline="\n")
 
     row_count = table.count("\n| <a href=")
-    if not readme_changed and not discovered:
+    if not readme_changed and not discovered_changed and not config_changed:
         print("README contributors section already up to date.")
         return 0
 
