@@ -17,17 +17,17 @@
   "scripts": {
     "test": "node --test electron/lib/mcp.test.js electron/lib/setup.test.js",
     "start": "electron .",
-    "dist": "electron-builder",
-    "dist:all": "electron-builder --win --mac --linux",
-    "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
-    "dist:mac:arm64": "electron-builder --mac --arm64",
-    "dist:mac:x64": "electron-builder --mac --x64",
-    "dist:mac:all": "electron-builder --mac",
-    "dist:linux": "electron-builder --linux",
-    "dist:dir": "electron-builder --dir",
-    "dist:mac:dir": "electron-builder --mac --dir",
-    "pack": "electron-builder --dir"
+    "dist": "electron-builder --publish never",
+    "dist:all": "electron-builder --win --mac --linux --publish never",
+    "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:mac:arm64": "electron-builder --mac --arm64 --publish never",
+    "dist:mac:x64": "electron-builder --mac --x64 --publish never",
+    "dist:mac:all": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never",
+    "dist:dir": "electron-builder --dir --publish never",
+    "dist:mac:dir": "electron-builder --mac --dir --publish never",
+    "pack": "electron-builder --dir --publish never"
   },
   "keywords": [],
   "devDependencies": {
