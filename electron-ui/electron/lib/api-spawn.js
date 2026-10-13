@@ -11,7 +11,6 @@ function createApiSpawn({ paths, llmConfig, state }) {
         USER_DATA,
         API_SCRIPT,
         CAPTURE_SCRIPT,
-        PYTHON_COMMAND,
         OLLAMA_COMMAND,
         API_STATE_FILE,
         CAPTURE_STATE_FILE,
@@ -20,6 +19,10 @@ function createApiSpawn({ paths, llmConfig, state }) {
         OLLAMA_NUM_PARALLEL,
         DEFAULT_API_PORT,
     } = paths
+    // Read through paths so setup can switch to the app venv mid-session.
+    function pythonCommand() {
+        return paths.PYTHON_COMMAND
+    }
     const { configuredOllamaBaseURL, usesManagedOllama, readLLMConfig } = llmConfig
 
     function buildPythonEnv(extra = {}) {
@@ -196,7 +199,7 @@ function createApiSpawn({ paths, llmConfig, state }) {
         // never need a hosted relay.
         if (state.apiProcess) return
         await ensureApiPort()
-        const proc = spawnHidden(PYTHON_COMMAND, [API_SCRIPT], {
+        const proc = spawnHidden(pythonCommand(), [API_SCRIPT], {
             cwd: ROOT,
             env: {
                 CLIPPY_API_PORT: String(state.apiPort),
@@ -345,7 +348,7 @@ function createApiSpawn({ paths, llmConfig, state }) {
         if (capturePhase === 'active' || capturePhase === 'starting' || capturePhase === 'stopping') return
         capturePhase = 'starting'
         stopReason = null
-        const proc = spawnHidden(PYTHON_COMMAND, [CAPTURE_SCRIPT], {
+        const proc = spawnHidden(pythonCommand(), [CAPTURE_SCRIPT], {
             cwd: ROOT,
             env: { PYTHONUNBUFFERED: '1' },
         })

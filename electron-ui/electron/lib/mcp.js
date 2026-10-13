@@ -40,7 +40,7 @@ function mcpClientDefinitions({ platform = process.platform, env = process.env, 
 }
 
 function createMcp({ paths, runCommand, shell, runtime } = {}) {
-    const { ROOT, DATA_DIR, PYTHON_COMMAND } = paths
+    const { ROOT, DATA_DIR } = paths
 
     const MCP_SERVER_KEY = 'clippy-vision'
 
@@ -55,9 +55,10 @@ function createMcp({ paths, runCommand, shell, runtime } = {}) {
 
     async function resolvePythonExecutable() {
         // Prefer an absolute path so MCP client configs do not depend on PATH.
+        // Prefer the app venv (paths.PYTHON_COMMAND) once setup has created it.
         const candidates = [
             (process.env.CLIPPY_PYTHON || '').trim(),
-            PYTHON_COMMAND,
+            paths.PYTHON_COMMAND,
         ].filter(Boolean)
 
         for (const candidate of candidates) {
@@ -72,7 +73,7 @@ function createMcp({ paths, runCommand, shell, runtime } = {}) {
             if (hit) return hit
         }
 
-        return PYTHON_COMMAND
+        return paths.PYTHON_COMMAND
     }
 
     async function getMcpLaunchConfig() {

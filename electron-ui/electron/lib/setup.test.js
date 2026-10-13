@@ -2,6 +2,7 @@
  * Setup preflight must require Python 3.11+.
  * Run with: node --test electron/lib/setup.test.js
  */
+const path = require('path')
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
 
@@ -16,11 +17,22 @@ const {
     firstExistingPath,
     parseWindowsRegPathValue,
     mergePathDirectories,
+    looksLikeMissingPythonVenvPackage,
+    missingPythonVenvPackageMessage,
+    looksLikeMissingZstd,
+    formatMissingZstdMessage,
+    summarizeCommandFailure,
     LINUX_OLLAMA_INSTALL_COMMAND,
     LINUX_OLLAMA_DOWNLOAD_URL,
     OLLAMA_DOWNLOAD_URL,
     PYTHON_DOWNLOAD_URL,
 } = require('./setup')
+const {
+    pythonVenvDir,
+    venvPythonPath,
+    isHealthyVenv,
+    PYTHON_VENV_DIRNAME,
+} = require('./paths')
 
 function collectInstallRuns(plan) {
     const invocation = installCommandToRun(plan)
@@ -244,5 +256,86 @@ test('mergePathDirectories prepends new install dirs without duplicates', () => 
     assert.equal(
         merged,
         'C:\\Users\\ada\\AppData\\Local\\Programs\\Ollama;C:\\Windows\\System32',
+    )
+})
+
+test('python venv lives under userData/python-venv', () => {
+    assert.equal(PYTHON_VENV_DIRNAME, 'python-venv')
+    assert.equal(pythonVenvDir('/tmp/clippy-data'), path.join('/tmp/clippy-data', 'python-venv'))
+})
+
+test('venvPythonPath uses Scripts on Windows and bin elsewhere', () => {
+    assert.equal(
+        venvPythonPath('C:\\Users\\ada\\AppData\\Roaming\\Clippy\\python-venv', 'win32'),
+        'C:\\Users\\ada\\AppData\\Roaming\\Clippy\\python-venv\\Scripts\\python.exe',
+    )
+    assert.equal(
+        venvPythonPath('/home/ada/.config/clippy/python-venv', 'linux'),
+        '/home/ada/.config/clippy/python-venv/bin/python',
+    )
+    assert.equal(
+        venvPythonPath('/Users/ada/Library/Application Support/clippy/python-venv', 'darwin'),
+        '/Users/ada/Library/Application Support/clippy/python-venv/bin/python',
+    )
+})
+
+test('isHealthyVenv requires the platform interpreter path', () => {
+    const linuxPy = venvPythonPath('/tmp/venv', 'linux')
+    const winPy = venvPythonPath('C:\\Users\\ada\\venv', 'win32')
+    assert.equal(isHealthyVenv('/tmp/venv', 'linux', (file) => file === linuxPy), true)
+    assert.equal(isHealthyVenv('/tmp/venv', 'linux', () => false), false)
+    assert.equal(isHealthyVenv('C:\\Users\\ada\\venv', 'win32', (file) => file === winPy), true)
+    assert.equal(isHealthyVenv('C:\\Users\\ada\\venv', 'win32', () => false), false)
+})
+
+test('missing python3-venv package errors are detected', () => {
+    assert.equal(
+        looksLikeMissingPythonVenvPackage('The virtual environment was not created successfully because ensurepip is not available'),
+        true,
+    )
+    assert.equal(
+        looksLikeMissingPythonVenvPackage('On Debian/Ubuntu systems, you need to install the python3-venv package'),
+        true,
+    )
+    assert.equal(looksLikeMissingPythonVenvPackage('Successfully created virtual environment'), false)
+    assert.match(missingPythonVenvPackageMessage(), /python3-venv/)
+    assert.match(missingPythonVenvPackageMessage(), /python3-full/)
+})
+
+test('missing zstd installer errors are detected', () => {
+    assert.equal(
+        looksLikeMissingZstd('ERROR: This version requires zstd for extraction'),
+        true,
+    )
+    assert.equal(looksLikeMissingZstd('ollama installed successfully'), false)
+})
+
+test('formatMissingZstdMessage prefers the available package manager', () => {
+    assert.match(
+        formatMissingZstdMessage({ hasAptGet: true }),
+        /sudo apt-get update && sudo apt-get install zstd/,
+    )
+    assert.match(
+        formatMissingZstdMessage({ hasDnf: true }),
+        /sudo dnf install zstd/,
+    )
+    assert.match(
+        formatMissingZstdMessage({ hasPacman: true }),
+        /sudo pacman -S zstd/,
+    )
+    const fallback = formatMissingZstdMessage({})
+    assert.match(fallback, /apt-get install zstd/)
+    assert.match(fallback, /dnf install zstd/)
+    assert.match(fallback, /pacman -S zstd/)
+})
+
+test('summarizeCommandFailure surfaces stderr and exit code', () => {
+    assert.equal(
+        summarizeCommandFailure({ code: 1, stderr: 'This version requires zstd for extraction\nmore' }, 'failed'),
+        'This version requires zstd for extraction (exit 1)',
+    )
+    assert.equal(
+        summarizeCommandFailure({ code: 2, stdout: '', stderr: '' }, 'Ollama install failed'),
+        'Ollama install failed (exit 2)',
     )
 })

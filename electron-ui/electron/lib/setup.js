@@ -2,6 +2,7 @@ const path = require('path')
 const fs   = require('fs')
 const os   = require('os')
 const http = require('http')
+const { pythonVenvDir, venvPythonPath, isHealthyVenv } = require('./paths')
 
 const MIN_PYTHON_MAJOR = 3
 const MIN_PYTHON_MINOR = 11
@@ -281,6 +282,60 @@ function mergePathDirectories(chunks, delimiter) {
     return out.join(sep)
 }
 
+function looksLikeMissingPythonVenvPackage(output) {
+    const text = String(output || '').toLowerCase()
+    return (
+        text.includes('ensurepip is not available') ||
+        text.includes('python3-venv') ||
+        text.includes('python3-full') ||
+        text.includes('no module named \'venv\'') ||
+        text.includes('no module named "venv"') ||
+        (text.includes('ensurepip') && text.includes('venv'))
+    )
+}
+
+function missingPythonVenvPackageMessage() {
+    return [
+        'Could not create a Python virtual environment.',
+        'On Debian/Ubuntu install python3-venv (or python3-full), then retry.',
+        'Example: sudo apt-get update && sudo apt-get install python3-venv',
+    ].join(' ')
+}
+
+function looksLikeMissingZstd(output) {
+    const text = String(output || '').toLowerCase()
+    return text.includes('requires zstd')
+        || (text.includes('zstd') && text.includes('extraction'))
+}
+
+function formatMissingZstdMessage({ hasAptGet, hasDnf, hasPacman } = {}) {
+    const commands = []
+    if (hasAptGet) commands.push('sudo apt-get update && sudo apt-get install zstd')
+    if (hasDnf) commands.push('sudo dnf install zstd')
+    if (hasPacman) commands.push('sudo pacman -S zstd')
+    if (commands.length === 0) {
+        commands.push(
+            'sudo apt-get update && sudo apt-get install zstd',
+            'sudo dnf install zstd',
+            'sudo pacman -S zstd',
+        )
+    }
+    return `Ollama's Linux installer requires zstd for extraction. Install it with: ${commands.join(' — or — ')}`
+}
+
+function summarizeCommandFailure(result, fallback = 'Command failed') {
+    if (!result) return fallback
+    const stderr = String(result.stderr || '').trim()
+    const stdout = String(result.stdout || '').trim()
+    const detail = stderr || stdout
+    const codePart = result.code == null || result.code === 0 ? '' : ` (exit ${result.code})`
+    if (!detail) return `${fallback}${codePart}`
+    const firstLine = detail.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || detail
+    // Keep wizard messages readable while still surfacing the real installer error.
+    const clipped = firstLine.length > 240 ? `${firstLine.slice(0, 237)}...` : firstLine
+    return `${clipped}${codePart}`
+}
+
 function setupManualError(code, stepSub, extra = {}) {
     const err = new Error(code)
     err.stepSub = stepSub
@@ -305,10 +360,21 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         REQUIREMENTS,
         SETUP_FLAG,
         RESIDENCY_FILE,
-        PYTHON_COMMAND,
+        SYSTEM_PYTHON_COMMAND,
+        PYTHON_VENV_DIR,
         OLLAMA_COMMAND,
         OLLAMA_MAX_LOADED_MODELS,
     } = paths
+    // Always read paths.PYTHON_COMMAND so the packages step can switch to the venv.
+    function pythonCommand() {
+        return paths.PYTHON_COMMAND
+    }
+    function systemPythonCommand() {
+        return paths.SYSTEM_PYTHON_COMMAND || SYSTEM_PYTHON_COMMAND || pythonCommand()
+    }
+    function venvDir() {
+        return paths.PYTHON_VENV_DIR || PYTHON_VENV_DIR || pythonVenvDir(USER_DATA)
+    }
     const {
         readLLMConfig,
         configuredOllamaBaseURL,
@@ -560,7 +626,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         if (process.platform === 'win32') await refreshWindowsPathFromRegistry()
         const extra = runtimePythonPaths()
         extra.forEach((candidate) => addDirToPath(path.dirname(candidate)))
-        return verifyWithKnownPaths(PYTHON_COMMAND, extra)
+        return verifyWithKnownPaths(systemPythonCommand(), extra)
     }
 
     function acceptPythonVersion(raw) {
@@ -582,7 +648,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         stepUpdate('python', 'running', 'Checking for Python 3.11+...')
         log('> python --version', 'dim')
 
-        const found = await verifyWithKnownPaths(PYTHON_COMMAND, runtimePythonPaths())
+        const found = await verifyWithKnownPaths(systemPythonCommand(), runtimePythonPaths())
         const version = found.stdout || found.stderr
 
         if (found.code === 0 && version) {
@@ -678,6 +744,51 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         return result.response === 1
     }
 
+    async function detectLinuxPackageManagers() {
+        const [apt, dnf, pacman] = await Promise.all([
+            runCommand('sh', ['-c', 'command -v apt-get']),
+            runCommand('sh', ['-c', 'command -v dnf']),
+            runCommand('sh', ['-c', 'command -v pacman']),
+        ])
+        return {
+            hasAptGet: apt.code === 0,
+            hasDnf: dnf.code === 0,
+            hasPacman: pacman.code === 0,
+        }
+    }
+
+    async function ensureLinuxZstdAvailable() {
+        const zstd = await runCommand('sh', ['-c', 'command -v zstd'])
+        if (zstd.code === 0) return
+        const managers = await detectLinuxPackageManagers()
+        const message = formatMissingZstdMessage(managers)
+        log(message, 'err')
+        throw setupManualError('ollama-zstd-missing', message, {
+            offerLinuxInstall: true,
+            downloadUrl: LINUX_OLLAMA_DOWNLOAD_URL,
+        })
+    }
+
+    async function throwLinuxOllamaInstallFailure(install, fallback) {
+        const combined = `${install && install.stdout || ''}\n${install && install.stderr || ''}`
+        if (looksLikeMissingZstd(combined)) {
+            const managers = await detectLinuxPackageManagers()
+            const message = formatMissingZstdMessage(managers)
+            log(message, 'err')
+            throw setupManualError('ollama-zstd-missing', message, {
+                offerLinuxInstall: true,
+                downloadUrl: LINUX_OLLAMA_DOWNLOAD_URL,
+            })
+        }
+        const detail = summarizeCommandFailure(install, fallback)
+        log(detail, 'err')
+        throw setupManualError(
+            'ollama-install-failed',
+            detail,
+            { offerLinuxInstall: true, downloadUrl: LINUX_OLLAMA_DOWNLOAD_URL },
+        )
+    }
+
     async function handleLinuxOllamaMissing(plan) {
         const invocation = ollamaInstallCommandToRun(plan)
         if (!invocation) {
@@ -688,14 +799,16 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
             throw linuxOllamaMissingError()
         }
 
+        await ensureLinuxZstdAvailable()
+
         log('Ollama not found. Running the official Linux installer with your consent...', 'info')
         stepUpdate('ollama', 'running', 'Installing Ollama (sudo/admin prompt)...')
         log(`> ${invocation.command} ${invocation.args.join(' ')}`, 'dim')
 
         let install = await runCommand(invocation.command, invocation.args)
         if (install.stdout) log(install.stdout, 'dim')
+        if (install.stderr) log(install.stderr, install.code === 0 ? 'dim' : 'err')
         if (install.code !== 0) {
-            if (install.stderr) log(install.stderr, 'err')
             const missingPkexec = /not found|ENOENT|spawn pkexec/i.test(install.stderr || '')
             if (missingPkexec) {
                 log('pkexec not available. Opening a visible terminal for the official installer...', 'info')
@@ -708,24 +821,32 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
                     install = await runCommand('xterm', ['-e', 'bash', '-c', script])
                 }
                 if (install.stdout) log(install.stdout, 'dim')
+                if (install.stderr) log(install.stderr, install.code === 0 ? 'dim' : 'err')
             }
             if (install.code !== 0) {
-                if (install.stderr) log(install.stderr, 'err')
                 log('Ollama installer did not succeed. Run the official command in a terminal, then retry.', 'err')
-                throw setupManualError(
-                    'ollama-install-failed',
+                await throwLinuxOllamaInstallFailure(
+                    install,
                     `Ollama install failed. Run: ${LINUX_OLLAMA_INSTALL_COMMAND}`,
-                    { offerLinuxInstall: true, downloadUrl: LINUX_OLLAMA_DOWNLOAD_URL },
                 )
             }
         }
 
+        const combinedOutput = `${install.stdout || ''}\n${install.stderr || ''}`
+        if (looksLikeMissingZstd(combinedOutput)) {
+            await ensureLinuxZstdAvailable()
+        }
+
         const verify = await verifyOllamaAfterInstall()
         if (verify.code !== 0) {
-            log('Ollama installer finished, but ollama is still not on PATH.', 'err')
+            const installDetail = summarizeCommandFailure(
+                install,
+                'Ollama install finished but ollama is not on PATH',
+            )
+            log(`Ollama installer finished, but ollama is still not on PATH. ${installDetail}`, 'err')
             throw setupManualError(
                 'ollama-path',
-                'Ollama install finished but ollama is not on PATH. Open a new terminal, then retry.',
+                `${installDetail}. Open a new terminal, then retry.`,
                 { offerLinuxInstall: true, downloadUrl: LINUX_OLLAMA_DOWNLOAD_URL },
             )
         }
@@ -863,21 +984,79 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         throw new Error('ollama-service-timeout')
     }
 
+    async function probeVenvPython(venvPy) {
+        const probe = await runCommand(venvPy, ['-c', 'import sys; print(sys.executable)'])
+        return probe.code === 0
+    }
+
+    async function ensureAppPythonVenv() {
+        // Install into <userData>/python-venv so Debian/Ubuntu PEP 668 hosts never
+        // need --break-system-packages, and so every platform shares one runtime.
+        const dir = venvDir()
+        const basePython = systemPythonCommand()
+        let venvPy = venvPythonPath(dir)
+
+        if (isHealthyVenv(dir) && await probeVenvPython(venvPy)) {
+            log(`Reusing Python venv at ${dir}`, 'ok')
+            paths.PYTHON_COMMAND = venvPy
+            return venvPy
+        }
+
+        if (fs.existsSync(dir)) {
+            log('Existing Python venv looks broken; recreating...', 'info')
+            try {
+                fs.rmSync(dir, { recursive: true, force: true })
+            } catch (err) {
+                log(`Could not remove broken venv: ${err.message}`, 'err')
+            }
+        }
+
+        stepUpdate('packages', 'running', 'Creating Python virtual environment...')
+        log(`> ${basePython} -m venv ${dir}`, 'dim')
+        const created = await runCommand(basePython, ['-m', 'venv', dir])
+        if (created.stdout) log(created.stdout, 'dim')
+        if (created.stderr) log(created.stderr, created.code === 0 ? 'dim' : 'err')
+
+        venvPy = venvPythonPath(dir)
+        if (created.code !== 0 || !(await probeVenvPython(venvPy))) {
+            const combined = `${created.stdout || ''}\n${created.stderr || ''}`
+            if (looksLikeMissingPythonVenvPackage(combined)) {
+                const message = missingPythonVenvPackageMessage()
+                log(message, 'err')
+                throw setupManualError('python-venv-missing', message)
+            }
+            const detail = summarizeCommandFailure(created, 'Failed to create Python virtual environment')
+            log(detail, 'err')
+            throw setupManualError('python-venv-failed', detail)
+        }
+
+        log(`Python venv ready at ${dir}`, 'ok')
+        paths.PYTHON_COMMAND = venvPy
+        return venvPy
+    }
+
     async function stepInstallPackages() {
         // pip output is streamed to the onboarding log while the renderer receives
-        // an approximate progress value for long installs.
-        stepUpdate('packages', 'running', 'Installing Python packages...')
-        log('> pip install -r requirements.txt', 'dim')
+        // an approximate progress value for long installs. Packages always go into
+        // the app venv — never the system interpreter.
+        stepUpdate('packages', 'running', 'Preparing Python environment...')
         stepProgress('packages', -1)
+        const venvPy = await ensureAppPythonVenv()
+
+        stepUpdate('packages', 'running', 'Installing Python packages...')
+        log(`> ${venvPy} -m pip install -r requirements.txt`, 'dim')
 
         return new Promise((resolve, reject) => {
-            const proc = spawnHidden(PYTHON_COMMAND, ['-m', 'pip', 'install', '-r', REQUIREMENTS], { cwd: ROOT })
+            const proc = spawnHidden(venvPy, ['-m', 'pip', 'install', '-r', REQUIREMENTS], { cwd: ROOT })
 
             const PKG_TOTAL = 20
             let installed = 0
+            let pipLog = ''
 
             proc.stdout.on('data', (chunk) => {
-                const lines = chunk.toString().split('\n').filter(l => l.trim())
+                const text = chunk.toString()
+                pipLog += text
+                const lines = text.split('\n').filter(l => l.trim())
                 for (const line of lines) {
                     log(line, line.toLowerCase().includes('error') ? 'err' : 'dim')
                     if (line.startsWith('Installing') || line.startsWith('Successfully installed')) {
@@ -892,9 +1071,10 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
             })
 
             proc.stderr.on('data', (chunk) => {
-                const lines = chunk.toString().split('\n').filter(l => l.trim())
+                const text = chunk.toString()
+                pipLog += text
+                const lines = text.split('\n').filter(l => l.trim())
                 for (const line of lines) {
-
                     const isError = line.toLowerCase().startsWith('error')
                     log(line, isError ? 'err' : 'dim')
                 }
@@ -906,10 +1086,20 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
                     log('All packages installed.', 'ok')
                     markDone('packages', 'All packages installed')
                     resolve()
-                } else {
-                    stepUpdate('packages', 'error', 'pip install failed. Check the log.')
-                    reject(new Error('pip-failed'))
+                    return
                 }
+                if (/externally-managed-environment/i.test(pipLog)) {
+                    const message = 'pip refused an externally-managed environment. Clippy should install into its app venv — retry setup, or recreate the venv.'
+                    stepUpdate('packages', 'error', message)
+                    reject(setupManualError('pip-externally-managed', message))
+                    return
+                }
+                const detail = summarizeCommandFailure(
+                    { code, stderr: pipLog },
+                    'pip install failed. Check the log.',
+                )
+                stepUpdate('packages', 'error', detail)
+                reject(setupManualError('pip-failed', detail))
             })
 
             proc.on('error', (e) => {
@@ -925,7 +1115,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         stepUpdate('models', 'running', 'Downloading local ML models (MiniLM)...')
         log('> python -m core.model_download', 'dim')
         try {
-            const { code, stdout, stderr } = await runCommand(PYTHON_COMMAND, ['-m', 'core.model_download'], { cwd: ROOT })
+            const { code, stdout, stderr } = await runCommand(pythonCommand(), ['-m', 'core.model_download'], { cwd: ROOT })
             if (stdout) log(stdout, 'dim')
             if (stderr) log(stderr, code === 0 ? 'dim' : 'err')
             if (code !== 0) {
@@ -975,7 +1165,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
             stepProgress('models', -1)
 
             await new Promise((resolve, reject) => {
-                const proc = spawnHidden(PYTHON_COMMAND, ['-m', 'core.ollama_pull', model.name], { cwd: ROOT })
+                const proc = spawnHidden(pythonCommand(), ['-m', 'core.ollama_pull', model.name], { cwd: ROOT })
                 let lastError = null
                 let lineBuffer = ''
                 let lastLoggedStatus = ''
@@ -1180,9 +1370,19 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
             await ensureOllamaParallelConfig({ persist: !alreadyConfigured })
         }
 
-        const py = await runCommand(PYTHON_COMMAND, ['--version'])
+        const py = await runCommand(pythonCommand(), ['--version'])
         if (py.code !== 0) {
-            return describePreflightFailure('python', 'Python not found or not on PATH.')
+            // Fall back to system Python so a missing/broken venv still surfaces a
+            // recoverable "packages" step instead of a hard Python failure.
+            const systemPy = await runCommand(systemPythonCommand(), ['--version'])
+            if (systemPy.code !== 0) {
+                return describePreflightFailure('python', 'Python not found or not on PATH.')
+            }
+            const systemCheck = evaluatePythonVersion(systemPy.stdout || systemPy.stderr)
+            if (!systemCheck.ok) {
+                return describePreflightFailure('python', systemCheck.message)
+            }
+            return describePreflightFailure('packages', 'Python virtual environment is missing or broken.')
         }
         const pyCheck = evaluatePythonVersion(py.stdout || py.stderr)
         if (!pyCheck.ok) {
@@ -1216,7 +1416,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         }
 
         // Import checks are a cheap proxy for the full capture dependency set.
-        const pkgCheck = await runCommand(PYTHON_COMMAND, [
+        const pkgCheck = await runCommand(pythonCommand(), [
             '-c',
             'import fastapi, uvicorn, pynput, mss, PIL, psutil, imagehash, transformers, torch',
         ])
@@ -1382,6 +1582,11 @@ module.exports = {
     firstExistingPath,
     parseWindowsRegPathValue,
     mergePathDirectories,
+    looksLikeMissingPythonVenvPackage,
+    missingPythonVenvPackageMessage,
+    looksLikeMissingZstd,
+    formatMissingZstdMessage,
+    summarizeCommandFailure,
     LINUX_OLLAMA_INSTALL_COMMAND,
     LINUX_OLLAMA_DOWNLOAD_URL,
     OLLAMA_DOWNLOAD_URL,

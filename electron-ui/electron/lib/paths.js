@@ -8,6 +8,7 @@ const LOCAL_EMBEDDING_MODEL = 'local:sentence-transformers/all-MiniLM-L6-v2'
 const OLLAMA_MAX_LOADED_MODELS = '1'
 const OLLAMA_NUM_PARALLEL = '1'
 const DEFAULT_API_PORT = 8000
+const PYTHON_VENV_DIRNAME = 'python-venv'
 
 const DEFAULT_LLM_CONFIG = {
     provider: 'ollama',
@@ -17,6 +18,26 @@ const DEFAULT_LLM_CONFIG = {
     chat_model: 'qwen3:8b',
     // Capture uses accessibility + OCR; no vision model is downloaded or required.
     embedding_model: LOCAL_EMBEDDING_MODEL,
+}
+
+function pythonVenvDir(userData) {
+    return path.join(userData, PYTHON_VENV_DIRNAME)
+}
+
+function venvPythonPath(venvDir, platform = process.platform) {
+    const p = platform === 'win32' ? path.win32 : path.posix
+    return platform === 'win32'
+        ? p.join(venvDir, 'Scripts', 'python.exe')
+        : p.join(venvDir, 'bin', 'python')
+}
+
+function isHealthyVenv(venvDir, platform = process.platform, existsFn = fs.existsSync) {
+    if (!venvDir) return false
+    try {
+        return Boolean(existsFn(venvPythonPath(venvDir, platform)))
+    } catch (_) {
+        return false
+    }
 }
 
 function createPaths(app, electronDir) {
@@ -44,6 +65,7 @@ function createPaths(app, electronDir) {
     const API_STATE_FILE  = path.join(USER_DATA, 'api_process.json')
     const DESKTOP_SETTINGS_FILE = path.join(USER_DATA, 'desktop_settings.json')
     const RELEASE_CHECK_FILE = path.join(USER_DATA, 'release_check.json')
+    const PYTHON_VENV_DIR = pythonVenvDir(USER_DATA)
     // Electron does not always inherit the interactive shell PATH. These common
     // macOS locations cover Homebrew, npm/pnpm, Volta, and nvm installations.
     const PATH_HINTS = process.platform === 'darwin'
@@ -65,10 +87,16 @@ function createPaths(app, electronDir) {
         return candidate || fallback
     }
 
-    const PYTHON_COMMAND = process.env.CLIPPY_PYTHON || commandFromKnownPaths(
+    const SYSTEM_PYTHON_COMMAND = process.env.CLIPPY_PYTHON || commandFromKnownPaths(
         'python3',
         process.platform === 'win32' ? 'python' : 'python3',
     )
+    // Prefer an existing healthy app venv so packaged launches and post-setup
+    // runs never install into (or depend on) the system site-packages.
+    let PYTHON_COMMAND = SYSTEM_PYTHON_COMMAND
+    if (!process.env.CLIPPY_PYTHON && isHealthyVenv(PYTHON_VENV_DIR)) {
+        PYTHON_COMMAND = venvPythonPath(PYTHON_VENV_DIR)
+    }
     const OLLAMA_COMMAND = process.env.CLIPPY_OLLAMA || commandFromKnownPaths('ollama', 'ollama')
 
     return {
@@ -90,9 +118,16 @@ function createPaths(app, electronDir) {
         API_STATE_FILE,
         DESKTOP_SETTINGS_FILE,
         RELEASE_CHECK_FILE,
+        PYTHON_VENV_DIR,
         PATH_HINTS,
         commandFromKnownPaths,
-        PYTHON_COMMAND,
+        SYSTEM_PYTHON_COMMAND,
+        get PYTHON_COMMAND() {
+            return PYTHON_COMMAND
+        },
+        set PYTHON_COMMAND(value) {
+            PYTHON_COMMAND = value
+        },
         OLLAMA_COMMAND,
         DEFAULT_API_PORT,
         OLLAMA_BASE_URL,
@@ -104,4 +139,10 @@ function createPaths(app, electronDir) {
     }
 }
 
-module.exports = { createPaths }
+module.exports = {
+    createPaths,
+    pythonVenvDir,
+    venvPythonPath,
+    isHealthyVenv,
+    PYTHON_VENV_DIRNAME,
+}
