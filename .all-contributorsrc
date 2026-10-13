@@ -107,6 +107,33 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "cursoragent",
+      "name": "cursoragent",
+      "avatar_url": "https://github.com/cursoragent.png",
+      "profile": "https://github.com/cursoragent",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "tadaokatzuki",
+      "name": "tadaokatzuki",
+      "avatar_url": "https://github.com/tadaokatzuki.png",
+      "profile": "https://github.com/tadaokatzuki",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "Afrin-banu-A",
+      "name": "Afrin-banu-A",
+      "avatar_url": "https://github.com/Afrin-banu-A.png",
+      "profile": "https://github.com/Afrin-banu-A",
+      "contributions": [
+        "code"
+      ]
     }
   ]
 }
