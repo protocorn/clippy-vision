@@ -1,13 +1,12 @@
-name: Collect GitHub Traffic (DISABLED for fork)
+name: Collect GitHub Traffic
 
-# This workflow has been DISABLED in the Grok Bot fork.
-# Reason: It automatically commits traffic snapshots to main, which was specific
-# to the upstream repository's analytics needs. This fork does not need to track
-# GitHub traffic statistics, and enabling it could create unnecessary commit noise.
-# Original functionality: archived views/clones/referrers/paths/downloads beyond GitHub's 14-day UI window.
+# Archives views/clones/referrers/paths/downloads beyond GitHub's 14-day UI window.
+# Requires repo secret TRAFFIC_TOKEN (default GITHUB_TOKEN cannot call traffic APIs).
 
 on:
-  # workflow_dispatch kept for manual testing if needed, but scheduled run is disabled
+  schedule:
+    # 13:00 UTC daily (~9:00 AM Eastern during EDT)
+    - cron: "0 13 * * *"
   workflow_dispatch:
 
 permissions:
@@ -20,8 +19,6 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    # Job is effectively disabled - will only run on manual workflow_dispatch if needed
-    if: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
