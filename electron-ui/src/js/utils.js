@@ -1,6 +1,7 @@
 import {
   nameView, timelineView, loadingView, settingsView, chatView, appShell,
   APP_PANELS, settingsBtn, navMoreBtn, homeBtn, homeMenuBtn, chatBtn, chatMenuBtn, wideLayoutMq,
+  welcomeInput, welcomeSend, inputBox, sendBtn, USER_MESSAGE_MAX_CHARS, CHAR_COUNT_SHOW_AT, store,
 } from './dom.js'
 
 export function setStatus(el, text, kind) {
@@ -8,6 +9,20 @@ export function setStatus(el, text, kind) {
   el.textContent = text || ''
   el.classList.remove('ok', 'error')
   if (kind) el.classList.add(kind)
+}
+
+export function updateCharCount(inputEl, countEl) {
+  if (!inputEl || !countEl) return
+  const n = (inputEl.value || '').length
+  countEl.textContent = `${n} / ${USER_MESSAGE_MAX_CHARS}`
+  countEl.classList.toggle('is-visible', n >= CHAR_COUNT_SHOW_AT)
+  countEl.classList.toggle('is-warn', n >= CHAR_COUNT_SHOW_AT && n < USER_MESSAGE_MAX_CHARS)
+  countEl.classList.toggle('is-limit', n >= USER_MESSAGE_MAX_CHARS)
+  if (inputEl === welcomeInput) {
+    if (welcomeSend) welcomeSend.disabled = store.isLoading || n > USER_MESSAGE_MAX_CHARS
+  } else if (inputEl === inputBox) {
+    if (sendBtn) sendBtn.disabled = store.isLoading || n > USER_MESSAGE_MAX_CHARS
+  }
 }
 
 function syncNavActive(panel) {
