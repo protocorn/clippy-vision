@@ -561,6 +561,12 @@
       text-overflow: ellipsis;
     }
 
+    .step.error .step-sub {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: unset;
+    }
+
     .step.running .step-sub { opacity: 1; }
 
     .step-bar-wrap {
@@ -592,8 +598,11 @@
       100% { transform: translateX(350%); }
     }
 
-    .retry-btn {
+    .retry-btn,
+    .install-btn,
+    .download-btn {
       margin-top: 8px;
+      margin-right: 8px;
       padding: 5px 14px;
       background: transparent;
       border: 1px solid var(--danger-border);
@@ -604,6 +613,20 @@
     }
 
     .retry-btn:hover { background: var(--danger-bg); }
+
+    .install-btn {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .install-btn:hover { background: var(--panel); }
+
+    .download-btn {
+      border-color: var(--border);
+      color: var(--muted);
+    }
+
+    .download-btn:hover { background: var(--panel); }
 
     .log-wrap {
       min-height: 60px;
@@ -1076,7 +1099,7 @@
           id: 'ollama',
           title: 'Ollama (local model runtime)',
           why: 'Runs the local AI model you chose entirely on this machine. Clippy installs Ollama only if it is missing; if you already have it, this step just verifies it.',
-          meta: 'Installed only when missing · winget on Windows, Homebrew on macOS, or ollama.com',
+          meta: 'Installed only when missing · winget on Windows, Homebrew on macOS, official Linux script with consent, or ollama.com',
           required: true,
         })
         items.push({
@@ -1336,7 +1359,11 @@
       return document.getElementById(`step-${key}`)
     }
 
-    function setStepState(key, state, subText) {
+    function clearStepActionButtons(el) {
+      el.querySelectorAll('.retry-btn, .install-btn, .download-btn').forEach((btn) => btn.remove())
+    }
+
+    function setStepState(key, state, subText, extra) {
       const el = getStepEl(key)
       if (!el) return
 
@@ -1348,6 +1375,7 @@
 
       if (state === 'done') completedSteps.add(key)
       if (state === 'error') completedSteps.delete(key)
+      if (state !== 'error') clearStepActionButtons(el)
 
       if (state === 'pending') {
         iconEl.innerHTML = '○'
@@ -1357,15 +1385,39 @@
         iconEl.innerHTML = '✅'
       } else if (state === 'error') {
         iconEl.innerHTML = '❌'
+        const body = el.querySelector('.step-body')
         if (!el.querySelector('.retry-btn')) {
           const btn = document.createElement('button')
           btn.className = 'retry-btn'
           btn.textContent = 'Retry'
           btn.addEventListener('click', () => {
-            btn.remove()
+            clearStepActionButtons(el)
             retryStep(key)
           })
-          el.querySelector('.step-body').appendChild(btn)
+          body.appendChild(btn)
+        }
+        if (extra && extra.offerLinuxInstall && !el.querySelector('.install-btn')) {
+          const installBtn = document.createElement('button')
+          installBtn.className = 'install-btn'
+          installBtn.textContent = 'Install Ollama'
+          installBtn.addEventListener('click', async () => {
+            installBtn.disabled = true
+            try {
+              const res = await retryStep({ key: 'ollama', userConsent: true })
+              if (res && res.cancelled) installBtn.disabled = false
+            } catch (_) {
+              installBtn.disabled = false
+            }
+          })
+          body.appendChild(installBtn)
+        }
+        const downloadUrl = extra && extra.downloadUrl
+        if (downloadUrl && !el.querySelector('.download-btn') && window.setup && window.setup.openSetupDownload) {
+          const downloadBtn = document.createElement('button')
+          downloadBtn.className = 'download-btn'
+          downloadBtn.textContent = 'Open ' + String(downloadUrl).replace(/^https:\/\//, '')
+          downloadBtn.addEventListener('click', () => window.setup.openSetupDownload(downloadUrl))
+          body.appendChild(downloadBtn)
         }
       }
 
@@ -1405,7 +1457,7 @@
 
     function retryStep(key) {
       if (window.setup && window.setup.retryStep) {
-        window.setup.retryStep(key)
+        return window.setup.retryStep(key)
       }
     }
 
@@ -1434,8 +1486,8 @@
     }
 
     if (window.setup) {
-      window.setup.onStepUpdate(({ key, state, sub }) => {
-        setStepState(key, state, sub)
+      window.setup.onStepUpdate(({ key, state, sub, offerLinuxInstall, downloadUrl }) => {
+        setStepState(key, state, sub, { offerLinuxInstall, downloadUrl })
         if (state === 'done') {
           requestAnimationFrame(() => {
             const allDone = STEPS.every(k => {

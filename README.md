@@ -60,9 +60,10 @@ The installers are unsigned: on Windows choose **More info → Run anyway**, and
 **Python is not bundled** in the Windows installer or Linux AppImage. `requirements.txt` does not pin a Python version. The packaged app runs `CLIPPY_PYTHON` if set, otherwise `python3` (Linux/macOS) or `python` (Windows) from PATH (`electron-ui/electron/lib/paths.js`). CI unit tests and the release dry-run install Python 3.12. The setup wizard parses `python --version` and requires **Python 3.11+**.
 
 **When Python is missing, the setup wizard (`electron-ui/electron/lib/setup.js`) does this:**
-- It parses `--version` on that interpreter. Preflight text says "Clippy needs Python 3.11+ on PATH."
-- **Windows:** tries `winget install Python.Python.3.11 --silent`. Fail → install from python.org. Installed but not on PATH → restart required.
-- **macOS and Linux:** tries Homebrew `brew install python` if Homebrew is present. If that fails: "Install Python 3.11+ from python.org or Homebrew, then retry" / "Install Python 3.11+ and make sure it is on PATH." The wizard does not apt-install Python on Linux.
+- It parses `--version` on that interpreter and requires Python 3.11+. Preflight text says "Clippy needs Python 3.11+ on PATH." It then re-resolves known install locations before declaring failure.
+- **Windows:** tries `winget install Python.Python.3.11 --silent`. If winget is missing or the install cannot be found on PATH, it shows [python.org/downloads](https://www.python.org/downloads/) and probes `%LOCALAPPDATA%\Programs\Python\Python311\python.exe`.
+- **macOS:** tries Homebrew `brew install python` when Homebrew is present. If Homebrew is missing, it shows a manual-install message with the python.org link.
+- **Linux:** stays a manual install. The wizard does not try Homebrew or apt; it shows a python.org link.
 
 **Advanced:** point Clippy at a specific interpreter before launch:
 

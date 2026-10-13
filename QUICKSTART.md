@@ -5,8 +5,8 @@
 Download `ClippyVision-Windows-Setup-{version}.exe` on Windows, or `ClippyVision-macOS-arm64-{version}.dmg` (Apple Silicon) / `ClippyVision-macOS-x64-{version}.dmg` (Intel) on macOS, from the [latest release](https://github.com/protocorn/clippy-vision/releases/latest).
 
 The installer's built-in setup wizard will:
-- Check for Python. Windows installs it with winget when it is missing. macOS installs it with Homebrew when Homebrew is already installed.
-- Check for Ollama the same way (winget on Windows, Homebrew on macOS).
+- Check for Python. Windows installs it with winget when it is missing (or links [python.org](https://www.python.org/downloads/) if winget is not available). macOS installs it with Homebrew when Homebrew is already installed; otherwise it links python.org. Linux is a manual Python install.
+- Check for Ollama the same way on Windows and macOS. On Linux it shows the official install command and can run it only with your consent.
 - Start the Ollama service
 - Install all Python packages from `requirements.txt`
 - Download the text model you picked in setup (the suggested default is `qwen3:8b`)

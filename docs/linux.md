@@ -21,6 +21,21 @@ Other distros and ARM are **not verified yet**. Wayland is **not supported** (lo
 
 ---
 
+## Prerequisites
+
+Install these **before** first launch. The Linux setup wizard does not silently install them.
+
+1. **Install Ollama first.** Official command:
+
+   ```bash
+   curl -fsSL https://ollama.com/install.sh | sh
+   ```
+
+   Download page: [https://ollama.com/download/linux](https://ollama.com/download/linux). If Ollama is missing, the wizard shows that command and a link. It can optionally run the official installer only after you click **Install** and confirm it needs sudo/admin rights. It never tries Homebrew on Linux.
+2. **Python 3.11+** on PATH (next section). Python is not inside the AppImage.
+
+---
+
 ## Get the AppImage
 
 1. Download the published AppImage from the [GitHub releases page](https://github.com/protocorn/clippy-vision/releases) when a Linux build is published (artifact name `ClippyVision-Linux-x86_64-{version}.AppImage`). Until then, build from source with `npm run dist:linux` in `electron-ui/`.
@@ -42,7 +57,13 @@ The AppImage is **unsigned** (release job name: “Build Linux AppImage (unsigne
 
 **FUSE (general AppImage guidance, not a Clippy-specific requirement in application code):** AppImages produced by electron-builder commonly need FUSE to run in place. This repo’s launch test installs `libfuse2` on Ubuntu before executing the AppImage (`sudo apt-get install -y … libfuse2 …` in `.github/workflows/release.yml`). If the AppImage refuses to start with a FUSE-related error, installing `libfuse2` is the usual Debian/Ubuntu fix. That package install is **CI-only** here; it is **not verified yet** on a real desktop. The smoke check extracts with `--appimage-extract` instead of running under FUSE.
 
-Python is **not** inside the AppImage. Install Python 3.11+ first (next section), then run the AppImage so the first-run wizard can find it.
+If `libfuse2` is missing, you can still run the AppImage without FUSE:
+
+```bash
+./ClippyVision-Linux-x86_64-2.1.0.AppImage --appimage-extract-and-run
+```
+
+Python is **not** inside the AppImage. Install Ollama and Python 3.11+ first (see Prerequisites), then run the AppImage so the first-run wizard can find them.
 
 Packaged Linux `userData` is `~/.config/Clippy Vision` (Electron `productName`; confirmed in the release workflow). First-run setup writes `setup_complete.json` there. Until that file exists, the backend does not start.
 
@@ -65,7 +86,7 @@ To point Clippy at a specific interpreter **before** launch:
 export CLIPPY_PYTHON=/path/to/venv/bin/python3
 ```
 
-**The wizard does not apt-install Python on Linux.** If `python3` is missing, it tries Homebrew `brew install python` when `brew` is already present. If that fails, the log says “Install Python 3.11+ from python.org or Homebrew, then retry.” and the step error is “Install Python 3.11+ and make sure it is on PATH.” Comment in `setup.js`: “Linux stays a manual install.”
+**The wizard does not install Python on Linux.** If `python3` is missing, it does **not** try Homebrew. It shows a clear manual-install message with a link to [https://www.python.org/downloads/](https://www.python.org/downloads/). Retry after you install Python 3.11+ and put it on PATH. Comment in `setup.js`: “Linux stays a manual install.”
 
 CI unit tests and the AppImage dry-run use **Python 3.12**.
 
@@ -139,13 +160,13 @@ On first launch the setup wizard runs (`electron-ui/electron/lib/setup.js`, `ele
 When Ollama is the managed local runtime (default base URL `http://127.0.0.1:11434`):
 
 1. Python 3.11+ on PATH (see above)
-2. Ollama on PATH — `ollama --version`. If missing, Linux tries Homebrew `brew install ollama` when Homebrew is present. If that fails: “Install Ollama from ollama.com and make sure it is on PATH.” The wizard does **not** apt-install Ollama.
+2. Ollama on PATH — `ollama --version`. If missing, Linux does **not** try Homebrew. The wizard shows the official command (`curl -fsSL https://ollama.com/install.sh | sh`) and https://ollama.com/download/linux. An **Install** button can run that script only after you confirm it needs sudo/admin rights (`pkexec`, or a visible terminal if `pkexec` is missing). After it runs, the wizard re-checks that Ollama is reachable and fails with a clear message if it is not. The wizard does **not** apt-install Ollama and never runs the installer silently.
 3. Start/configure Ollama (`ollama serve` / wait until reachable)
 4. `pip install -r requirements.txt` into the interpreter from `CLIPPY_PYTHON` / `python3`
 5. Download MiniLM embeddings (`python -m core.model_download`) and pull **only** the chat model you selected (`python -m core.ollama_pull <model>`)
 6. Warmup and write `setup_complete.json`
 
-Consent copy in the wizard: Ollama is installed only when missing, via “winget on Windows, Homebrew on macOS, or ollama.com”. Suggested chat models in the wizard include `qwen3:8b` (hint: balanced; README says ~4.7 GB). Capture uses accessibility + OCR; no vision model is downloaded.
+Consent copy in the wizard: Ollama is installed only when missing, via “winget on Windows, Homebrew on macOS, official Linux script with consent, or ollama.com”. Suggested chat models in the wizard include `qwen3:8b` (hint: balanced; README says ~4.7 GB). Capture uses accessibility + OCR; no vision model is downloaded.
 
 You can point at a specific `ollama` binary with `CLIPPY_OLLAMA` (`paths.js`). That override is **not verified yet** on a Linux desktop.
 
@@ -202,8 +223,8 @@ That snippet is the macOS check from `docs/usage.md` with the Linux `userData` p
 
 | You see | Meaning | What to do (from the code / existing docs) |
 |---------|---------|--------------------------------------------|
-| Wizard: “Python is missing” / “Install Python 3.11+ and make sure it is on PATH.” | No usable 3.11+ interpreter | Install Python 3.11+ yourself. Set `CLIPPY_PYTHON` if it is not `python3` on PATH. The wizard will not `apt-get install` Python. |
-| Wizard: “Ollama is not installed” / install from ollama.com | `ollama` not on PATH and Homebrew install did not run or failed | Install from [ollama.com](https://ollama.com/download), then retry. See [usage.md](usage.md#ollama-not-found-after-install). |
+| Wizard: “Python is missing” / python.org link | No usable 3.11+ interpreter | Install Python 3.11+ from [python.org/downloads](https://www.python.org/downloads/). Set `CLIPPY_PYTHON` if it is not `python3` on PATH. The wizard will not `apt-get install` Python. |
+| Wizard: “Ollama is not installed” / install from ollama.com | `ollama` not on PATH | Install with `curl -fsSL https://ollama.com/install.sh \| sh`, or click **Install** in the wizard (needs sudo). See [https://ollama.com/download/linux](https://ollama.com/download/linux) and [usage.md](usage.md#ollama-not-found-after-install). |
 | `[platform_support] xdotool not found; window metadata will be limited` | No `xdotool` | Install `xdotool`. Titles and focused-window crop stay limited until it is on PATH. |
 | `[platform_support] Linux idle detection unavailable (xprintidle or xdotool not found)` | Neither idle helper found | Install `xprintidle` and/or `xdotool`. |
 | `[capture] Linux Wayland screenshots are not supported yet…` | Session is Wayland (or no `DISPLAY`) | **Wayland is not supported.** Log in to an X11 session. Do not rely on `grim`. |
@@ -211,7 +232,7 @@ That snippet is the macOS check from `docs/usage.md` with the Linux `userData` p
 | `[accessibility_text] pyatspi not available; install python3-pyatspi…` | `import pyatspi` failed | `apt install python3-pyatspi`. Venv: `--system-site-packages` or `python3-gi`. |
 | `[accessibility_text] AT-SPI desktop not available (accessibility may be disabled)` | `Registry.getDesktop(0)` was `None` | Desktop accessibility may be off. **Not verified yet** how to enable it on a given DE. |
 | `[accessibility_text] AT-SPI bus not available` / `AT-SPI query timed out` | D-Bus / timeout while walking the tree | Capture continues without that text. |
-| AppImage will not execute | Not executable, or FUSE missing | `chmod +x` the file. For FUSE, see the AppImage section (`libfuse2` is general AppImage guidance). |
+| AppImage will not execute | Not executable, or FUSE missing | `chmod +x` the file. If `libfuse2` is missing, run with `--appimage-extract-and-run`. For FUSE, see the AppImage section. |
 | Unsigned binary warning from the desktop | Expected | The AppImage is unsigned. |
 
 App stuck on the opening screen, retrying a wizard step, and resetting setup: [usage.md](usage.md#installation-troubleshooting).

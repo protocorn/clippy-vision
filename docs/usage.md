@@ -130,15 +130,19 @@ The disk image is unsigned. Right-click Clippy Vision and choose **Open**, then 
 
 ### Homebrew / dependencies on macOS
 
-The setup wizard uses Homebrew when Homebrew is already installed to install Python and Ollama. If Homebrew is missing, install Python 3.11+ and Ollama yourself, then retry setup. `brew install ollama` is the same step the wizard tries when Homebrew is present.
+The setup wizard uses Homebrew when Homebrew is already installed to install Python and Ollama. If Homebrew is missing, the wizard shows a manual-install message with links to [python.org/downloads](https://www.python.org/downloads/) and [ollama.com/download](https://ollama.com/download). Install those yourself, then click **Retry**. `brew install ollama` is the same step the wizard tries when Homebrew is present.
 
 ### Linux AppImage
 
-Linux support is **experimental and X11 only. Wayland is not supported.** The unsigned AppImage, Python 3.11+ (not bundled; the setup wizard parses `python --version` and rejects anything older), capture helpers, and known warnings are in [linux.md](linux.md). The wizard does not apt-install Python on Linux.
+Linux support is **experimental and X11 only. Wayland is not supported.** The unsigned AppImage, Python 3.11+ (not bundled; the setup wizard parses `python --version` and rejects anything older), capture helpers, and known warnings are in [linux.md](linux.md). **Install Ollama first** (`curl -fsSL https://ollama.com/install.sh | sh`, or [ollama.com/download/linux](https://ollama.com/download/linux)). Python stays a manual install from [python.org/downloads](https://www.python.org/downloads/). If `libfuse2` is missing, run the AppImage with `--appimage-extract-and-run`.
+
+### Windows winget missing or PATH stale after install
+
+If `winget` is not available, the wizard does not dead-end: it shows [python.org/downloads](https://www.python.org/downloads/) and [ollama.com/download](https://ollama.com/download). After a successful winget install it re-reads PATH and probes known locations such as `%LOCALAPPDATA%\Programs\Ollama\ollama.exe` and `%LOCALAPPDATA%\Programs\Python\Python311\python.exe` before asking you to retry.
 
 ### Ollama not found after install
 
-Open a new terminal and run `ollama --version`. If not found, re-run setup or install it from [ollama.com](https://ollama.com/download).
+Open a new terminal and run `ollama --version`. If not found, re-run setup or install it from [ollama.com](https://ollama.com/download). On Linux the wizard can run the official installer only after you click **Install** and confirm it needs sudo.
 
 ### Reset setup / reinstall
 
