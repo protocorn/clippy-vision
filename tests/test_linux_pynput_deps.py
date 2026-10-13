@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.util
 from pathlib import Path
 
@@ -36,13 +37,16 @@ def test_requirements_keep_pynput_off_linux_marker():
 def test_pynput_installed_with_xlib_backend_without_evdev():
     """CI installs pynput with --no-deps; X11 deps must be present and evdev absent.
 
-    Do not `import pynput.keyboard` here: that opens an X connection and the
-    main Linux pytest job has no DISPLAY (xvfb is only used for screenshot tests).
+    Avoid importing pynput.keyboard here: that opens an X connection and the
+    main Linux pytest job has no DISPLAY.
     """
     assert importlib.util.find_spec("Xlib") is not None, "python-xlib should be installed on Linux"
     assert importlib.util.find_spec("six") is not None
-    assert importlib.util.find_spec("pynput") is not None
-    # Backend module is importable as a spec without needing a live DISPLAY.
-    assert importlib.util.find_spec("pynput.keyboard._xorg") is not None
     # Intentionally do not require evdev — that is the whole point of --no-deps.
     assert importlib.util.find_spec("evdev") is None
+
+    dist = importlib.metadata.distribution("pynput")
+    file_names = {str(f).replace("\\", "/") for f in (dist.files or [])}
+    assert any(name.endswith("pynput/keyboard/_xorg.py") for name in file_names), (
+        "pynput X11 backend module missing from install"
+    )
