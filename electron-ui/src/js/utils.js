@@ -1,6 +1,6 @@
 import {
-  nameView, timelineView, loadingView, settingsView, appShell,
-  APP_PANELS, settingsBtn, navMoreBtn, homeBtn, homeMenuBtn, wideLayoutMq,
+  nameView, timelineView, loadingView, settingsView, chatView, appShell,
+  APP_PANELS, settingsBtn, navMoreBtn, homeBtn, homeMenuBtn, chatBtn, chatMenuBtn, wideLayoutMq,
 } from './dom.js'
 
 export function setStatus(el, text, kind) {
@@ -13,8 +13,11 @@ export function setStatus(el, text, kind) {
 function syncNavActive(panel) {
   const onSessions = panel === timelineView
   const onSettings = panel === settingsView
+  const onChat = panel === chatView
   if (homeBtn) homeBtn.classList.toggle('is-nav-active', onSessions)
   if (homeMenuBtn) homeMenuBtn.classList.toggle('is-nav-active', onSessions)
+  if (chatBtn) chatBtn.classList.toggle('is-nav-active', onChat)
+  if (chatMenuBtn) chatMenuBtn.classList.toggle('is-nav-active', onChat)
   if (settingsBtn) settingsBtn.classList.toggle('is-nav-active', onSettings)
   if (navMoreBtn) navMoreBtn.classList.toggle('is-nav-active', onSettings)
 }

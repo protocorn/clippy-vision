@@ -1,6 +1,6 @@
 export const nameView = document.getElementById('name-view')
 export const appShell = document.getElementById('app-shell')
-// ARCHIVED: chatView / composer / drawer — see archive/in_app_chat/
+export const chatView = document.getElementById('chat-view')
 export const settingsView = document.getElementById('settings-view')
 export const timelineView = document.getElementById('timeline-view')
 export const nameInput = document.getElementById('name-input')
@@ -10,6 +10,8 @@ export const nameError = document.getElementById('name-error')
 export const appBrand = document.getElementById('app-brand')
 export const homeBtn = document.getElementById('home-btn')
 export const homeMenuBtn = document.getElementById('home-menu-btn')
+export const chatBtn = document.getElementById('chat-btn')
+export const chatMenuBtn = document.getElementById('chat-menu-btn')
 export const settingsBtn = document.getElementById('settings-btn')
 export const navMore = document.getElementById('nav-more')
 export const navMoreBtn = document.getElementById('nav-more-btn')
@@ -76,9 +78,26 @@ export const updateBannerText = document.getElementById('update-banner-text')
 export const updateBannerLink = document.getElementById('update-banner-link')
 export const updateBannerDismiss = document.getElementById('update-banner-dismiss')
 
+// Chat elements
+export const chatMain = document.getElementById('chat-main')
+export const messages = document.getElementById('messages')
+export const inputBox = document.getElementById('input-box')
+export const sendBtn = document.getElementById('send-btn')
+export const welcomeInput = document.getElementById('welcome-input')
+export const welcomeSend = document.getElementById('welcome-send')
+export const welcomeCharCount = document.getElementById('welcome-char-count')
+export const inputCharCount = document.getElementById('input-char-count')
+export const drawer = document.getElementById('conv-drawer')
+export const drawerBackdrop = document.getElementById('drawer-backdrop')
+export const convList = document.getElementById('conv-list')
+export const convSearch = document.getElementById('conv-search')
+export const convSearchHint = document.getElementById('conv-search-hint')
+
 export const wideLayoutMq = window.matchMedia('(min-width: 800px)')
 
-export const APP_PANELS = [settingsView, timelineView]
+export const APP_PANELS = [chatView, settingsView, timelineView]
+
+export const USER_MESSAGE_MAX_CHARS = 4000
 
 export const store = {
  searchTimer: null,

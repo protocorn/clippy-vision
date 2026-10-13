@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import heapq
 import re
+import sys
 from collections import deque
 import threading
-from core.platform_support import IS_MACOS, IS_WINDOWS, _run_command
+from core.platform_support import IS_MACOS, IS_WINDOWS, IS_LINUX, _run_command
 
 
 MAX_TEXT_CHARS = 4000
@@ -758,12 +759,278 @@ def _mac_text() -> str:
     )
 
 
+_linux_at_spi_warned = False
+_linux_at_spi_unavailable = False
+
+# AT-SPI wall-clock budget to prevent hangs when querying stuck applications
+_ATSPI_WALK_TIMEOUT_SECONDS = 2.0
+
+
+def _linux_text() -> str:
+    """Linux accessibility text extraction via AT-SPI.
+    
+    Gracefully falls back to empty string when:
+    - pyatspi is not installed
+    - Accessibility bus is not running
+    - AT-SPI is disabled
+    - Session is Wayland (limited support)
+    - Query times out
+    """
+    global _linux_at_spi_warned, _linux_at_spi_unavailable
+    
+    # If we know AT-SPI is unavailable, skip immediately
+    if _linux_at_spi_unavailable:
+        return ""
+    
+    try:
+        import pyatspi
+    except ImportError:
+        if not _linux_at_spi_warned:
+            _linux_at_spi_warned = True
+            print(
+                "[accessibility_text] pyatspi not available; install python3-pyatspi "
+                "for accessibility text extraction. If using a venv, recreate it with "
+                "--system-site-packages or ensure python3-gi is available.",
+                file=sys.stderr
+            )
+        _linux_at_spi_unavailable = True
+        return ""
+    
+    try:
+        # Set a short D-Bus timeout if supported to avoid blocking on hung apps
+        try:
+            if hasattr(pyatspi, 'set_timeout'):
+                pyatspi.set_timeout(500, 1000)  # 500ms sync, 1000ms async
+        except Exception:
+            pass
+        
+        # Get the desktop (root of the accessibility tree)
+        desktop = pyatspi.Registry.getDesktop(0)
+        if desktop is None:
+            if not _linux_at_spi_warned:
+                _linux_at_spi_warned = True
+                print("[accessibility_text] AT-SPI desktop not available (accessibility may be disabled)", file=sys.stderr)
+            _linux_at_spi_unavailable = True
+            return ""
+        
+        # Find the active application
+        active_app = None
+        try:
+            for app in desktop:
+                if app is None:
+                    continue
+                try:
+                    state_set = app.getState()
+                    if pyatspi.STATE_ACTIVE in state_set:
+                        active_app = app
+                        break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        
+        if active_app is None:
+            return ""
+        
+        # Extract text from the active application's accessible tree with timeout
+        import time
+        start_time = time.monotonic()
+        text_pieces = []
+        _walk_at_spi_tree(active_app, text_pieces, depth=0, max_nodes=MAX_UI_NODES, start_time=start_time)
+        
+        return normalize_accessibility_text(*text_pieces)
+    
+    except Exception as e:
+        if not _linux_at_spi_warned:
+            _linux_at_spi_warned = True
+            error_msg = str(e).lower()
+            if "dbus" in error_msg or "bus" in error_msg:
+                print("[accessibility_text] AT-SPI bus not available", file=sys.stderr)
+            elif "timeout" in error_msg:
+                print("[accessibility_text] AT-SPI query timed out", file=sys.stderr)
+            else:
+                print(f"[accessibility_text] AT-SPI error: {type(e).__name__}", file=sys.stderr)
+        return ""
+
+
+def _walk_at_spi_tree(accessible, text_pieces: list[str], depth: int, max_nodes: int, visited: int = 0, start_time: float = 0) -> int:
+    """Walk the AT-SPI accessibility tree and collect text content.
+    
+    Returns the number of nodes visited so far. Stops early if the wall-clock
+    budget is exceeded to prevent blocking on hung applications.
+    """
+    if visited >= max_nodes or depth >= MAX_UI_DEPTH:
+        return visited
+    
+    # Check wall-clock timeout to avoid blocking on hung apps
+    if start_time > 0:
+        import time
+        elapsed = time.monotonic() - start_time
+        if elapsed > _ATSPI_WALK_TIMEOUT_SECONDS:
+            return visited
+    
+    if accessible is None:
+        return visited
+    
+    visited += 1
+    
+    try:
+        # Get role first to check for password fields before any text extraction
+        role = None
+        try:
+            role = accessible.getRole()
+        except Exception:
+            pass
+        
+        # Skip password fields unconditionally (regardless of state)
+        if role is not None and _is_at_spi_password_role(role):
+            return visited
+        
+        # Skip certain chrome/UI roles (similar to Windows implementation)
+        if role is not None and _is_at_spi_chrome_role(role):
+            return visited
+        
+        # Try to get text content
+        text_content = _text_from_at_spi(accessible, role)
+        if text_content and text_content.strip():
+            text_pieces.append(text_content)
+        
+        # Stop if we've collected enough text
+        if sum(len(t) for t in text_pieces) >= MAX_TEXT_CHARS * 2:
+            return visited
+        
+        # Recurse into children
+        try:
+            child_count = accessible.childCount
+            for i in range(min(child_count, 50)):  # Limit children per node
+                try:
+                    child = accessible.getChildAtIndex(i)
+                    visited = _walk_at_spi_tree(child, text_pieces, depth + 1, max_nodes, visited, start_time)
+                    if visited >= max_nodes:
+                        break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+    
+    except Exception:
+        pass
+    
+    return visited
+
+
+def _is_at_spi_password_role(role) -> bool:
+    """Check if a role is a password field. Check role only, not state."""
+    try:
+        import pyatspi
+        return role == pyatspi.ROLE_PASSWORD_TEXT
+    except Exception:
+        return False
+
+
+def _is_at_spi_password(accessible) -> bool:
+    """Check if an accessible is a password field."""
+    try:
+        role = accessible.getRole()
+        return _is_at_spi_password_role(role)
+    except Exception:
+        return False
+
+
+def _is_at_spi_chrome_role(role) -> bool:
+    """Check if a role represents UI chrome rather than content."""
+    try:
+        import pyatspi
+        chrome_roles = {
+            pyatspi.ROLE_MENU_BAR,
+            pyatspi.ROLE_MENU,
+            pyatspi.ROLE_MENU_ITEM,
+            pyatspi.ROLE_TOOL_BAR,
+            pyatspi.ROLE_SCROLL_BAR,
+            pyatspi.ROLE_SEPARATOR,
+            pyatspi.ROLE_TOOLTIP,
+            pyatspi.ROLE_STATUS_BAR,
+            pyatspi.ROLE_PROGRESS_BAR,
+            pyatspi.ROLE_SLIDER,
+            pyatspi.ROLE_SPLIT_PANE,
+        }
+        return role in chrome_roles
+    except Exception:
+        return False
+
+
+def _text_from_at_spi(accessible, role=None) -> str:
+    """Extract text from an AT-SPI accessible object.
+    
+    Tries multiple methods:
+    1. Text interface (for text controls, documents)
+    2. Value interface (for entry fields)
+    3. Name property (for labels, buttons)
+    """
+    if accessible is None:
+        return ""
+    
+    chunks: list[str] = []
+    
+    try:
+        import pyatspi
+        
+        # For text-heavy controls, try the Text interface first
+        if role in (pyatspi.ROLE_TEXT, pyatspi.ROLE_DOCUMENT_FRAME, 
+                   pyatspi.ROLE_PARAGRAPH, pyatspi.ROLE_TERMINAL,
+                   pyatspi.ROLE_ENTRY):
+            try:
+                text_iface = accessible.queryText()
+                if text_iface:
+                    text = text_iface.getText(0, min(text_iface.characterCount, MAX_TEXT_CHARS))
+                    if text and text.strip():
+                        chunks.append(text)
+            except NotImplementedError:
+                pass
+            except Exception:
+                pass
+        
+        # Try Value interface for entry fields
+        if role == pyatspi.ROLE_ENTRY or (role and not chunks):
+            try:
+                value_iface = accessible.queryValue()
+                if value_iface:
+                    current_value = value_iface.currentValue
+                    if current_value is not None:
+                        value_str = str(current_value).strip()
+                        # Skip bare URLs as primary content
+                        if value_str and not (value_str.startswith("http://") or value_str.startswith("https://")):
+                            chunks.append(value_str)
+                        elif value_str and not chunks:
+                            chunks.append(value_str)
+            except NotImplementedError:
+                pass
+            except Exception:
+                pass
+        
+        # Fall back to name for labels, buttons, etc.
+        if not chunks:
+            try:
+                name = accessible.name
+                if name and name.strip():
+                    chunks.append(name)
+            except Exception:
+                pass
+    
+    except Exception:
+        pass
+    
+    return normalize_accessibility_text(*chunks)
+
+
 def extract_accessibility_text(hwnd: int | None = None) -> str:
     """Read bounded text from the foreground UI without taking a screenshot."""
     if IS_WINDOWS:
         return _windows_text(hwnd)
     if IS_MACOS:
         return _mac_text()
+    if IS_LINUX:
+        return _linux_text()
     return ""
 
 

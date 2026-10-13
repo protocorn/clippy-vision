@@ -35,6 +35,9 @@ async function getErrorMessage(response) {
 
 contextBridge.exposeInMainWorld('clippy', {
 
+    // Expose apiUrl helper for chat streaming
+    apiUrl,
+
     // ARCHIVED in-app chat — UI moved to archive/in_app_chat/. Stubs remain for restore.
     chat: async (message, conversationId) => {
         const response = await fetch(await apiUrl('/chat'), {
@@ -270,6 +273,12 @@ contextBridge.exposeInMainWorld('clippy', {
 
     getDataStats: async () => {
         const response = await fetch(await apiUrl('/settings/data'))
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
+    getDiagnostics: async () => {
+        const response = await fetch(await apiUrl('/settings/diagnostics'))
         if (!response.ok) throw new Error(await getErrorMessage(response))
         return response.json()
     },

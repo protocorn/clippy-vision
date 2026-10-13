@@ -75,6 +75,8 @@ function createHardware({ paths, llmConfig, runCommand }) {
     async function getHardwareCheck() {
         // Apple Silicon reports shared unified memory rather than discrete VRAM;
         // use total memory for the GPU grade so capable Macs are not blocked.
+        // Linux machines with AMD, Intel, or no discrete GPU also report 0 from
+        // nvidia-smi; treat integrated graphics the same as unified memory.
         // Round RAM to the nearest GB so marketed machines are not blocked by a
         // small amount of reserved memory (e.g. 7.8 GB reported on an 8 GB box).
         const ramGb = Math.round(os.totalmem() / (1024 ** 3))
@@ -84,10 +86,11 @@ function createHardware({ paths, llmConfig, runCommand }) {
         const osId = detectOsLabel()
         const requirements = process.platform === 'darwin' ? HW_MIN_MAC : HW_MIN
         const recommended = process.platform === 'darwin' ? HW_REC_MAC : HW_REC
-        const vramGb = process.platform === 'darwin'
+        // macOS always uses unified memory; Linux uses RAM when no discrete GPU is detected
+        const vramGb = process.platform === 'darwin' || (process.platform === 'linux' && vramRaw === 0)
             ? ramGb
             : Math.round(vramRaw * 10) / 10
-        const osOk = process.platform === 'win32' || process.platform === 'darwin'
+        const osOk = process.platform === 'win32' || process.platform === 'darwin' || process.platform === 'linux'
 
         const grades = {
             ram:  gradeResource(ramGb, requirements.ramGb, recommended.ramGb),
@@ -110,11 +113,16 @@ function createHardware({ paths, llmConfig, runCommand }) {
                 vramGb,
                 diskGb,
                 os: osId,
-                memoryLabel: process.platform === 'darwin' ? 'Unified memory' : 'GPU VRAM',
+                memoryLabel: process.platform === 'darwin' 
+                    ? 'Unified memory' 
+                    : (process.platform === 'linux' && vramRaw === 0)
+                    ? 'RAM (integrated GPU)'
+                    : 'GPU VRAM',
                 osLabel: osId === 'windows11' ? 'Windows 11'
                     : osId === 'windows10' ? 'Windows 10'
                     : osId === 'macos-apple-silicon' ? 'macOS · Apple Silicon'
                     : osId === 'macos-intel' ? 'macOS · Intel'
+                    : osId === 'linux' ? 'Linux (supported, experimental)'
                     : osId,
             },
             mode: usesManagedOllama() ? 'ollama' : 'external',

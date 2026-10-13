@@ -39,10 +39,13 @@
   <div id="app-shell" class="view">
     <header id="app-header" style="display:flex; justify-content:space-between; align-items:center;">
       <div class="header-actions">
-        <!-- ARCHIVED: Chats drawer + New Chat — see archive/in_app_chat/ -->
         <button type="button" id="home-btn" class="header-btn icon-label-btn" title="Sessions">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
           <span>Sessions</span>
+        </button>
+        <button type="button" id="chat-btn" class="header-btn icon-label-btn" title="Chat">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>Chat</span>
         </button>
         <button type="button" id="app-brand" class="app-brand" title="Sessions">Clippy Vision</button>
       </div>
@@ -54,6 +57,7 @@
           </button>
           <div class="nav-more-menu" id="nav-more-menu" hidden role="menu">
             <button type="button" id="home-menu-btn" class="nav-more-item" role="menuitem" data-nav="home">Sessions</button>
+            <button type="button" id="chat-menu-btn" class="nav-more-item" role="menuitem" data-nav="chat">Chat</button>
             <button type="button" id="settings-btn" class="nav-more-item" role="menuitem" data-nav="settings">Settings</button>
           </div>
         </div>
@@ -84,6 +88,51 @@
     </div>
 
     <div id="app-panels">
+      <!-- Chat panel -->
+      <div id="chat-view" class="app-panel">
+        <div id="chat-layout">
+          <div id="drawer-backdrop"></div>
+          <aside id="conv-drawer">
+            <div class="drawer-header">
+              <span>Conversations</span>
+              <button id="drawer-close" aria-label="Close">✕</button>
+            </div>
+            <div class="drawer-search-wrap">
+              <input id="conv-search" type="search" placeholder="Search chats…" autocomplete="off" />
+              <div id="conv-search-hint" class="conv-search-hint"></div>
+            </div>
+            <div id="conv-list"></div>
+          </aside>
+
+          <div id="chat-main" class="is-welcome">
+            <div id="welcome-screen" class="welcome-screen">
+              <div class="welcome-brand">
+                <img class="welcome-logo" src="../assets/logo_active.png" alt="" />
+                <h1 class="welcome-title">Clippy Vision</h1>
+                <p class="welcome-sub">Ask about your captured activity — powered by your local Ollama model.</p>
+              </div>
+              <div class="welcome-composer">
+                <textarea id="welcome-input" rows="2" placeholder="What did I work on today?"
+                  autocomplete="off"
+                  maxlength="4000"></textarea>
+                <div class="welcome-composer-bar">
+                  <span id="welcome-char-count" class="char-count" aria-live="polite"></span>
+                  <button type="button" id="welcome-send">Send</button>
+                </div>
+              </div>
+            </div>
+
+            <div id="messages"></div>
+
+            <div id="input-row">
+              <textarea id="input-box" rows="1" placeholder="Ask Clippy..." maxlength="4000"></textarea>
+              <span id="input-char-count" class="char-count" aria-live="polite"></span>
+              <button id="send-btn">Send</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Settings panel -->
       <div id="settings-view" class="app-panel">
         <div class="settings-shell">
@@ -406,6 +455,10 @@
                     <dd id="about-memory" title="Clippy Vision UI + local API (excludes Ollama model RAM)">—</dd>
                   </div>
                 </dl>
+              </div>
+              <div class="settings-actions" style="margin-top: 14px;">
+                <button type="button" id="diagnostics-copy-btn" class="settings-text-link">Copy diagnostics</button>
+                <span id="diagnostics-status" class="settings-status"></span>
               </div>
             </section>
           </div>

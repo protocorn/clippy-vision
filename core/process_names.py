@@ -17,6 +17,8 @@ _ALIASES = {
     "brave browser": "brave",
     "firefox": "firefox",
     "mozilla firefox": "firefox",
+    "opera": "opera",
+    "vivaldi": "vivaldi",
     "telegram": "telegram",
     "telegramdesktop": "telegram",
     "whatsapp": "whatsapp",

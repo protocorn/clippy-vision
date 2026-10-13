@@ -1,8 +1,10 @@
-"""Detect a private Chrome, Edge, or Brave window from its accessibility tree.
+"""Detect a private Chrome, Edge, Brave, Opera, Vivaldi, or Firefox window.
 
-The visible window title drops the private-mode word once a page loads, or
-keeps it only in a form that also appears on ordinary pages. The browser's
-root pane keeps a stable accessible name.
+On Windows the Chromium-family browsers (Chrome, Edge, Brave, Opera and
+Vivaldi) are detected from the accessibility tree: the visible window title
+drops the private-mode word once a page loads, or keeps it only in a form
+that also appears on ordinary pages, but the browser's root pane keeps a
+stable accessible name.
 
 A private window ends with the brand and a parenthetical label, in whatever
 language that label uses:
@@ -21,6 +23,12 @@ profile name. Parentheses in that profile name are not the private label.
 Chrome and Edge call the pane ``BrowserRootView``. Brave calls it
 ``BraveBrowserRootView``. The window class is ``Chrome_WidgetWin_1`` for
 all three, so the class is not the signal.
+
+Firefox is detected separately, from "Private Browsing" markers in the
+accessibility tree. On macOS the front window's mode is read with AppleScript
+(Chrome, Edge, Brave, Firefox and Opera; Vivaldi is not mapped). On Linux,
+private-window detection is not implemented and this module always returns
+False.
 """
 
 from __future__ import annotations
@@ -46,17 +54,31 @@ _CHROME_PRIVATE_NAME = _brand_private(r"Google[ \u00a0]Chrome")
 _EDGE_PRIVATE_NAME = _brand_private(r"Microsoft\u200b?[ \u00a0]Edge")
 _BRAVE_PRIVATE_NAME = _brand_private(r"Brave")
 
+# Firefox private browsing: look for "Private Browsing" or "InPrivate Browsing" in window/element names
+_FIREFOX_PRIVATE_PATTERN = re.compile(
+    r"(private\s+browsing|inprivate\s+browsing|private\s+window|you'?ve\s+gone\s+incognito|navigation\s+priv[ée]e)",
+    re.IGNORECASE,
+)
+
+# Opera and Vivaldi (Chromium-based) may use parenthetical pattern like Chrome
+_OPERA_PRIVATE_NAME = _brand_private(r"Opera")
+_VIVALDI_PRIVATE_NAME = _brand_private(r"Vivaldi")
+
 # Keys come from core.process_names, so chrome.exe and Google Chrome share one.
 _BY_KEY = {
     "chrome": _CHROME_PRIVATE_NAME,
     "edge": _EDGE_PRIVATE_NAME,
     "brave": _BRAVE_PRIVATE_NAME,
+    "opera": _OPERA_PRIVATE_NAME,
+    "vivaldi": _VIVALDI_PRIVATE_NAME,
 }
 # AppleScript application names. Their window mode is "incognito" on all three.
 _MAC_APP = {
     "chrome": "Google Chrome",
     "edge": "Microsoft Edge",
     "brave": "Brave Browser",
+    "firefox": "Firefox",
+    "opera": "Opera",
 }
 _ROOT_CLASSES = {"BrowserRootView", "BraveBrowserRootView"}
 _MAX_CACHE = 64
@@ -71,8 +93,18 @@ def _pattern_for(process_name: str):
     return _BY_KEY.get(process_key(process_name))
 
 
+def _is_firefox(process_name: str) -> bool:
+    """True when this is a Firefox process."""
+    from core.process_names import process_key
+    return process_key(process_name) == "firefox"
+
+
 def root_name_is_private(name: str, process_name: str) -> bool:
     """True when this browser's root-pane name marks a private window."""
+    # Firefox uses a different pattern (not parenthetical brand)
+    if _is_firefox(process_name):
+        return _FIREFOX_PRIVATE_PATTERN.search(str(name or "").strip()) is not None
+    
     pattern = _pattern_for(process_name)
     if pattern is None:
         return False
@@ -103,9 +135,34 @@ def control_is_private(control, process_name: str) -> bool | None:
 
     A missing pane is not a normal window. The caller retries next time
     instead of remembering a guess.
+    
+    For Firefox, checks window and child element names for "Private Browsing" markers.
+    For Chromium-based browsers, checks BrowserRootView for parenthetical private label.
+    
+    This function works with both real Windows controls and mock objects for testing.
     """
+    if control is None:
+        return None
+    
+    # Firefox: check window name and walk shallow tree for "Private Browsing" markers
+    if _is_firefox(process_name):
+        try:
+            window_name = _control_name(control)
+            if _FIREFOX_PRIVATE_PATTERN.search(window_name):
+                return True
+            # Check children for private browsing markers
+            children = list(control.GetChildren())
+            for child in children[:10]:  # Check first 10 children only
+                child_name = _control_name(child)
+                if _FIREFOX_PRIVATE_PATTERN.search(child_name):
+                    return True
+        except Exception:
+            pass
+        return None
+    
+    # Chromium-based browsers (Chrome, Edge, Brave, Opera, Vivaldi)
     pattern = _pattern_for(process_name)
-    if control is None or pattern is None:
+    if pattern is None:
         return None
     try:
         children = list(control.GetChildren())
@@ -135,9 +192,9 @@ def forget_private_windows() -> None:
 
 
 def mode_reply_is_private(reply: str) -> bool:
-    """True when AppleScript reported a Chromium private window."""
+    """True when AppleScript reported a Chromium or Firefox private window."""
     token = (reply or "").strip().lower()
-    return token in {"incognito", "inprivate"}
+    return token in {"incognito", "inprivate", "private"}
 
 
 def parse_private_bounds(reply: str) -> list[tuple[int, int, int, int]]:
@@ -219,18 +276,22 @@ def _mac_front_is_private(process_name: str) -> bool:
 
 
 def window_is_private(hwnd: int | None, process_name: str) -> bool:
-    """True for a Chrome, Edge, or Brave window marked private.
+    """True for a Chrome, Edge, Brave, Firefox, Opera, or Vivaldi window marked private.
 
-    On Windows the answer is remembered per window handle. The check is two
-    nodes deep, so later captures do not walk the page. On macOS the browser
-    reports the front window's mode, which is ``incognito`` for all three.
+    On Windows the answer is remembered per window handle. The check walks the
+    accessibility tree (two nodes deep for Chromium, shallow for Firefox), so later
+    captures do not re-walk the page. On macOS the browser reports the front window's
+    mode, which is ``incognito`` for Chromium and ``private`` for Firefox.
+    On Linux, always returns False (browser private mode detection not yet implemented).
     """
-    if _pattern_for(process_name) is None:
+    if not _is_firefox(process_name) and _pattern_for(process_name) is None:
         return False
     if not _redaction_enabled():
         return False
-    from core.platform_support import IS_MACOS
+    from core.platform_support import IS_MACOS, IS_LINUX
 
+    if IS_LINUX:
+        return False
     if IS_MACOS:
         return _mac_front_is_private(process_name)
     if not hwnd:

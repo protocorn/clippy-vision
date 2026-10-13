@@ -2,9 +2,12 @@
 
 import unittest
 
+import pytest
+
 from core.mac_ui import parse_field_dump, parse_window_dump, redaction_from_nodes
 
 
+@pytest.mark.macos
 class MacRedactionTests(unittest.TestCase):
     def test_password_field_is_painted_and_its_value_is_not_kept(self):
         result = redaction_from_nodes(

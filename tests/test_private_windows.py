@@ -158,16 +158,98 @@ class BravePrivateNameTests(unittest.TestCase):
         )
 
 
+class FirefoxPrivateNameTests(unittest.TestCase):
+    def test_private_browsing_window_is_private(self):
+        # Firefox shows "Private Browsing" in various languages
+        self.assertTrue(root_name_is_private("Private Browsing - Mozilla Firefox", "firefox.exe"))
+        self.assertTrue(root_name_is_private("Mozilla Firefox (Private Browsing)", "firefox.exe"))
+        self.assertTrue(root_name_is_private("Navigation privée - Mozilla Firefox", "firefox.exe"))
+    
+    def test_new_private_window_is_private(self):
+        # Initial private window title
+        self.assertTrue(root_name_is_private("New Private Window - Mozilla Firefox", "firefox.exe"))
+        self.assertTrue(root_name_is_private("InPrivate Browsing - Firefox", "firefox.exe"))
+    
+    def test_normal_window_is_not_private(self):
+        self.assertFalse(root_name_is_private("Google - Mozilla Firefox", "firefox.exe"))
+        self.assertFalse(root_name_is_private("New Tab - Firefox", "firefox.exe"))
+    
+    def test_window_with_private_in_page_title_is_not_private(self):
+        # Page title containing "private" but not the browser's private mode
+        self.assertFalse(root_name_is_private("Private Company Info - Mozilla Firefox", "firefox.exe"))
+    
+    def test_tree_reads_firefox_window(self):
+        window = _Node(
+            "MozillaWindowClass",
+            "Private Browsing - Mozilla Firefox",
+            [
+                _Node("MozillaContentWindowClass"),
+                _Node("ToolbarWindow", "You're browsing privately"),
+            ],
+        )
+        self.assertTrue(control_is_private(window, "firefox.exe"))
+    
+    def test_firefox_child_element_with_private_marker(self):
+        window = _Node(
+            "MozillaWindowClass",
+            "Search Results - Mozilla Firefox",
+            [
+                _Node("MozillaContentWindowClass", "Private Browsing"),
+            ],
+        )
+        self.assertTrue(control_is_private(window, "firefox.exe"))
+
+
+class OperaPrivateNameTests(unittest.TestCase):
+    def test_opera_private_window_is_private(self):
+        # Opera (Chromium-based) may use parenthetical pattern
+        name = "Search Results - Opera (Private)"
+        self.assertTrue(root_name_is_private(name, "opera.exe"))
+    
+    def test_opera_normal_window_is_not_private(self):
+        name = "Search Results - Opera"
+        self.assertFalse(root_name_is_private(name, "opera.exe"))
+    
+    def test_tree_reads_opera_root_pane(self):
+        window = _Node(
+            "Chrome_WidgetWin_1",
+            "Search Results - Opera",
+            [
+                _Node("Intermediate D3D Window"),
+                _Node(
+                    "BrowserRootView",
+                    "Search Results - Opera (Private)",
+                ),
+            ],
+        )
+        self.assertTrue(control_is_private(window, "opera.exe"))
+
+
+class VivaldiPrivateNameTests(unittest.TestCase):
+    def test_vivaldi_private_window_is_private(self):
+        # Vivaldi (Chromium-based) may use parenthetical pattern
+        name = "Search - Vivaldi (Private)"
+        self.assertTrue(root_name_is_private(name, "vivaldi.exe"))
+    
+    def test_vivaldi_normal_window_is_not_private(self):
+        name = "Search - Vivaldi"
+        self.assertFalse(root_name_is_private(name, "vivaldi.exe"))
+
+
 class ProcessNameTests(unittest.TestCase):
     def test_windows_file_and_mac_app_are_the_same(self):
         self.assertEqual(process_key("chrome.exe"), process_key("Google Chrome"))
         self.assertEqual(process_key("msedge.exe"), process_key("Microsoft Edge"))
         self.assertEqual(process_key("brave.exe"), process_key("Brave Browser"))
+        self.assertEqual(process_key("firefox.exe"), process_key("Mozilla Firefox"))
+        self.assertEqual(process_key("opera.exe"), process_key("Opera"))
+        self.assertEqual(process_key("vivaldi.exe"), process_key("Vivaldi"))
         self.assertNotEqual(process_key("chrome.exe"), process_key("Code.exe"))
 
     def test_mac_mode_reply(self):
         self.assertTrue(mode_reply_is_private("incognito\n"))
         self.assertTrue(mode_reply_is_private("inprivate"))
+        self.assertTrue(mode_reply_is_private("private"))
         self.assertFalse(mode_reply_is_private("normal"))
 
     def test_private_bounds_parse_and_overlap(self):

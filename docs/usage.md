@@ -31,13 +31,25 @@ Apps you list under privacy are blacked out whenever they are visible, not only 
 
 ### Private browsing
 
-Private browsing protection is on by default for **Google Chrome**, **Microsoft Edge**, and **Brave** on Windows and macOS:
+Private browsing protection is on by default. When a private window is detected, Clippy:
 
-- The window is painted black.
-- The address is not stored.
-- The title is saved as "Private window".
+- paints the window black,
+- does not store the address,
+- saves the title as "Private window".
 
-Firefox, Opera, and Safari are not covered. Pause capture when those private windows must not be stored.
+Coverage depends on the operating system. "Untested" means detection is attempted but has not been verified on that platform:
+
+| Browser (private mode) | Windows | macOS | Linux |
+| --- | --- | --- | --- |
+| Google Chrome (Incognito) | Covered | Covered | Not yet |
+| Microsoft Edge (InPrivate) | Covered | Covered | Not yet |
+| Brave (Private) | Covered | Covered | Not yet |
+| Firefox (Private Browsing) | Covered | Untested | Not yet |
+| Opera | Covered | Untested | Not yet |
+| Vivaldi | Covered | Not covered | Not yet |
+| Safari | Not covered | Not covered | Not yet |
+
+Windows detection is exercised by unit tests in CI only. On Linux there is no private-window detection yet, so a private window is captured like any other. Pause capture when a private window must not be stored. Linux install, capture helpers, and these privacy limits: [linux.md](linux.md#privacy-limits-on-linux).
 
 ### What the privacy layer does
 
@@ -46,6 +58,12 @@ Before text or a screenshot is stored, Clippy tries to:
 - Paint password fields and other single-line sensitive fields.
 - Strip API keys, tokens, private keys, and other secret-shaped text.
 - Black out Clippy's own window in every screenshot.
+- **Honor OS-level capture opt-out signals**: When the foreground window asks the OS not to be captured, Clippy skips screenshots, OCR, accessibility text, and clipboard capture for that moment and records only a minimal event marker with no content.
+
+**OS-level opt-out mechanisms honored:**
+- **Windows**: `SetWindowDisplayAffinity` with `WDA_EXCLUDEFROMCAPTURE` or `WDA_MONITOR` (used by password managers and some secure apps)
+- **macOS**: `NSWindowSharingNone` (`kCGWindowSharingState == 0`) on the frontmost window of the foreground app, via CGWindowList
+- **Linux**: No standardized per-window mechanism. Clippy falls back to an exact-name list of well-known password managers (not substring matching). Browser private windows stay on the existing private-window path. Details: [linux.md](linux.md#privacy-limits-on-linux).
 
 The same redactor runs again on every MCP tool reply. Screenshot file paths are left out. A window you marked private is returned as "This moment was private" with the app and time only. If that filter fails, the tool returns nothing. The copy on this computer is unchanged.
 
@@ -112,11 +130,19 @@ The disk image is unsigned. Right-click Clippy Vision and choose **Open**, then 
 
 ### Homebrew / dependencies on macOS
 
-The setup wizard uses Homebrew when Homebrew is already installed to install Python and Ollama. If Homebrew is missing, install Python 3.11+ and Ollama yourself, then retry setup. `brew install ollama` is the same step the wizard tries when Homebrew is present.
+The setup wizard uses Homebrew when Homebrew is already installed to install Python and Ollama. If Homebrew is missing, the wizard shows a manual-install message with links to [python.org/downloads](https://www.python.org/downloads/) and [ollama.com/download](https://ollama.com/download). Install those yourself, then click **Retry**. `brew install ollama` is the same step the wizard tries when Homebrew is present.
+
+### Linux AppImage
+
+Linux support is **experimental and X11 only. Wayland is not supported.** The unsigned AppImage, Python 3.11+ (not bundled; the setup wizard parses `python --version` and rejects anything older), capture helpers, and known warnings are in [linux.md](linux.md). **Install Ollama first** (`curl -fsSL https://ollama.com/install.sh | sh`, or [ollama.com/download/linux](https://ollama.com/download/linux)). Python stays a manual install from [python.org/downloads](https://www.python.org/downloads/). If `libfuse2` is missing, run the AppImage with `--appimage-extract-and-run`.
+
+### Windows winget missing or PATH stale after install
+
+If `winget` is not available, the wizard does not dead-end: it shows [python.org/downloads](https://www.python.org/downloads/) and [ollama.com/download](https://ollama.com/download). After a successful winget install it re-reads PATH and probes known locations such as `%LOCALAPPDATA%\Programs\Ollama\ollama.exe` and `%LOCALAPPDATA%\Programs\Python\Python311\python.exe` before asking you to retry.
 
 ### Ollama not found after install
 
-Open a new terminal and run `ollama --version`. If not found, re-run setup or install it from [ollama.com](https://ollama.com/download).
+Open a new terminal and run `ollama --version`. If not found, re-run setup or install it from [ollama.com](https://ollama.com/download). On Linux the wizard can run the official installer only after you click **Install** and confirm it needs sudo.
 
 ### Reset setup / reinstall
 
@@ -142,6 +168,8 @@ python3 -c "import json,urllib.request,pathlib; p=pathlib.Path.home()/'Library/A
 ---
 
 ## File locations (installed)
+
+Linux packaged paths: [linux.md](linux.md#file-locations-packaged-linux).
 
 | Item | Windows | macOS |
 |------|---------|-------|

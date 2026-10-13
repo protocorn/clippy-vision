@@ -1925,15 +1925,19 @@
  color: var(--text);
  }
 
- button.mcp-copy-btn {
+ button.mcp-copy-btn,
+ button.settings-text-link {
  background: none;
  border: none;
  padding: 0;
  cursor: pointer;
  font: inherit;
+ white-space: nowrap;
+ flex-shrink: 0;
  }
 
- button.mcp-copy-btn:disabled {
+ button.mcp-copy-btn:disabled,
+ button.settings-text-link:disabled {
  opacity: 0.45;
  cursor: default;
  text-decoration: none;

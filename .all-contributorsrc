@@ -89,6 +89,24 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "furox-art",
+      "name": "furox-art",
+      "avatar_url": "https://github.com/furox-art.png",
+      "profile": "https://github.com/furox-art",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "keuqs",
+      "name": "keuqs",
+      "avatar_url": "https://github.com/keuqs.png",
+      "profile": "https://github.com/keuqs",
+      "contributions": [
+        "code"
+      ]
     }
   ]
 }

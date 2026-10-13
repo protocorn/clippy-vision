@@ -1,18 +1,37 @@
 name: Build & Publish Release
 
+# Triggers:
+# - pull_request: dry-run Windows + Linux packaging (no GitHub Release)
+# - push of tags matching v*: same packaging dry-run; does NOT create or update a GitHub Release
+# - workflow_dispatch: dry-run if tag is empty; create/update a *draft* GitHub Release only when
+#   tag is set. That is the only path that attaches installers to a GitHub Release.
+#
+# Tag pushes never publish or clobber a GitHub Release. Publishing requires a manual
+# Actions run (workflow_dispatch) with a tag input.
+
 on:
   push:
     tags:
       - 'v*'
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'electron-ui/**'
+      - 'scripts/ci_llm_stub.py'
+      - 'requirements.txt'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing release tag to build and attach installers to (e.g. v2.0.0)'
-        required: true
+        description: 'Release tag to attach artifacts to (e.g. v2.0.1). Leave empty for dry-run without creating a release.'
+        required: false
       include_macos:
-        description: 'Also build and upload macOS installers (only after Apple Silicon and Intel validation)'
+        description: 'Also build unsigned macOS installers (opt-in, manual validation required)'
         type: boolean
         default: false
+      include_linux:
+        description: 'Build Linux AppImage (enabled by default for tag pushes and PRs)'
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -38,11 +57,19 @@ jobs:
         working-directory: electron-ui
         run: npm ci
 
-      - name: Sync app version from release tag
+      - name: Sync app version from release tag or dry-run
         working-directory: electron-ui
         shell: bash
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          if [[ -n "${{ github.event.inputs.tag }}" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            # Dry-run: use package.json version with -dev suffix
+            TAG="v$(node -p "require('./package.json').version")-dev+${{ github.sha }}"
+            echo "::notice::Dry-run build (no release will be created): $TAG"
+          fi
           VERSION="${TAG#v}"
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+-].*)?$ ]]; then
             echo "Invalid version derived from tag '$TAG' (got '$VERSION')"
@@ -50,17 +77,343 @@ jobs:
           fi
           npm version "$VERSION" --no-git-tag-version --allow-same-version
           echo "Building Clippy Vision $VERSION (release tag $TAG)"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "TAG=$TAG" >> $GITHUB_ENV
 
-      - name: Build Windows installer
+      - name: Build Windows installer (unsigned)
         working-directory: electron-ui
         run: npm run dist:win
 
+      - name: Smoke check Windows installer
+        shell: bash
+        working-directory: electron-ui/dist
+        run: |
+          echo "Checking Windows installer..."
+          INSTALLER=$(ls ClippyVision-Windows-Setup-*.exe 2>/dev/null | head -1)
+          if [[ -z "$INSTALLER" ]]; then
+            echo "ERROR: No Windows installer found"
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$INSTALLER" 2>/dev/null || stat -f%z "$INSTALLER" 2>/dev/null)
+          echo "Found: $INSTALLER (${SIZE} bytes)"
+          if [[ $SIZE -lt 50000000 ]]; then
+            echo "ERROR: Installer too small (${SIZE} bytes, expected >50MB)"
+            exit 1
+          fi
+          echo "✓ Windows installer OK"
+
+      # Python is not bundled in the installer. The packaged app spawns
+      # CLIPPY_PYTHON or PATH python (electron-ui/electron/lib/paths.js).
+      # Use the same 3.12 as .github/workflows/tests.yml.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Silent install test Windows
+        shell: pwsh
+        working-directory: electron-ui/dist
+        env:
+          ELECTRON_ENABLE_LOGGING: "1"
+        run: |
+          # CI-only first-run bypass. Not a user-facing skip flag.
+          #
+          # SETUP_FLAG in electron-ui/electron/lib/paths.js is
+          #   <Electron userData>/setup_complete.json
+          # NOT <userData>/data/setup_complete.json. Packaged Windows userData
+          # is %APPDATA%\Clippy Vision (Roaming), not LocalAppData.
+          # Seeding that file skips the interactive wizard so main.js takes
+          # the runPreflightChecks() -> api.startServer() path.
+          #
+          # llm_config.json lives in <userData>/data/ (LLM_CONFIG_FILE). A
+          # base_url other than http://127.0.0.1:11434 makes usesManagedOllama()
+          # false, so preflight talks to scripts/ci_llm_stub.py on :11555
+          # instead of requiring Ollama or a real model.
+          #
+          # Python is not bundled; CLIPPY_PYTHON points at the runner interpreter
+          # that already has requirements.txt installed.
+          #
+          # Proves: packaged app spawns the backend and GET /health returns 200
+          # once setup is already complete.
+          # Does not prove: wizard, Ollama, a real model, or real hardware.
+
+          $ErrorActionPreference = "Continue"
+          $pythonExe = (python -c "import sys; print(sys.executable)").Trim()
+          if (-not $pythonExe) {
+            Write-Host "ERROR: python executable not found on PATH"
+            exit 1
+          }
+          $env:CLIPPY_PYTHON = $pythonExe
+          $env:ELECTRON_ENABLE_LOGGING = "1"
+          Write-Host "CLIPPY_PYTHON=$env:CLIPPY_PYTHON"
+          & $pythonExe --version
+
+          function Write-JsonFile([string]$Path, $Object) {
+            $dir = Split-Path -Parent $Path
+            New-Item -Path $dir -ItemType Directory -Force | Out-Null
+            $json = $Object | ConvertTo-Json -Depth 6
+            [System.IO.File]::WriteAllText($Path, $json)
+            Write-Host "  wrote $Path"
+          }
+
+          function Seed-ClippySetup([string]$UserData) {
+            Write-Host "Seeding Electron userData: $UserData"
+            Write-JsonFile (Join-Path $UserData "setup_complete.json") @{
+              version = "2.1.0"
+              completedAt = (Get-Date).ToUniversalTime().ToString("o")
+            }
+            Write-JsonFile (Join-Path $UserData "data\llm_config.json") @{
+              provider = "ollama"
+              base_url = "http://127.0.0.1:11555"
+              api_key = ""
+              chat_model = "test-model"
+              embedding_model = "nomic-embed-text"
+            }
+          }
+
+          Write-Host "=== Running silent installation ==="
+          $installer = Get-ChildItem -Filter "ClippyVision-Windows-Setup-*.exe" | Select-Object -First 1
+          if (-not $installer) {
+            Write-Host "ERROR: No installer found"
+            exit 1
+          }
+
+          Write-Host "Installing: $($installer.Name)"
+          $installLog = Join-Path (Get-Location) "install-test.log"
+          Start-Process -FilePath $installer.FullName -ArgumentList "/S" -Wait -NoNewWindow
+
+          Write-Host "Checking installation..."
+          $exeCandidates = @(
+            "${env:ProgramFiles}\Clippy Vision\Clippy Vision.exe",
+            "${env:LOCALAPPDATA}\Programs\Clippy Vision\Clippy Vision.exe"
+          )
+          $installedExe = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $installedExe) {
+            Write-Host "ERROR: Installation failed - executable not found:"
+            $exeCandidates | ForEach-Object { Write-Host "  - $_" }
+            "Installation failed - exe not found" | Out-File $installLog
+            exit 1
+          }
+          Write-Host "OK: installed $installedExe ($((Get-Item $installedExe).Length) bytes)"
+
+          foreach ($candidate in @(
+            (Join-Path $env:APPDATA "Clippy Vision"),
+            (Join-Path $env:APPDATA "clippy-vision")
+          )) {
+            Seed-ClippySetup $candidate
+          }
+
+          Write-Host "Starting stub LLM API (scripts/ci_llm_stub.py) on port 11555..."
+          $stubScript = (Resolve-Path "..\..\scripts\ci_llm_stub.py").Path
+          $stubOut = Join-Path (Get-Location) "llm-stub.log"
+          $stubProc = Start-Process -FilePath $pythonExe -ArgumentList @($stubScript) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stubOut -RedirectStandardError "$stubOut.err"
+          Start-Sleep -Seconds 2
+          try {
+            $tags = Invoke-WebRequest -Uri "http://127.0.0.1:11555/api/tags" -TimeoutSec 3 -UseBasicParsing
+            Write-Host "OK: stub /api/tags $($tags.StatusCode) $($tags.Content)"
+          } catch {
+            Write-Host "ERROR: stub LLM server failed to start: $_"
+            if (Test-Path $stubOut) { Get-Content $stubOut | Write-Host }
+            if (Test-Path "$stubOut.err") { Get-Content "$stubOut.err" | Write-Host }
+            exit 1
+          }
+
+          $launchLog = Join-Path (Get-Location) "launch-test.log"
+          $launchErr = Join-Path (Get-Location) "launch-test.stderr"
+          function Combined-LaunchLog {
+            $parts = @()
+            foreach ($f in @($launchLog, $launchErr)) {
+              if (Test-Path $f) {
+                $parts += Get-Content $f -Raw -ErrorAction SilentlyContinue
+              }
+            }
+            return ($parts -join "`n")
+          }
+
+          function Start-Clippy {
+            if (Test-Path $launchLog) { Remove-Item $launchLog -Force }
+            if (Test-Path $launchErr) { Remove-Item $launchErr -Force }
+            Write-Host "Launching: $installedExe"
+            return Start-Process -FilePath $installedExe -PassThru -WindowStyle Hidden -RedirectStandardOutput $launchLog -RedirectStandardError $launchErr -ErrorAction Stop
+          }
+
+          function Stop-Clippy([System.Diagnostics.Process]$proc) {
+            if ($null -eq $proc) { return }
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Get-Process -Name "Clippy Vision" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+          }
+
+          $process = Start-Clippy
+          if (-not $process) {
+            Write-Host "ERROR: Failed to start process"
+            "Launch failed" | Out-File $installLog
+            exit 1
+          }
+          Write-Host "  Main process PID: $($process.Id)"
+
+          $backendPort = $null
+          $backendHttpOk = $false
+          $backendHttpBody = ""
+          $userDataFromLog = $null
+          $relaunched = $false
+          $deadlineSeconds = 90
+
+          for ($i = 1; $i -le $deadlineSeconds; $i++) {
+            Start-Sleep -Seconds 1
+            if ($process.HasExited) {
+              Write-Host "ERROR: Process exited after $i seconds (exit code: $($process.ExitCode))"
+              Write-Host "=== Launch log ==="
+              Write-Host (Combined-LaunchLog)
+              if ($stubProc -and -not $stubProc.HasExited) { Stop-Process -Id $stubProc.Id -Force -ErrorAction SilentlyContinue }
+              exit 1
+            }
+
+            $logContent = Combined-LaunchLog
+
+            if (-not $userDataFromLog -and $logContent -match '\[paths\] USER_DATA=(.+)') {
+              $userDataFromLog = $matches[1].Trim()
+              Write-Host "OK: USER_DATA from app log: $userDataFromLog at ${i}s"
+              $flagPath = Join-Path $userDataFromLog "setup_complete.json"
+              if (-not (Test-Path $flagPath)) {
+                if ($relaunched) {
+                  Write-Host "ERROR: SETUP_FLAG still missing at $flagPath after re-seed"
+                } else {
+                  Write-Host "SETUP_FLAG missing at logged USER_DATA; seeding and relaunching"
+                  Seed-ClippySetup $userDataFromLog
+                  Stop-Clippy $process
+                  $process = Start-Clippy
+                  $relaunched = $true
+                  $backendPort = $null
+                  $i = 0
+                  continue
+                }
+              } else {
+                Write-Host "OK: SETUP_FLAG present at $flagPath"
+              }
+            }
+
+            if (($null -eq $backendPort) -and $logContent -match '\[api\] port=(\d+)') {
+              $backendPort = $matches[1]
+              Write-Host "OK: Backend port announced: $backendPort at ${i}s"
+            }
+
+            if (($null -ne $backendPort) -and (-not $backendHttpOk)) {
+              foreach ($hostAddr in @("127.0.0.1", "localhost")) {
+                try {
+                  $response = Invoke-WebRequest -Uri "http://${hostAddr}:${backendPort}/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+                  if ($response.StatusCode -eq 200) {
+                    $backendHttpOk = $true
+                    $backendHttpBody = [string]$response.Content
+                    Write-Host "OK: Backend HTTP 200 on ${hostAddr}:${backendPort} at ${i}s"
+                    Write-Host "  Response: $backendHttpBody"
+                    break
+                  }
+                } catch {
+                  # still starting
+                }
+              }
+            }
+
+            if ($logContent -match '\[preflight\] Failed at step') {
+              Write-Host "WARNING: preflight failure in logs at ${i}s"
+            }
+
+            if ($i % 10 -eq 0) {
+              Write-Host "  ...${i}s elapsed (process alive, backend HTTP: $(if ($backendHttpOk) {'OK'} else {'not yet'}))"
+            }
+
+            if ($backendHttpOk) { break }
+          }
+
+          if ($stubProc -and -not $stubProc.HasExited) {
+            Stop-Process -Id $stubProc.Id -Force -ErrorAction SilentlyContinue
+          }
+
+          if ($null -eq $backendPort) {
+            Write-Host "ERROR: Backend port was never announced in logs"
+            Write-Host "=== Launch log ==="
+            Write-Host (Combined-LaunchLog)
+            Stop-Clippy $process
+            exit 1
+          }
+          if (-not $backendHttpOk) {
+            Write-Host "ERROR: Backend HTTP health check FAILED"
+            Write-Host "  Port announced: $backendPort"
+            Write-Host "  HTTP /health never returned 200 OK"
+            Write-Host "  USER_DATA: $userDataFromLog"
+            Write-Host "=== Launch log ==="
+            Write-Host (Combined-LaunchLog)
+            Stop-Clippy $process
+            exit 1
+          }
+
+          Write-Host "OK: Backend HTTP health check PASSED"
+          Stop-Clippy $process
+
+          @(
+            "Installation: $installedExe",
+            "Backend port: $backendPort",
+            "Backend HTTP: PASS (200)",
+            "Body: $backendHttpBody",
+            "USER_DATA: $userDataFromLog"
+          ) | Out-File $installLog
+
+          Write-Host ""
+          Write-Host "Silent install test completed"
+          Write-Host "  - Installed: $installedExe"
+          Write-Host "  - Backend port: $backendPort"
+          Write-Host "  - Backend HTTP: PASS (200 OK) $backendHttpBody"
+
+      - name: Upload Windows test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-install-test
+          path: |
+            electron-ui/dist/install-test.log
+            electron-ui/dist/launch-test.log
+            electron-ui/dist/launch-test.stderr
+            electron-ui/dist/llm-stub.log
+          retention-days: 14
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: electron-ui/dist/*.exe
+          retention-days: 14
+
+      - name: Ensure release notes file exists
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          NOTES="docs/release-notes/${TAG}.md"
+          if [[ ! -f "$NOTES" ]]; then
+            echo "::error::Release notes file not found: $NOTES"
+            echo "Looked up from workflow_dispatch tag input '$TAG'."
+            ls -la docs/release-notes/ || true
+            exit 1
+          fi
+          echo "Using release notes: $NOTES"
+
       - name: Upload Windows installer to release
+        # Manual only: workflow_dispatch with a tag. Tag pushes and PRs never create/update a release.
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ github.event.inputs.tag }}
+          body_path: docs/release-notes/${{ github.event.inputs.tag }}.md
           files: |
             electron-ui/dist/*.exe
+          draft: true
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -83,11 +436,17 @@ jobs:
         working-directory: electron-ui
         run: npm ci
 
-      - name: Sync app version from release tag
+      - name: Sync app version from release tag or dry-run
         working-directory: electron-ui
         shell: bash
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          if [[ -n "${{ github.event.inputs.tag }}" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            # Dry-run: use package.json version with -dev suffix
+            TAG="v$(node -p "require('./package.json').version")-dev+${{ github.sha }}"
+            echo "::notice::Dry-run build (no release will be created): $TAG"
+          fi
           VERSION="${TAG#v}"
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+-].*)?$ ]]; then
             echo "Invalid version derived from tag '$TAG' (got '$VERSION')"
@@ -95,18 +454,390 @@ jobs:
           fi
           npm version "$VERSION" --no-git-tag-version --allow-same-version
           echo "Building Clippy Vision $VERSION (release tag $TAG)"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "TAG=$TAG" >> $GITHUB_ENV
 
-      - name: Build macOS installer
+      - name: Build macOS installer (unsigned, code signing disabled)
         working-directory: electron-ui
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npm run dist:mac
 
+      - name: Upload macOS installers artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-installer
+          path: electron-ui/dist/*.dmg
+          retention-days: 14
+
+      - name: Ensure release notes file exists
+        if: github.event.inputs.tag != '' && github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          NOTES="docs/release-notes/${TAG}.md"
+          if [[ ! -f "$NOTES" ]]; then
+            echo "::error::Release notes file not found: $NOTES"
+            echo "Looked up from workflow_dispatch tag input '$TAG'."
+            ls -la docs/release-notes/ || true
+            exit 1
+          fi
+          echo "Using release notes: $NOTES"
+
       - name: Upload macOS installers to release
+        # Manual only: workflow_dispatch with a tag. Tag pushes never run this job.
+        if: github.event.inputs.tag != '' && github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ github.event.inputs.tag }}
+          body_path: docs/release-notes/${{ github.event.inputs.tag }}.md
           files: |
             electron-ui/dist/*.dmg
+          draft: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    # Run on tag pushes, PRs (dry-run), or on workflow_dispatch if include_linux is true (default)
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.include_linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: electron-ui
+        run: npm ci
+
+      - name: Sync app version from release tag or dry-run
+        working-directory: electron-ui
+        shell: bash
+        run: |
+          if [[ -n "${{ github.event.inputs.tag }}" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            # Dry-run: use package.json version with -dev suffix
+            TAG="v$(node -p "require('./package.json').version")-dev+${{ github.sha }}"
+            echo "::notice::Dry-run build (no release will be created): $TAG"
+          fi
+          VERSION="${TAG#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+-].*)?$ ]]; then
+            echo "Invalid version derived from tag '$TAG' (got '$VERSION')"
+            exit 1
+          fi
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          echo "Building Clippy Vision $VERSION (release tag $TAG)"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "TAG=$TAG" >> $GITHUB_ENV
+
+      - name: Build Linux AppImage (unsigned)
+        working-directory: electron-ui
+        run: npm run dist:linux
+
+      - name: Smoke check Linux AppImage
+        working-directory: electron-ui/dist
+        run: |
+          echo "Checking Linux AppImage..."
+          APPIMAGE=$(ls ClippyVision-Linux-*.AppImage 2>/dev/null | head -1)
+          if [[ -z "$APPIMAGE" ]]; then
+            echo "ERROR: No AppImage found"
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$APPIMAGE")
+          echo "Found: $APPIMAGE (${SIZE} bytes)"
+          if [[ $SIZE -lt 50000000 ]]; then
+            echo "ERROR: AppImage too small (${SIZE} bytes, expected >50MB)"
+            exit 1
+          fi
+          
+          # Extract and verify main binary exists
+          chmod +x "$APPIMAGE"
+          ./"$APPIMAGE" --appimage-extract >/dev/null 2>&1
+          
+          if [[ ! -f "squashfs-root/clippy-vision" ]] && [[ ! -f "squashfs-root/AppRun" ]]; then
+            echo "ERROR: Main binary not found in extracted AppImage"
+            ls -la squashfs-root/ || true
+            exit 1
+          fi
+          
+          echo "✓ AppImage structure OK"
+          rm -rf squashfs-root
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Launch test Linux AppImage under Xvfb
+        working-directory: electron-ui/dist
+        env:
+          ELECTRON_ENABLE_LOGGING: "1"
+        run: |
+          # CI-only first-run bypass. Not a user-facing skip flag.
+          #
+          # SETUP_FLAG (electron-ui/electron/lib/paths.js) is
+          #   <Electron userData>/setup_complete.json
+          # Packaged Linux userData is ~/.config/Clippy Vision (productName).
+          # It is NOT ~/.config/Clippy Vision/data/setup_complete.json.
+          # Seeding the flag skips the wizard so main.js runs preflight and
+          # api.startServer().
+          #
+          # llm_config.json in <userData>/data/ points base_url at
+          # scripts/ci_llm_stub.py (:11555) so usesManagedOllama() is false
+          # and preflight does not require Ollama or a real model.
+          #
+          # Python is not bundled. CLIPPY_PYTHON is the runner interpreter
+          # that already has requirements.txt installed (same 3.12 as tests.yml).
+          #
+          # Proves: packaged AppImage spawns the backend and GET /health
+          # returns 200 once setup is already complete.
+          # Does not prove: wizard, Ollama, a real model, or real hardware.
+
+          set -euo pipefail
+          echo "=== Installing Xvfb, FUSE, and diagnostic tools ==="
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb x11-utils imagemagick xterm xdotool libfuse2 procps curl lsof iproute2
+
+          PYTHON_EXE="$(python -c 'import sys; print(sys.executable)')"
+          export CLIPPY_PYTHON="$PYTHON_EXE"
+          export ELECTRON_ENABLE_LOGGING=1
+          echo "CLIPPY_PYTHON=$CLIPPY_PYTHON"
+          python --version
+
+          seed_clippy_setup() {
+            local user_data="$1"
+            mkdir -p "$user_data/data"
+            printf '%s\n' '{"version":"2.1.0","completedAt":"2026-10-12T00:00:00.000Z"}' > "$user_data/setup_complete.json"
+            printf '%s\n' '{"provider":"ollama","base_url":"http://127.0.0.1:11555","api_key":"","chat_model":"test-model","embedding_model":"nomic-embed-text"}' > "$user_data/data/llm_config.json"
+            echo "seeded $user_data/setup_complete.json"
+            echo "seeded $user_data/data/llm_config.json"
+          }
+
+          echo "=== Pre-seeding setup_complete.json at Electron userData root ==="
+          seed_clippy_setup "$HOME/.config/Clippy Vision"
+          seed_clippy_setup "$HOME/.config/clippy-vision"
+
+          echo "=== Starting stub LLM API on port 11555 ==="
+          python ../../scripts/ci_llm_stub.py > llm-stub.log 2>&1 &
+          STUB_PID=$!
+          sleep 1
+          TAGS_BODY="$(curl -sS -w '\n%{http_code}' http://127.0.0.1:11555/api/tags || true)"
+          echo "stub /api/tags: $TAGS_BODY"
+          echo "$TAGS_BODY" | tail -1 | grep -qx 200 || {
+            echo "ERROR: stub LLM server failed to start"
+            cat llm-stub.log || true
+            kill $STUB_PID 2>/dev/null || true
+            exit 1
+          }
+
+          APPIMAGE=$(ls ClippyVision-Linux-*.AppImage 2>/dev/null | head -1)
+          chmod +x "$APPIMAGE"
+
+          echo "=== Starting Xvfb on :99 ==="
+          Xvfb :99 -screen 0 1024x768x24 &
+          XVFB_PID=$!
+          export DISPLAY=:99
+          sleep 2
+
+          LOG_FILE="launch-test.log"
+          STDERR_FILE="launch-test.stderr"
+
+          start_app() {
+            rm -f "$LOG_FILE" "$STDERR_FILE"
+            echo "Launching AppImage with CLIPPY_PYTHON=$CLIPPY_PYTHON"
+            ./"$APPIMAGE" > "$LOG_FILE" 2> "$STDERR_FILE" &
+            APP_PID=$!
+            echo "AppImage PID: $APP_PID"
+          }
+
+          stop_app() {
+            kill $APP_PID 2>/dev/null || true
+            sleep 1
+            kill -9 $APP_PID 2>/dev/null || true
+          }
+
+          dump_logs() {
+            echo "=== Application stdout ==="
+            cat "$LOG_FILE" 2>/dev/null || true
+            echo "=== Application stderr ==="
+            cat "$STDERR_FILE" 2>/dev/null || true
+            echo "=== Listening TCP ==="
+            ss -tlnp 2>/dev/null | head -40 || true
+            echo "=== Python processes ==="
+            ps -ef | grep -i python | grep -v grep || true
+          }
+
+          start_app
+
+          BACKEND_PORT=""
+          BACKEND_HTTP_OK=false
+          BACKEND_HTTP_BODY=""
+          WINDOW_FOUND=false
+          USER_DATA_LOGGED=""
+          RELAUNCHED=false
+
+          for i in $(seq 1 90); do
+            if ! kill -0 $APP_PID 2>/dev/null; then
+              echo "ERROR: AppImage crashed after $i seconds"
+              dump_logs
+              kill $STUB_PID $XVFB_PID 2>/dev/null || true
+              exit 1
+            fi
+
+            if [ -z "$USER_DATA_LOGGED" ]; then
+              USER_DATA_LOGGED="$(grep -oE '\[paths\] USER_DATA=.*' "$LOG_FILE" "$STDERR_FILE" 2>/dev/null | head -1 | sed 's/.*USER_DATA=//' || true)"
+              if [ -n "$USER_DATA_LOGGED" ]; then
+                echo "OK: USER_DATA from app log: $USER_DATA_LOGGED at ${i}s"
+                if [ ! -f "$USER_DATA_LOGGED/setup_complete.json" ]; then
+                  if [ "$RELAUNCHED" = true ]; then
+                    echo "ERROR: SETUP_FLAG still missing at $USER_DATA_LOGGED/setup_complete.json"
+                    dump_logs
+                    kill $STUB_PID $APP_PID $XVFB_PID 2>/dev/null || true
+                    exit 1
+                  fi
+                  echo "SETUP_FLAG missing at logged USER_DATA; seeding and relaunching"
+                  seed_clippy_setup "$USER_DATA_LOGGED"
+                  stop_app
+                  RELAUNCHED=true
+                  BACKEND_PORT=""
+                  start_app
+                  continue
+                fi
+                echo "OK: SETUP_FLAG present at $USER_DATA_LOGGED/setup_complete.json"
+              fi
+            fi
+
+            if [ -z "$BACKEND_PORT" ]; then
+              PORT_LINE="$(grep -oE '\[api\] port=[0-9]+' "$LOG_FILE" "$STDERR_FILE" 2>/dev/null | head -1 || true)"
+              if [ -n "$PORT_LINE" ]; then
+                BACKEND_PORT="$(echo "$PORT_LINE" | grep -oE '[0-9]+')"
+                echo "OK: Backend port announced: $BACKEND_PORT at ${i}s"
+              fi
+            fi
+
+            if [ -n "$BACKEND_PORT" ] && [ "$BACKEND_HTTP_OK" = false ]; then
+              for host in 127.0.0.1 localhost; do
+                HTTP_RESPONSE="$(curl -sS -w '\n%{http_code}' "http://${host}:${BACKEND_PORT}/health" 2>/dev/null || true)"
+                HTTP_CODE="$(printf '%s\n' "$HTTP_RESPONSE" | tail -1)"
+                HTTP_BODY="$(printf '%s\n' "$HTTP_RESPONSE" | sed '$d')"
+                if [ "$HTTP_CODE" = "200" ]; then
+                  BACKEND_HTTP_OK=true
+                  BACKEND_HTTP_BODY="$HTTP_BODY"
+                  echo "OK: Backend HTTP 200 on ${host}:${BACKEND_PORT} at ${i}s"
+                  echo "  Response: $HTTP_BODY"
+                  break
+                fi
+              done
+            fi
+
+            if [ "$WINDOW_FOUND" = false ]; then
+              if xdotool search --name "Clippy" > /dev/null 2>&1; then
+                WINDOW_FOUND=true
+                echo "OK: Electron window detected at ${i}s"
+              fi
+            fi
+
+            if [ "$BACKEND_HTTP_OK" = true ] && [ "$WINDOW_FOUND" = true ]; then
+              echo "OK: health 200 and window verified"
+              break
+            fi
+            sleep 1
+          done
+
+          if [ -z "$BACKEND_PORT" ]; then
+            echo "ERROR: Backend port never announced in log"
+            dump_logs
+            kill $STUB_PID $APP_PID $XVFB_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          if [ "$BACKEND_HTTP_OK" = false ]; then
+            echo "ERROR: Backend HTTP health check never succeeded"
+            echo "  Port announced: $BACKEND_PORT"
+            echo "  USER_DATA: $USER_DATA_LOGGED"
+            echo "  CLIPPY_PYTHON: $CLIPPY_PYTHON"
+            dump_logs
+            kill $STUB_PID $APP_PID $XVFB_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          if [ "$WINDOW_FOUND" = false ]; then
+            echo "ERROR: Electron window never appeared"
+            dump_logs
+            kill $STUB_PID $APP_PID $XVFB_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "Capturing screenshot..."
+          import -window root -display :99 launch-screenshot.png 2>/dev/null || \
+            echo "Screenshot capture failed (non-critical)"
+
+          kill $STUB_PID $APP_PID $XVFB_PID 2>/dev/null || true
+
+          echo ""
+          echo "Launch test completed successfully"
+          echo "  - Backend port: $BACKEND_PORT"
+          echo "  - Backend HTTP health check: PASSED (200 OK) $BACKEND_HTTP_BODY"
+          echo "  - Electron window: verified"
+
+      - name: Upload launch test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-launch-test
+          path: |
+            electron-ui/dist/launch-test.log
+            electron-ui/dist/launch-test.stderr
+            electron-ui/dist/launch-screenshot.png
+            electron-ui/dist/llm-stub.log
+          retention-days: 14
+
+      - name: Upload Linux AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: electron-ui/dist/*.AppImage
+          retention-days: 14
+
+      - name: Ensure release notes file exists
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          NOTES="docs/release-notes/${TAG}.md"
+          if [[ ! -f "$NOTES" ]]; then
+            echo "::error::Release notes file not found: $NOTES"
+            echo "Looked up from workflow_dispatch tag input '$TAG'."
+            ls -la docs/release-notes/ || true
+            exit 1
+          fi
+          echo "Using release notes: $NOTES"
+
+      - name: Upload Linux AppImage to release
+        # Manual only: workflow_dispatch with a tag. Tag pushes and PRs never create/update a release.
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          body_path: docs/release-notes/${{ github.event.inputs.tag }}.md
+          files: |
+            electron-ui/dist/*.AppImage
+          draft: true
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

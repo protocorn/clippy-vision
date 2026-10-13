@@ -24,6 +24,7 @@ except ImportError:
 PLATFORM = sys.platform
 IS_WINDOWS = PLATFORM == "win32"
 IS_MACOS = PLATFORM == "darwin"
+IS_LINUX = PLATFORM.startswith("linux")
 
 # AppleScript and Accessibility queries are relatively expensive, so the
 # capture loop shares a short-lived front-window snapshot between callers.
@@ -162,6 +163,8 @@ def get_idle_seconds() -> float | None:
         return _windows_idle_seconds()
     if IS_MACOS:
         return _macos_idle_seconds()
+    if IS_LINUX:
+        return _linux_idle_seconds()
     return None
 
 
@@ -204,6 +207,31 @@ def _macos_idle_seconds() -> float | None:
         )
     except Exception:
         return None
+
+
+_linux_idle_warned = False
+
+
+def _linux_idle_seconds() -> float | None:
+    """Linux idle time via xprintidle or xdotool, returning None if unavailable."""
+    global _linux_idle_warned
+    try:
+        # Try xprintidle first (returns milliseconds since last input)
+        if shutil.which("xprintidle"):
+            result = _run_command(["xprintidle"])
+            if result:
+                return int(result) / 1000.0
+        # Fall back to xdotool
+        if shutil.which("xdotool"):
+            result = _run_command(["xdotool", "get_idle_time"])
+            if result:
+                return int(result) / 1000.0
+    except (ValueError, OSError):
+        pass
+    if not _linux_idle_warned:
+        _linux_idle_warned = True
+        print("[platform_support] Linux idle detection unavailable (xprintidle or xdotool not found)", file=sys.stderr)
+    return None
 
 
 def _windows_browser_url(window: Any, class_name: str) -> str | None:
@@ -314,6 +342,47 @@ def _mac_metadata() -> tuple[WindowMetadata | None, tuple[int, int, int, int] | 
     )
 
 
+_linux_xdotool_warned = False
+
+
+def _linux_metadata() -> WindowMetadata | None:
+    """Best-effort Linux window metadata via xdotool and psutil."""
+    global _linux_xdotool_warned
+    
+    # If xdotool is not available, warn once and return empty metadata
+    if not shutil.which("xdotool"):
+        if not _linux_xdotool_warned:
+            _linux_xdotool_warned = True
+            print("[platform_support] xdotool not found; window metadata will be limited", file=sys.stderr)
+        return WindowMetadata(
+            timestamp=time.time(),
+            current_window_title="",
+            active_url=None,
+            process_name="unknown",
+        )
+    
+    title = _run_command(["xdotool", "getactivewindow", "getwindowname"])
+    process_name = "unknown"
+    
+    # Get PID and resolve to process name
+    if title:
+        pid_str = _run_command(["xdotool", "getactivewindow", "getwindowpid"])
+        if pid_str:
+            try:
+                import psutil
+                pid = int(pid_str)
+                process_name = psutil.Process(pid).name()
+            except (ValueError, psutil.NoSuchProcess, psutil.AccessDenied):
+                process_name = "unknown"
+    
+    return WindowMetadata(
+        timestamp=time.time(),
+        current_window_title=title or "",
+        active_url=None,
+        process_name=process_name,
+    )
+
+
 def get_window_metadata() -> WindowMetadata | None:
     """Return the frontmost app/window, with a short cache to avoid shell churn on macOS."""
     # Keep the capture pipeline platform-neutral; only this adapter knows how
@@ -330,22 +399,9 @@ def get_window_metadata() -> WindowMetadata | None:
             _mac_cache_at = now
             return _mac_cache[0]
 
-
-
     # Linux support is intentionally best-effort: xdotool is optional and the
     # rest of capture should continue even when a desktop lacks it.
-    title = _run_command(["xdotool", "getactivewindow", "getwindowname"])
-    process_name = "unknown"
-    if title:
-        process_name = _run_command(
-            ["xdotool", "getactivewindow", "getwindowpid"]
-        ) or "unknown"
-    return WindowMetadata(
-        timestamp=time.time(),
-        current_window_title=title,
-        active_url=None,
-        process_name=process_name,
-    )
+    return _linux_metadata()
 
 
 def get_foreground_window_bounds() -> tuple[int, int, int, int] | None:
@@ -375,6 +431,29 @@ def get_foreground_window_rect(hwnd: int | None = None) -> tuple[int, int, int, 
             return None
     if IS_MACOS:
         return get_foreground_window_bounds()
+    if IS_LINUX and shutil.which("xdotool"):
+        raw = _run_command(
+            ["xdotool", "getactivewindow", "getwindowgeometry", "--shell"],
+            timeout=2.0,
+        )
+        if raw:
+            values: dict[str, int] = {}
+            for line in raw.splitlines():
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if key in {"X", "Y", "WIDTH", "HEIGHT"}:
+                    try:
+                        values[key] = int(value)
+                    except ValueError:
+                        pass
+            if all(k in values for k in ("X", "Y", "WIDTH", "HEIGHT")):
+                left = values["X"]
+                top = values["Y"]
+                right = left + values["WIDTH"]
+                bottom = top + values["HEIGHT"]
+                if right > left and bottom > top:
+                    return left, top, right, bottom
     return None
 
 

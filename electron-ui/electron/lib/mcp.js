@@ -2,7 +2,44 @@ const path = require('path')
 const fs   = require('fs')
 const os   = require('os')
 
-function createMcp({ paths, runCommand, shell }) {
+function resolveUserConfigDir({ platform = process.platform, env = process.env, home = os.homedir() } = {}) {
+    if (platform === 'darwin') {
+        return path.join(home, 'Library', 'Application Support')
+    }
+    if (platform === 'win32') {
+        return env.APPDATA || path.join(home, 'AppData', 'Roaming')
+    }
+    return env.XDG_CONFIG_HOME || path.join(home, '.config')
+}
+
+function mcpClientDefinitions({ platform = process.platform, env = process.env, home = os.homedir() } = {}) {
+    const userConfigDir = resolveUserConfigDir({ platform, env, home })
+    return {
+        cursor: {
+            id: 'cursor',
+            label: 'Cursor',
+            method: 'deeplink+file',
+            configPath: path.join(home, '.cursor', 'mcp.json'),
+            hint: 'One-click install and writes ~/.cursor/mcp.json',
+        },
+        vscode: {
+            id: 'vscode',
+            label: 'VS Code',
+            method: 'deeplink+file',
+            configPath: path.join(userConfigDir, 'Code', 'User', 'mcp.json'),
+            hint: 'Opens VS Code install prompt and writes User/mcp.json when possible',
+        },
+        'claude-desktop': {
+            id: 'claude-desktop',
+            label: 'Claude Desktop',
+            method: 'file',
+            configPath: path.join(userConfigDir, 'Claude', 'claude_desktop_config.json'),
+            hint: 'Writes Claude\u2019s MCP config — fully quit and reopen Claude after connecting',
+        },
+    }
+}
+
+function createMcp({ paths, runCommand, shell, runtime } = {}) {
     const { ROOT, DATA_DIR, PYTHON_COMMAND } = paths
 
     const MCP_SERVER_KEY = 'clippy-vision'
@@ -77,34 +114,8 @@ function createMcp({ paths, runCommand, shell }) {
         }
     }
 
-    function mcpClientDefinitions() {
-        const home = os.homedir()
-        const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming')
-        return {
-            cursor: {
-                id: 'cursor',
-                label: 'Cursor',
-                method: 'deeplink+file',
-                configPath: path.join(home, '.cursor', 'mcp.json'),
-                hint: 'One-click install and writes ~/.cursor/mcp.json',
-            },
-            vscode: {
-                id: 'vscode',
-                label: 'VS Code',
-                method: 'deeplink+file',
-                configPath: path.join(appData, 'Code', 'User', 'mcp.json'),
-                hint: 'Opens VS Code install prompt and writes User/mcp.json when possible',
-            },
-            'claude-desktop': {
-                id: 'claude-desktop',
-                label: 'Claude Desktop',
-                method: 'file',
-                configPath: process.platform === 'darwin'
-                    ? path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
-                    : path.join(appData, 'Claude', 'claude_desktop_config.json'),
-                hint: 'Writes Claude\u2019s MCP config — fully quit and reopen Claude after connecting',
-            },
-        }
+    function clientDefinitions() {
+        return mcpClientDefinitions(runtime)
     }
 
     function readJsonObject(filePath) {
@@ -176,7 +187,7 @@ function createMcp({ paths, runCommand, shell }) {
     }
 
     function isMcpClientConnected(clientId, launch) {
-        const def = mcpClientDefinitions()[clientId]
+        const def = clientDefinitions()[clientId]
         if (!def?.configPath) return false
         const doc = readJsonObject(def.configPath)
         return Boolean(findClippyEntry(doc, launch))
@@ -261,7 +272,7 @@ function createMcp({ paths, runCommand, shell }) {
 
     async function listMcpClientStatus() {
         const launch = await getMcpLaunchConfig()
-        const defs = mcpClientDefinitions()
+        const defs = clientDefinitions()
         const clients = Object.values(defs).map((def) => ({
             id: def.id,
             label: def.label,
@@ -278,7 +289,7 @@ function createMcp({ paths, runCommand, shell }) {
         if (!launch.ready) {
             return { ok: false, error: (launch.issues || []).join(' ') || 'MCP launcher is not ready.' }
         }
-        const def = mcpClientDefinitions()[clientId]
+        const def = clientDefinitions()[clientId]
         if (!def) return { ok: false, error: `Unknown client: ${clientId}` }
 
         const result = {
@@ -327,7 +338,7 @@ function createMcp({ paths, runCommand, shell }) {
     }
 
     async function disconnectMcpClient(clientId) {
-        const def = mcpClientDefinitions()[clientId]
+        const def = clientDefinitions()[clientId]
         if (!def) return { ok: false, error: `Unknown client: ${clientId}` }
         if (!def.configPath) {
             return { ok: false, error: 'This client has no config file Clippy can edit.' }
@@ -395,4 +406,4 @@ function createMcp({ paths, runCommand, shell }) {
     }
 }
 
-module.exports = { createMcp }
+module.exports = { createMcp, mcpClientDefinitions, resolveUserConfigDir }

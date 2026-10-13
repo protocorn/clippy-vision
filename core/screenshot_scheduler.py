@@ -18,6 +18,7 @@ except ImportError:
 
 try:
     from core.platform_support import (
+        IS_LINUX,
         IS_MACOS,
         IS_WINDOWS,
         get_foreground_window_bounds,
@@ -27,6 +28,7 @@ try:
     )
 except ImportError:
     from platform_support import (
+        IS_LINUX,
         IS_MACOS,
         IS_WINDOWS,
         get_foreground_window_bounds,
@@ -309,7 +311,8 @@ def _foreground_accessibility_text() -> str:
         return ""
     process_name = metadata.get("process_name", "")
     title = metadata.get("current_window_title", "")
-    executable = _process_executable(_foreground_hwnd())
+    hwnd = _foreground_hwnd()
+    executable = _process_executable(hwnd)
     if (
         is_clippy_window(process_name, title)
         or should_redact_window(process_name, title)
@@ -318,7 +321,13 @@ def _foreground_accessibility_text() -> str:
         return ""
     from core.private_windows import window_is_private
 
-    if window_is_private(_foreground_hwnd(), process_name):
+    if window_is_private(hwnd, process_name):
+        return ""
+    
+    # Check if the foreground window has opted out of capture
+    from core.capture_optout import foreground_should_skip_capture
+
+    if foreground_should_skip_capture(hwnd, process_name):
         return ""
     captured_text = extract_accessibility_text()
     current = get_window_metadata()
@@ -710,6 +719,15 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
     process_name = (foreground or {}).get("process_name") or ""
     if process_name and not should_watch_process(process_name):
         return None
+    
+    # Check if the foreground window has opted out of capture via OS-level signals
+    from core.capture_optout import foreground_should_skip_capture
+
+    hwnd_before = _foreground_hwnd()
+    if foreground_should_skip_capture(hwnd_before, process_name):
+        increment("screenshots.opted_out")
+        return None
+    
     # Cursor and VS Code hide the open file until this setting is on.
     from core.editor_accessibility import ensure_screen_reader_support
 
@@ -718,18 +736,26 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
         with timed("screenshot.total"):
             # monitor 0 is the virtual desktop; monitor 1 is the primary display.
             # The setting keeps the default capture cost low for multi-monitor Macs.
-            hwnd_before = _foreground_hwnd()
             metadata_before = get_window_metadata()
             with timed("screenshot.grab"):
-                with mss.mss() as sct:
-                    settings = get_capture_settings()
-                    monitor = dict(
-                        sct.monitors[0]
-                        if settings["capture_all_monitors"]
-                        else (sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0])
-                    )
-                    screenshot = sct.grab(monitor)
-                    img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
+                settings = get_capture_settings()
+                if IS_LINUX:
+                    from core.linux_screenshot import grab_linux_screen
+
+                    grabbed = grab_linux_screen(settings["capture_all_monitors"])
+                    if grabbed is None:
+                        increment("screenshots.skipped_linux")
+                        return None
+                    img, monitor = grabbed
+                else:
+                    with mss.mss() as sct:
+                        monitor = dict(
+                            sct.monitors[0]
+                            if settings["capture_all_monitors"]
+                            else (sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0])
+                        )
+                        screenshot = sct.grab(monitor)
+                        img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
 
             hwnd_after = _foreground_hwnd()
             window_changed = (
@@ -773,6 +799,10 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
                             rect = None
                     elif IS_MACOS:
                         rect = get_foreground_window_bounds()
+                    else:
+                        from core.platform_support import get_foreground_window_rect
+
+                        rect = get_foreground_window_rect(hwnd)
                     if not rect:
                         increment("screenshots.secret_scan_timeout")
                         print("[capture] skipped frame; auth window bounds unknown")

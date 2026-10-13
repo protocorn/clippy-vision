@@ -12,6 +12,16 @@ Connecting is all or nothing. A connected app may call every Clippy tool listed 
 
 The same privacy redactor that runs before storage runs again on every tool reply. Screenshot file paths are left out. A window you marked private is returned as "This moment was private" with the app and time only. If that filter fails, the tool returns nothing. The copy on this computer is unchanged.
 
+### Security: Untrusted content marking
+
+Screen-derived content (OCR text, window titles, URLs, clipboard, accessibility text) is attacker-controllable: any web page, email, or document the user views can contain text like "ignore previous instructions and..." that attempts prompt injection attacks against the connected AI model.
+
+To mitigate this risk, all MCP tool replies that include captured screen content wrap that content in clearly delimited blocks with a preamble marking it as untrusted data rather than instructions. Each reply uses a random nonce in the delimiters (e.g., `<<<CAPTURED_SCREEN_DATA id=3f9a...>>>` ... `<<<END_CAPTURED_SCREEN_DATA id=3f9a...>>>`) to make them unforgeable. The delimiter escaping is robust against breakout attempts (captured text containing fake end markers is neutralized automatically).
+
+**For MCP client developers**: Tool replies now return wrapped text blocks rather than raw JSON strings. If your client attempts to JSON-parse the reply directly, read the content between the delimiters instead. Most MCP clients handle this automatically, but custom integrations should expect the wrapper format.
+
+This protection is transparent to legitimate MCP clients and models, which can still parse and use the captured content normally while being explicitly warned that it is observed data rather than trusted instructions.
+
 ---
 
 ## Connecting a client
@@ -21,6 +31,12 @@ Open **Settings → Connect apps**.
 ### One-click clients
 
 **Cursor**, **Claude Desktop**, and **VS Code** have a Connect button. It writes the config on this machine.
+
+Step-by-step client guides:
+
+- [Claude Desktop](mcp-clients/claude-desktop.md) — config location, restart, verifying the tools appear
+- [VS Code](mcp-clients/vscode.md) — one-click connection, user configuration, and Copilot Chat tool verification
+- [LM Studio](mcp-clients/lm-studio.md) — local model setup, MCP configuration, and tool-call verification
 
 ### Copy JSON (any other MCP app)
 

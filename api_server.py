@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -206,25 +207,117 @@ def _validate_user_message(message: str) -> str:
     return text
 
 
-# --- Archived in-app chat (see archive/in_app_chat/) ---
+def _user_facing_chat_error(exc: BaseException) -> tuple[str, dict]:
+    """Map chat failures to a message the UI can show, plus SSE extra fields."""
+    from core.ollama_client import OllamaError, OllamaUnavailable
+
+    if isinstance(exc, OllamaUnavailable):
+        return (
+            "Ollama is not running. Please start Ollama and try again.",
+            {"ollama_unavailable": True},
+        )
+    if isinstance(exc, OllamaError):
+        text = str(exc).lower()
+        if "404" in text or "not found" in text:
+            return (
+                "The chat model is not installed. Open Settings to download it, then try again.",
+                {"model_missing": True},
+            )
+        return (
+            "The local model could not answer. Check Ollama and your model in Settings, then try again.",
+            {},
+        )
+    return (str(exc) or "Chat failed.", {})
+
+
+# --- In-app chat endpoints ---
 
 @app.post("/chat")
 def chat(req: QueryRequest):
-    _validate_user_message(req.message)
-    return {"result": MCP_CHAT_GUIDANCE, "chat_disabled": True, "use": "mcp"}
+    """Non-streaming chat endpoint. Returns complete response."""
+    import uuid
+    from agent.conversation import save_chat
+    from core.chat_context import build_chat_messages
+    from core.chat_model import get_chat_model
+    from core.llm_gateway import Priority, gateway
+    from core.ollama_client import OllamaError, OllamaUnavailable
+
+    message = _validate_user_message(req.message)
+    conversation_id = (req.conversation_id or "").strip() or str(uuid.uuid4())
+
+    try:
+        messages = build_chat_messages(message, conversation_id)
+        model = get_chat_model()
+        response = gateway.chat(messages, model, priority=Priority.INTERACTIVE, timeout=120)
+
+        if not response:
+            raise HTTPException(status_code=500, detail="No response from model")
+
+        assistant_message = response.get("message", {}).get("content", "")
+
+        save_chat(conversation_id, "user", message)
+        save_chat(conversation_id, "assistant", assistant_message)
+
+        return {
+            "result": assistant_message,
+            "conversation_id": conversation_id,
+            "chat_disabled": False,
+        }
+
+    except HTTPException:
+        raise
+    except (OllamaUnavailable, OllamaError) as e:
+        msg, _extra = _user_facing_chat_error(e)
+        raise HTTPException(status_code=503, detail=msg) from e
+    except Exception as e:
+        print(f"[chat] error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/chat/stream")
 def chat_stream(req: QueryRequest):
-    _validate_user_message(req.message)
+    """Streaming chat endpoint. Returns SSE stream."""
+    import uuid
+    from agent.conversation import save_chat
+    from core.chat_context import build_chat_messages
+    from core.chat_model import get_chat_model
+    from core.llm_gateway import Priority, gateway
+
+    message = _validate_user_message(req.message)
+    conversation_id = (req.conversation_id or "").strip() or str(uuid.uuid4())
 
     def event_gen():
+        accumulated = []
         try:
-            yield f"data: {json.dumps({'type': 'status', 'text': 'MCP is the chat surface'}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'content', 'delta': MCP_CHAT_GUIDANCE}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'result': MCP_CHAT_GUIDANCE, 'chat_disabled': True, 'use': 'mcp'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'status', 'text': 'Retrieving context...'}, ensure_ascii=False)}\n\n"
+
+            messages = build_chat_messages(message, conversation_id)
+
+            yield f"data: {json.dumps({'type': 'status', 'text': 'Generating response...'}, ensure_ascii=False)}\n\n"
+
+            model = get_chat_model()
+            stream = gateway.chat_stream(messages, model, priority=Priority.INTERACTIVE, timeout=120)
+
+            if not stream:
+                raise Exception("No stream returned from gateway")
+
+            for chunk in stream:
+                delta = chunk.get("message", {}).get("content", "")
+                if delta:
+                    accumulated.append(delta)
+                    yield f"data: {json.dumps({'type': 'content', 'delta': delta}, ensure_ascii=False)}\n\n"
+
+            assistant_message = "".join(accumulated)
+            save_chat(conversation_id, "user", message)
+            save_chat(conversation_id, "assistant", assistant_message)
+
+            yield f"data: {json.dumps({'type': 'done', 'result': assistant_message, 'conversation_id': conversation_id}, ensure_ascii=False)}\n\n"
+
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+            print(f"[chat/stream] error: {e}")
+            msg, extra = _user_facing_chat_error(e)
+            payload = {"type": "error", "message": msg, **extra}
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_gen(),

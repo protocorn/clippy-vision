@@ -2,6 +2,10 @@
 
 Thanks for your interest in contributing! Clippy Vision is an open-source project that welcomes contributions from the community. Contributions are licensed under AGPL-3.0, the same license as the next release.
 
+## Getting Started
+
+Looking for a place to start? Check out issues labeled [`good first issue`](https://github.com/protocorn/clippy-vision/labels/good%20first%20issue). These are beginner-friendly tasks that don't require deep knowledge of the codebase.
+
 ## Ways to Contribute
 
 - **Bug Reports**: Found a bug? Open an issue with details on how to reproduce it
@@ -55,12 +59,12 @@ This isn't mandatory for every issue, quick bug reports don't need the full temp
 
 ## Development Setup
 
-Clippy Vision supports Windows and macOS. The app lives in `electron-ui/` and starts the Python API for you.
+Clippy Vision supports Windows and macOS. Linux support is experimental: X11 capture can use `xdotool`, clipboard support uses `wl-paste`, `xclip` or `xsel`, and `grim` is optional for wlroots. Native Wayland screenshots are skipped for now; releases include an unsigned Linux AppImage, but there is no signed Linux installer yet. The app lives in `electron-ui/` and starts the Python API for you.
 
 1. Fork the repository
 2. Clone your fork:
    ```powershell
-   git clone https://github.com/yourusername/clippy-vision.git
+   git clone https://github.com/<your-username>/clippy-vision.git
    cd clippy-vision
    ```
 3. Install and run the Electron app:
@@ -133,6 +137,62 @@ Before submitting a PR:
 2. Test your changes with real usage
 3. Ensure no new linter errors are introduced
 4. Test on a clean database if modifying storage/schema
+
+### Run the tests like CI does
+
+Install the same Python test dependencies as CI from the repository root:
+
+```bash
+python -m pip install --upgrade pip
+pip install pytest
+pip install -r requirements.txt
+```
+
+`requirements.txt` includes `torch` and `transformers`, so this installation can be a large download. The commands below set `PYTHONPATH` to the repository root, just like CI. Pytest also uses a temporary data directory when `CLIPPY_DATA_DIR` is not set, so these tests do not touch your real activity data.
+
+#### Windows (Git Bash)
+
+```bash
+PYTHONPATH=. pytest tests/ -v -m "not linux and not macos and not requires_gui and not requires_ollama and not integration" \
+  -k "not test_infer_project_root_from_file and not test_resolve_screenshot_file_accepts_the_processed_name"
+```
+
+CI skips those two path tests on Windows because of 8.3 short-path names.
+
+#### Linux (Ubuntu)
+
+```bash
+PYTHONPATH=. pytest tests/ -v -m "not windows and not macos and not requires_gui and not requires_ollama and not integration"
+sudo apt-get install -y xvfb x11-xserver-utils xterm
+PYTHONPATH=. xvfb-run -a pytest tests/test_linux_screenshot_capture.py -v -m "linux" -k "xvfb"
+```
+
+#### macOS
+
+macOS has no CI job. You can run the platform-filtered tests locally:
+
+```bash
+PYTHONPATH=. pytest tests/ -v -m "not windows and not linux and not requires_gui and not requires_ollama and not integration"
+```
+
+#### Electron MCP path tests
+
+The Electron MCP path test is also part of CI. From the repository root, install the Electron dependencies first, then run:
+
+```bash
+cd electron-ui
+npm install
+node --test electron/lib/mcp.test.js
+```
+
+The six pytest markers used by CI are:
+
+- `windows`: tests that require Windows or Windows-specific APIs
+- `macos`: tests that require macOS or macOS-specific APIs
+- `linux`: tests that require Linux-specific tools
+- `requires_ollama`: tests that require a running Ollama server
+- `requires_gui`: tests that require a display server or GUI
+- `integration`: full integration tests requiring complete app setup
 
 ## Pull Request Process
 

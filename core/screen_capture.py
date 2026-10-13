@@ -312,8 +312,16 @@ def on_paste_event(paste_event: PasteEvent):
     global _last_paste_time
     if not get_capture_settings()["capture_clipboard"]:
         return
-    _last_paste_time = time.time()
+    
+    # Check if the foreground window has opted out of capture
+    from core.capture_optout import foreground_should_skip_capture
+
     window_context = _safe_window_metadata(paste_event.get("window_context"))
+    process_name = window_context.get("process_name", "")
+    if foreground_should_skip_capture(_foreground_hwnd(), process_name):
+        return
+    
+    _last_paste_time = time.time()
     content = get_clipboard_text()
     event = Event(
         event_id=str(uuid.uuid4()),
@@ -351,6 +359,16 @@ def clipboard_monitor():
             last_content = None
             was_enabled = False
             continue
+        
+        # Check if the foreground window has opted out of capture
+        from core.capture_optout import foreground_should_skip_capture
+
+        metadata = _safe_window_metadata(get_window_metadata())
+        process_name = metadata.get("process_name", "")
+        if foreground_should_skip_capture(_foreground_hwnd(), process_name):
+            last_content = None
+            continue
+        
         current = get_clipboard_text()
         if not was_enabled:
             last_content = current

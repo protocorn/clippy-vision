@@ -64,6 +64,8 @@ const setup = createSetup({
     state,
     app,
     windowBridge: windows.windowBridge,
+    dialog,
+    shell,
 })
 app.on('second-instance', () => {
     if (state.setupWindow && !state.setupWindow.isDestroyed()) {

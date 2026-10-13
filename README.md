@@ -2,7 +2,7 @@
 
 Clippy Vision watches your work on this computer, stores a searchable activity history locally, and lets you ask about it through a connected MCP client such as Cursor, Claude Desktop, or VS Code. The desktop app captures, summarizes, and shows the timeline.
 
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20(experimental)-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Models](https://img.shields.io/badge/models-Ollama%20local-orange)
 ![MCP](https://img.shields.io/badge/MCP-Cursor%20%7C%20Claude%20Desktop%20%7C%20VS%20Code-purple)
@@ -23,7 +23,7 @@ Ask in a connected MCP client, for example:
 
 ## Download
 
-**Windows is tested for 2.0.** macOS validation is pending, so macOS 2.0 installers are not included yet. macOS downloads below are the previous release (**v1.3.1**). The README describes 2.0; some features differ from 1.3.1.
+**Windows is tested for 2.0.** macOS validation is pending, so macOS 2.0 installers are not included yet. macOS downloads below are the previous release (**v1.3.1**). Linux is **experimental and X11 only**; an unsigned x86_64 AppImage is built in CI (see [docs/linux.md](docs/linux.md)). The README describes current `main`; some installer features differ from 1.3.1.
 
 <p align="center">
   <a href="https://github.com/protocorn/clippy-vision/releases/download/v2.0.0/ClippyVision-Windows-Setup-2.0.0.exe"><img src="https://img.shields.io/badge/Download-Windows%20v2.0.0-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows v2.0.0" /></a>
@@ -51,10 +51,31 @@ The installers are unsigned: on Windows choose **More info → Run anyway**, and
 
 | | Minimum | Recommended |
 |--|---------|-------------|
-| OS | Windows 10 / 11 (64-bit) or macOS 12+ | Windows 11 or a current macOS |
+| OS | Windows 10 / 11 (64-bit), macOS 12+, or Linux (Ubuntu 22.04+, experimental, X11 only) | Windows 11 or a current macOS |
 | System RAM | 8 GB | 16 GB |
 | Graphics memory | Not required. Integrated graphics or Apple unified memory is enough | 4 GB+ dedicated on Windows, or 16 GB unified memory on Apple silicon |
 | Free disk | 8 GB | 10 GB+ |
+| **Python runtime** | System Python 3.11+ on PATH (not bundled). Windows auto-install uses 3.11; CI uses 3.12 | **Python 3.12** |
+
+**Python is not bundled** in the Windows installer or Linux AppImage. `requirements.txt` does not pin a Python version. The packaged app runs `CLIPPY_PYTHON` if set, otherwise `python3` (Linux/macOS) or `python` (Windows) from PATH (`electron-ui/electron/lib/paths.js`). CI unit tests and the release dry-run install Python 3.12. The setup wizard parses `python --version` and requires **Python 3.11+**.
+
+**When Python is missing, the setup wizard (`electron-ui/electron/lib/setup.js`) does this:**
+- It parses `--version` on that interpreter and requires Python 3.11+. Preflight text says "Clippy needs Python 3.11+ on PATH." It then re-resolves known install locations before declaring failure.
+- **Windows:** tries `winget install Python.Python.3.11 --silent`. If winget is missing or the install cannot be found on PATH, it shows [python.org/downloads](https://www.python.org/downloads/) and probes `%LOCALAPPDATA%\Programs\Python\Python311\python.exe`.
+- **macOS:** tries Homebrew `brew install python` when Homebrew is present. If Homebrew is missing, it shows a manual-install message with the python.org link.
+- **Linux:** stays a manual install. The wizard does not try Homebrew or apt; it shows a python.org link.
+
+**Advanced:** point Clippy at a specific interpreter before launch:
+
+```powershell
+$env:CLIPPY_PYTHON = "C:\path\to\python.exe"
+```
+
+```bash
+export CLIPPY_PYTHON=/path/to/venv/bin/python3
+```
+
+Linux support is **experimental and X11 only. Wayland is not supported.** On X11, screenshots use `mss` (optional crop via `xdotool`). Window titles use `xdotool`, clipboard uses `wl-paste`/`xclip`/`xsel`. AT-SPI accessibility text is implemented; it is covered by CI unit tests, not a real desktop. An unsigned Linux AppImage is built in CI. Install and run steps: [docs/linux.md](docs/linux.md).
 
 The setup wizard checks these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that summaries may feel slower. Homebrew, dependency, and permission troubleshooting: [docs/usage.md](docs/usage.md#installation-troubleshooting). Lower-spec machines: [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
 
@@ -67,7 +88,7 @@ The setup wizard checks these numbers before installing. Below minimum → setup
 3. Leave Clippy running to build your activity history.
 4. Open **Settings → Connect apps**, connect your agent, and ask about your activity.
 
-More detail: [docs/usage.md](docs/usage.md) · [docs/mcp.md](docs/mcp.md)  
+More detail: [docs/usage.md](docs/usage.md) · [docs/mcp.md](docs/mcp.md) · client guides: [Claude Desktop](docs/mcp-clients/claude-desktop.md) · [LM Studio](docs/mcp-clients/lm-studio.md)  
 Build from source: [CONTRIBUTING.md](CONTRIBUTING.md#building-from-source)
 
 ---
@@ -88,7 +109,7 @@ Build from source: [CONTRIBUTING.md](CONTRIBUTING.md#building-from-source)
 - Capture, summarization, and storage run locally on this computer.
 - Connected cloud agents can receive retrieved memory through MCP tool replies.
 - Connected clients have access to all exposed Clippy tools.
-- Redaction is best effort. Private-browsing protection covers only Google Chrome, Microsoft Edge, and Brave.
+- Redaction is best effort. Private-browsing detection is on by default: Chrome, Edge, and Brave on Windows and macOS; Firefox and Opera on Windows (and attempted but untested on macOS); Vivaldi on Windows. Vivaldi, Safari, and Linux are not covered. See the [coverage table](docs/usage.md#private-browsing).
 - You can pause capture and delete stored activity from the tray or timeline.
 
 Full guide (retention defaults and detailed behavior): [docs/usage.md](docs/usage.md#privacy-settings).
@@ -104,7 +125,10 @@ Full guide (retention defaults and detailed behavior): [docs/usage.md](docs/usag
 | Guide | Contents |
 |-------|----------|
 | [docs/usage.md](docs/usage.md) | Capture controls, privacy, accessibility, install troubleshooting |
+| [docs/linux.md](docs/linux.md) | Experimental Linux install and run (X11 only; AppImage, Python, capture tools) |
 | [docs/mcp.md](docs/mcp.md) | Supported clients, Copy JSON, tool reference, access permissions |
+| [docs/mcp-clients/claude-desktop.md](docs/mcp-clients/claude-desktop.md) | Step-by-step Claude Desktop setup: config location, restart, verification |
+| [docs/mcp-clients/lm-studio.md](docs/mcp-clients/lm-studio.md) | Step-by-step LM Studio setup: MCP configuration, local model, test query, privacy |
 | [docs/architecture.md](docs/architecture.md) | Tech stack, capture pipeline, summarization, distillation, schema |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Build from source and contribution guide |
 | [PROJECT_VISION.md](PROJECT_VISION.md) | Roadmap, principles, and known limitations |
@@ -132,9 +156,11 @@ Thanks to everyone who has shipped code, docs, design, or ideas.
 | <a href="https://github.com/rusetiq"><img src="https://avatars.githubusercontent.com/u/234747645?v=4" width="64" height="64" alt="rusetiq"/></a> | <a href="https://github.com/rusetiq"><b>@rusetiq</b></a><br/><sub>💻 📦</sub> | Brought Clippy Vision to macOS: native screen capture, permissions, and Apple Silicon + Intel packaging. |
 | <a href="https://github.com/ABarpanda"><img src="https://avatars.githubusercontent.com/u/145291762?v=4" width="64" height="64" alt="ABarpanda"/></a> | <a href="https://github.com/ABarpanda"><b>@ABarpanda</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=ABarpanda">See their commits →</a> |
 | <a href="https://github.com/vitorparras"><img src="https://avatars.githubusercontent.com/u/43687831?v=4" width="64" height="64" alt="vitorparras"/></a> | <a href="https://github.com/vitorparras"><b>@vitorparras</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=vitorparras">See their commits →</a> |
+| <a href="https://github.com/furox-art"><img src="https://github.com/furox-art.png" width="64" height="64" alt="furox-art"/></a> | <a href="https://github.com/furox-art"><b>@furox-art</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=furox-art">See their commits →</a> |
 | <a href="https://github.com/vaishn4vi"><img src="https://avatars.githubusercontent.com/u/150888364?v=4" width="64" height="64" alt="vaishn4vi"/></a> | <a href="https://github.com/vaishn4vi"><b>@vaishn4vi</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=vaishn4vi">See their commits →</a> |
 | <a href="https://github.com/adity982"><img src="https://avatars.githubusercontent.com/u/59918965?v=4" width="64" height="64" alt="adity982"/></a> | <a href="https://github.com/adity982"><b>@adity982</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=adity982">See their commits →</a> |
 | <a href="https://github.com/Draoui-Haroun"><img src="https://avatars.githubusercontent.com/u/266044395?v=4" width="64" height="64" alt="Draoui-Haroun"/></a> | <a href="https://github.com/Draoui-Haroun"><b>@Draoui-Haroun</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=Draoui-Haroun">See their commits →</a> |
+| <a href="https://github.com/keuqs"><img src="https://github.com/keuqs.png" width="64" height="64" alt="keuqs"/></a> | <a href="https://github.com/keuqs"><b>@keuqs</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=keuqs">See their commits →</a> |
 | <a href="https://github.com/shaurya703"><img src="https://avatars.githubusercontent.com/u/153742516?v=4" width="64" height="64" alt="shaurya703"/></a> | <a href="https://github.com/shaurya703"><b>@shaurya703</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=shaurya703">See their commits →</a> |
 | <a href="https://github.com/cyforkk"><img src="https://avatars.githubusercontent.com/u/165913369?v=4" width="64" height="64" alt="cyforkk"/></a> | <a href="https://github.com/cyforkk"><b>@cyforkk</b></a><br/><sub>💻</sub> | Made errors readable: replaced bare HTTP status codes with real API error messages in chat. |
 | <a href="https://github.com/icn5381"><img src="https://avatars.githubusercontent.com/u/255778606?v=4" width="64" height="64" alt="icn5381"/></a> | <a href="https://github.com/icn5381"><b>@icn5381</b></a><br/><sub>💻</sub> | <a href="https://github.com/protocorn/clippy-vision/commits?author=icn5381">See their commits →</a> |

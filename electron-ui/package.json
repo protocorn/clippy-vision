@@ -1,20 +1,30 @@
 {
   "name": "clippy-vision",
   "productName": "Clippy Vision",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Local AI desktop companion with screen awareness",
   "author": "Clippy Vision",
   "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/protocorn/clippy-vision",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/protocorn/clippy-vision.git"
+  },
+  "bugs": {
+    "url": "https://github.com/protocorn/clippy-vision/issues"
+  },
   "main": "electron/main.js",
   "scripts": {
+    "test": "node --test electron/lib/mcp.test.js electron/lib/setup.test.js",
     "start": "electron .",
     "dist": "electron-builder",
-    "dist:all": "electron-builder --win --mac",
+    "dist:all": "electron-builder --win --mac --linux",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
     "dist:mac:arm64": "electron-builder --mac --arm64",
     "dist:mac:x64": "electron-builder --mac --x64",
     "dist:mac:all": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
     "dist:dir": "electron-builder --dir",
     "dist:mac:dir": "electron-builder --mac --dir",
     "pack": "electron-builder --dir"
@@ -106,6 +116,19 @@
       "shortcutName": "Clippy Vision",
       "uninstallDisplayName": "Clippy Vision",
       "include": "nsis/installer.nsh"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "Utility",
+      "artifactName": "ClippyVision-Linux-x86_64-${version}.${ext}"
     },
     "asar": true
   },

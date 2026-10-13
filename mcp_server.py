@@ -35,17 +35,25 @@ with redirect_stdout(sys.stderr):
     )
     from agent.retrieval import search_events, search_sessions
     from agent.tools import find_files, list_workspace_roots
+    from agent.untrusted_wrapper import wrap_untrusted_content
 
 mcp = FastMCP("Clippy-Vision MCP")
 
 _WITHHELD = "Cloud result withheld. The privacy filter did not finish."
 
 
-def _call_tool(function, *args, **kwargs):
+def _call_tool(function, *args, wrap_as_untrusted=False, **kwargs):
     """Run a tool, then scrub the reply before it reaches a connected client.
 
     Connecting the app is what allows these tools. Capture has already stored
     its own copy. If scrubbing fails, the raw reply is not returned.
+
+    Args:
+        function: The tool function to call
+        *args: Positional arguments for the function
+        wrap_as_untrusted: If True, wrap the result as untrusted screen-captured
+            content to prevent prompt injection attacks
+        **kwargs: Keyword arguments for the function
     """
     with redirect_stdout(sys.stderr):
         result = function(*args, **kwargs)
@@ -54,9 +62,15 @@ def _call_tool(function, *args, **kwargs):
     try:
         from core.cloud_egress import redact_cloud_result
 
-        return redact_cloud_result(result)
+        result = redact_cloud_result(result)
     except Exception:
         return _WITHHELD
+    
+    # Wrap screen-captured content as untrusted data after redaction
+    if wrap_as_untrusted:
+        result = wrap_untrusted_content(result)
+    
+    return result
 
 
 @mcp.tool()
@@ -67,7 +81,7 @@ def search_sessions_tool(question: str) -> str:
     Returns paragraph summaries — NOT granular event detail.
     If the result says the info isn't there, call search_events_tool next.
     For exact date ranges prefer list_sessions_tool or search_bounded_tool."""
-    return _call_tool(search_sessions, question)
+    return _call_tool(search_sessions, question, wrap_as_untrusted=True)
 
 
 @mcp.tool()
@@ -78,7 +92,7 @@ def search_events_tool(question: str) -> str:
     Returns raw event rows with screen/OCR data.
     If the result says the info isn't there, call search_sessions_tool next.
     For exact date ranges prefer search_bounded_tool."""
-    return _call_tool(search_events, question)
+    return _call_tool(search_events, question, wrap_as_untrusted=True)
 
 
 @mcp.tool()
@@ -104,6 +118,7 @@ def search_bounded_tool(
                 table=table if table in ("events", "sessions") else "events",
             )
         ),
+        wrap_as_untrusted=True,
     )
 
 
@@ -123,6 +138,7 @@ def list_sessions_tool(
                 start or None, end or None, limit=limit, offset=offset
             )
         ),
+        wrap_as_untrusted=True,
     )
 
 
@@ -139,6 +155,7 @@ def activity_coverage_tool(
         lambda: dumps(
             activity_coverage(start, end or None, bucket_hours=bucket_hours)
         ),
+        wrap_as_untrusted=True,
     )
 
 
@@ -148,6 +165,7 @@ def app_time_summary_tool(start: str, end: str = "") -> str:
     start/end: epoch or YYYY-MM-DD. Durations are approximate (gaps capped at 5 min)."""
     return _call_tool(
         lambda: dumps(app_time_summary(start, end or None)),
+        wrap_as_untrusted=True,
     )
 
 
@@ -169,6 +187,7 @@ def list_urls_tool(
                 limit=limit,
             )
         ),
+        wrap_as_untrusted=True,
     )
 
 
@@ -180,6 +199,7 @@ def list_screenshots_tool(start: str = "", end: str = "", limit: int = 30) -> st
         lambda: dumps(
             list_screenshots(start or None, end or None, limit=limit)
         ),
+        wrap_as_untrusted=True,
     )
 
 
@@ -191,6 +211,7 @@ def get_screenshot_tool(filename: str = "", timestamp: float = 0.0) -> str:
     ts = timestamp if timestamp and timestamp > 0 else None
     return _call_tool(
         lambda: dumps(get_screenshot(filename=filename, timestamp=ts)),
+        wrap_as_untrusted=True,
     )
 
 
@@ -208,6 +229,7 @@ def recall_memory_tool(
         query=query,
         include_stale=include_stale,
         min_freshness=min_freshness,
+        wrap_as_untrusted=True,
     )
 
 
@@ -216,7 +238,7 @@ def fetch_cluster_tool(label: str) -> str:
     """Get all facts stored in a named memory cluster (with freshness annotations).
     Use after recall_memory_tool to get the full content of a specific topic.
     Pass the cluster label exactly as returned by recall_memory_tool."""
-    return _call_tool(fetch_cluster, label)
+    return _call_tool(fetch_cluster, label, wrap_as_untrusted=True)
 
 
 @mcp.tool()
