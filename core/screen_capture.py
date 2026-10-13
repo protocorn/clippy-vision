@@ -14,7 +14,13 @@ if __package__ in (None, ""):
 import threading
 import time
 
-from pynput import keyboard
+# Linux installs pynput without evdev (X11/python-xlib backend). If pynput cannot
+# load, capture still runs the foreground-window loop without keyboard hooks.
+try:
+    from pynput import keyboard
+except Exception as exc:  # pragma: no cover - exercised when deps are missing
+    keyboard = None
+    print(f"[capture] pynput unavailable: {exc}")
 
 try:
     from core.baseline import compute_deviation, update_baseline
@@ -589,15 +595,21 @@ def on_burst_completed(metrics: TypingBurstMetrics, skip_screenshot: bool = Fals
 burst_detector = BurstDetection(on_burst_completed=on_burst_completed, on_paste_event=on_paste_event)
 
 # Keyboard and clipboard listeners are optional at runtime. A permission
-# failure should not prevent the foreground-window loop from reporting context.
-try:
-    listener = keyboard.Listener(on_press=burst_detector.on_key_press, on_release=burst_detector.on_key_release)
-    listener.start()
-except Exception as exc:
-
-
-    listener = None
-    print(f"[capture] keyboard listener unavailable: {exc}")
+# or backend failure should not prevent the foreground-window loop from
+# reporting context.
+listener = None
+if keyboard is None:
+    print("[capture] keyboard listener unavailable: pynput could not be imported")
+else:
+    try:
+        listener = keyboard.Listener(
+            on_press=burst_detector.on_key_press,
+            on_release=burst_detector.on_key_release,
+        )
+        listener.start()
+    except Exception as exc:
+        listener = None
+        print(f"[capture] keyboard listener unavailable: {exc}")
 
 t = threading.Thread(target=clipboard_monitor, daemon=True)
 t.start()

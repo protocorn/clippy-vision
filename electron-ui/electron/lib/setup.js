@@ -336,6 +336,33 @@ function summarizeCommandFailure(result, fallback = 'Command failed') {
     return `${clipped}${codePart}`
 }
 
+function isIgnorablePipNotice(line) {
+    const text = String(line || '').trim()
+    if (!text) return true
+    // Environment markers (e.g. pywin32 on Linux) are noise, not the failure.
+    if (/^Ignoring\b/i.test(text)) return true
+    if (/markers?\b.*don.?t match your environment/i.test(text)) return true
+    return false
+}
+
+function summarizePipFailure(result, fallback = 'pip install failed. Check the log.') {
+    if (!result) return fallback
+    const text = `${result.stderr || ''}\n${result.stdout || ''}`
+    const lines = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => !isIgnorablePipNotice(line))
+    const errorLine = lines.find((line) => /^ERROR(?:\b|:)/i.test(line))
+        || lines.find((line) => /\berror\b/i.test(line) && !/^WARNING\b/i.test(line))
+    const chosen = errorLine || lines[0]
+    const codePart = result.code == null || result.code === 0 ? '' : ` (exit ${result.code})`
+    if (!chosen) return `${fallback}${codePart}`
+    const clipped = chosen.length > 240 ? `${chosen.slice(0, 237)}...` : chosen
+    return `${clipped}${codePart}`
+}
+
+function linuxPynputInstallArgs() {
+    // Avoid pulling evdev (no cp313 wheel; needs python3-dev to compile).
+    return ['install', '--no-deps', 'pynput']
+}
+
 function setupManualError(code, stepSub, extra = {}) {
     const err = new Error(code)
     err.stepSub = stepSub
@@ -1035,19 +1062,11 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         return venvPy
     }
 
-    async function stepInstallPackages() {
-        // pip output is streamed to the onboarding log while the renderer receives
-        // an approximate progress value for long installs. Packages always go into
-        // the app venv — never the system interpreter.
-        stepUpdate('packages', 'running', 'Preparing Python environment...')
-        stepProgress('packages', -1)
-        const venvPy = await ensureAppPythonVenv()
-
-        stepUpdate('packages', 'running', 'Installing Python packages...')
-        log(`> ${venvPy} -m pip install -r requirements.txt`, 'dim')
-
+    function runPipInstall(venvPy, pipArgs, { label } = {}) {
+        // Stream pip output to the onboarding log and approximate progress.
         return new Promise((resolve, reject) => {
-            const proc = spawnHidden(venvPy, ['-m', 'pip', 'install', '-r', REQUIREMENTS], { cwd: ROOT })
+            log(`> ${venvPy} -m pip ${pipArgs.join(' ')}`, 'dim')
+            const proc = spawnHidden(venvPy, ['-m', 'pip', ...pipArgs], { cwd: ROOT })
 
             const PKG_TOTAL = 20
             let installed = 0
@@ -1082,10 +1101,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
 
             proc.on('exit', (code) => {
                 if (code === 0) {
-                    stepProgress('packages', 100)
-                    log('All packages installed.', 'ok')
-                    markDone('packages', 'All packages installed')
-                    resolve()
+                    resolve({ code: 0, pipLog })
                     return
                 }
                 if (/externally-managed-environment/i.test(pipLog)) {
@@ -1094,9 +1110,9 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
                     reject(setupManualError('pip-externally-managed', message))
                     return
                 }
-                const detail = summarizeCommandFailure(
+                const detail = summarizePipFailure(
                     { code, stderr: pipLog },
-                    'pip install failed. Check the log.',
+                    `${label || 'pip install'} failed. Check the log.`,
                 )
                 stepUpdate('packages', 'error', detail)
                 reject(setupManualError('pip-failed', detail))
@@ -1107,6 +1123,28 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
                 reject(e)
             })
         })
+    }
+
+    async function stepInstallPackages() {
+        // Packages always go into the app venv — never the system interpreter.
+        // On Linux, requirements.txt installs python-xlib/six (not pynput), then a
+        // second --no-deps pynput install avoids compiling evdev.
+        stepUpdate('packages', 'running', 'Preparing Python environment...')
+        stepProgress('packages', -1)
+        const venvPy = await ensureAppPythonVenv()
+
+        stepUpdate('packages', 'running', 'Installing Python packages...')
+        await runPipInstall(venvPy, ['install', '-r', REQUIREMENTS], { label: 'pip install' })
+
+        if (process.platform === 'linux') {
+            stepUpdate('packages', 'running', 'Installing pynput (X11 backend, no evdev)...')
+            log('Linux: installing pynput with --no-deps so evdev is not compiled.', 'info')
+            await runPipInstall(venvPy, linuxPynputInstallArgs(), { label: 'pip install pynput' })
+        }
+
+        stepProgress('packages', 100)
+        log('All packages installed.', 'ok')
+        markDone('packages', 'All packages installed')
     }
 
     async function stepPullModels() {
@@ -1587,6 +1625,9 @@ module.exports = {
     looksLikeMissingZstd,
     formatMissingZstdMessage,
     summarizeCommandFailure,
+    isIgnorablePipNotice,
+    summarizePipFailure,
+    linuxPynputInstallArgs,
     LINUX_OLLAMA_INSTALL_COMMAND,
     LINUX_OLLAMA_DOWNLOAD_URL,
     OLLAMA_DOWNLOAD_URL,

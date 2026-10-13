@@ -6,7 +6,12 @@ pyobjc-framework-ApplicationServices>=10.0; platform_system == "Darwin"
 # pyatspi for Linux is installed via system package manager (apt install python3-pyatspi)
 mss
 Pillow
-pynput
+# pynput pulls evdev on Linux; evdev has no cp313 wheel and needs python3-dev to build.
+# Windows/macOS install pynput normally. Linux gets X11 deps here; setup/CI then run
+# `pip install --no-deps pynput` so the xlib backend works without compiling evdev.
+pynput; platform_system != "Linux"
+python-xlib; platform_system == "Linux"
+six; platform_system == "Linux"
 psutil
 imagehash
 mcp>=1.27,<2
