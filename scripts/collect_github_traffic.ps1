@@ -29,7 +29,33 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 function Invoke-GhJson {
     param([Parameter(Mandatory = $true)][string]$Path)
-    $raw = gh api $Path
+    # Native gh failures do not honor $ErrorActionPreference unless this is $true,
+    # and piping through Out-String can hide $LASTEXITCODE. Call gh directly.
+    $previousNative = $PSNativeCommandUseErrorActionPreference
+    $PSNativeCommandUseErrorActionPreference = $false
+    try {
+        $raw = & gh api $Path
+        $exit = $LASTEXITCODE
+    }
+    finally {
+        $PSNativeCommandUseErrorActionPreference = $previousNative
+    }
+    if ($exit -ne 0) {
+        $text = [string]$raw
+        if ($text -match '401|Bad credentials') {
+            throw @"
+GitHub rejected TRAFFIC_TOKEN (HTTP 401 Bad credentials). The secret is present but expired, revoked, or not a valid PAT.
+Sahil: rotate repo secret TRAFFIC_TOKEN.
+  Fine-grained PAT: Administration=Read and Contents=Read on this repo. Expiration 366+ days (a 30-day default is why daily collection died on 2026-10-10).
+  Classic PAT: repo scope.
+  Create: https://github.com/settings/personal-access-tokens/new
+  Then: repo Settings → Secrets and variables → Actions → update TRAFFIC_TOKEN.
+Do not commit the token.
+gh api ${Path}: $text
+"@
+        }
+        throw "gh api $Path failed (exit $exit): $text"
+    }
     if (-not $raw) { return $null }
     # Unary comma prevents PowerShell from unrolling JSON arrays on return.
     $parsed = $raw | ConvertFrom-Json

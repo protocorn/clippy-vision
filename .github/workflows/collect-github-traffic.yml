@@ -2,6 +2,9 @@ name: Collect GitHub Traffic
 
 # Archives views/clones/referrers/paths/downloads beyond GitHub's 14-day UI window.
 # Requires repo secret TRAFFIC_TOKEN (default GITHUB_TOKEN cannot call traffic APIs).
+#
+# Push of CSV updates happens only on schedule runs of main. workflow_dispatch on
+# this or any other branch collects and uploads artifacts; it never pushes to main.
 
 on:
   schedule:
@@ -13,7 +16,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: collect-github-traffic
+  group: collect-github-traffic-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -22,30 +25,66 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Stay on the triggering ref. Never fetch/push a different branch.
+          ref: ${{ github.ref }}
+          persist-credentials: true
 
-      - name: Require TRAFFIC_TOKEN
+      - name: Verify TRAFFIC_TOKEN can read traffic
         env:
           TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+          GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
         run: |
           if [ -z "${TRAFFIC_TOKEN}" ]; then
-            echo "::error::Set repo secret TRAFFIC_TOKEN to a PAT that can read traffic."
-            echo "Fine-grained PAT: Administration=Read on this repo (plus Contents=Read)."
+            echo "::error::Repo secret TRAFFIC_TOKEN is missing. Default GITHUB_TOKEN cannot call /traffic APIs."
+            echo "Sahil: create a PAT and set repo secret TRAFFIC_TOKEN (Settings → Secrets and variables → Actions)."
+            echo "Fine-grained PAT: resource owner = the account that owns this repo; repository access = this repo;"
+            echo "  permissions Administration=Read and Contents=Read. Use 366+ day (or no) expiration — a 30-day"
+            echo "  default is why collection died on 2026-10-10 after the 2026-09-10 token."
             echo "Classic PAT: repo scope."
             echo "Create: https://github.com/settings/personal-access-tokens/new"
-            echo "Then: gh secret set TRAFFIC_TOKEN --repo ${{ github.repository }}"
             exit 1
           fi
+          # Prefer GH_TOKEN (the PAT). Do not let the Actions GITHUB_TOKEN be used for traffic.
+          unset GITHUB_TOKEN || true
+          if ! gh api "repos/${GITHUB_REPOSITORY}/traffic/views" --jq .count >/tmp/traffic-probe.json; then
+            echo "::error::TRAFFIC_TOKEN is set but GitHub rejected it (HTTP 401/403). Expired, revoked, or missing Administration: Read."
+            echo "Sahil: rotate the repo secret TRAFFIC_TOKEN."
+            echo "1. https://github.com/settings/personal-access-tokens/new"
+            echo "2. Fine-grained PAT on protocorn/clippy-vision with Administration=Read and Contents=Read."
+            echo "   Expiration: 366 days or longer (not the 30-day default)."
+            echo "   Classic PAT with repo scope also works."
+            echo "3. Repo Settings → Secrets and variables → Actions → TRAFFIC_TOKEN → New / Update."
+            echo "Do not commit the token. Do not add paid services."
+            exit 1
+          fi
+          echo "TRAFFIC_TOKEN accepted. views_14d=$(cat /tmp/traffic-probe.json)"
 
       - name: Collect traffic CSVs
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
         run: |
           $owner, $repo = "${{ github.repository }}".Split("/")
           ./scripts/collect_github_traffic.ps1 -Owner $owner -Repo $repo
 
+      - name: Upload traffic CSVs
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-traffic-csvs
+          path: stats/github-traffic/*.csv
+          retention-days: 14
+
       - name: Commit CSV updates
+        # Only the daily job on main writes stats back. Dispatch on a branch cannot touch main.
+        if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
         run: |
+          branch="$(git rev-parse --abbrev-ref HEAD)"
+          if [ "$branch" != "main" ]; then
+            echo "Refusing to push: checked-out branch is '$branch', not main."
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add stats/github-traffic/*.csv
@@ -54,4 +93,4 @@ jobs:
             exit 0
           fi
           git commit -m "chore: archive GitHub traffic snapshot"
-          git push
+          git push origin HEAD:main

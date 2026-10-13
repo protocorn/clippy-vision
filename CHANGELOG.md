@@ -21,6 +21,8 @@ Post-v2.1.0 work on main. Verification is **CI-only** unless a line says otherwi
 - Published v2.1.0 notes and changelog after the tag ([#35](https://github.com/protocorn/clippy-vision/pull/35)) — documentation. Dropped leftover draft/checklist text; Python 3.11+ as the stated requirement. Did not rebuild or retag.
 
 ### Fixed
+- Tag-push release dry-run: pass `--publish never` so electron-builder does not implicitly publish to GitHub when `repository.url` is set and a `v*` tag is checked out — **CI-only**. Does not rebuild or retouch the published v2.1.0 release.
+- GitHub traffic collector: fail clearly when `TRAFFIC_TOKEN` is rejected (HTTP 401) instead of dying on an empty CSV upsert; `workflow_dispatch` never pushes to `main` — **CI-only**. Scheduled collection still needs Sahil to rotate `TRAFFIC_TOKEN`.
 - Chat prompt crash on SQL NULL `active_task` / `summary` / `ocr_text`; `/chat` and `/chat/stream` return a user-facing message when the model is missing instead of a 500 ([#34](https://github.com/protocorn/clippy-vision/pull/34)) — **CI-only**.
 - Electron preflight parses `python --version` and requires Python 3.11+ ([#38](https://github.com/protocorn/clippy-vision/pull/38)) — **CI-only** (`node --test` of `setup.test.js` and `mcp.test.js`). Not in the published v2.1.0 installer or AppImage.
 - Private-browsing docs aligned with a coverage table ([#41](https://github.com/protocorn/clippy-vision/pull/41), closes [#16](https://github.com/protocorn/clippy-vision/issues/16)) — documentation / **CI-only** wording honesty, not real-machine browser tests.
