@@ -15,7 +15,7 @@ Day-to-day capture and privacy: [usage.md](usage.md). Connecting an agent: [mcp.
 | Recommended hardware | Same wizard minima as Windows: 8 GB RAM and 8 GB free disk to continue; 16 GB RAM and 10 GB disk recommended. Below minimum blocks setup. Between minimum and recommended, you can continue with a warning. Linux with no discrete NVIDIA GPU (nvidia-smi reports 0) grades VRAM from system RAM (`hardware.js`). |
 | **CI (pytest)** | Ubuntu runner, Python 3.12. Platform-filtered unit tests, plus an Xvfb screenshot test: `xvfb-run -a pytest tests/test_linux_screenshot_capture.py -v -m "linux" -k "xvfb"` (`.github/workflows/tests.yml`). That Xvfb job installs `xvfb`, `x11-xserver-utils`, and `xterm` only. |
 | **CI (AppImage)** | Unsigned AppImage built with `npm run dist:linux`. Smoke check: `chmod +x`, then `./…AppImage --appimage-extract`, then looks for `squashfs-root/clippy-vision` or `squashfs-root/AppRun`. Launch test: Xvfb `:99`, `libfuse2` installed, setup pre-seeded, Ollama stubbed, `CLIPPY_PYTHON` pointed at the runner’s Python 3.12. Proves the packaged app can spawn the backend and `GET /health` returns 200. **Does not prove** the setup wizard, Ollama, a real model, or a real desktop (`.github/workflows/release.yml`). |
-| **Real desktop** | Nobody has run this fork’s Linux capture, wizard, or AppImage on a physical desktop. Treat every capture path below as **not verified yet** on GNOME, KDE, Sway, or any other compositor. |
+| **Real desktop** | Nobody has run Linux capture, wizard, or AppImage on a physical desktop. Treat every capture path below as **not verified yet** on GNOME, KDE, Sway, or any other compositor. |
 
 Other distros and ARM are **not verified yet**. Wayland is **not supported** (log in to X11).
 
@@ -23,7 +23,7 @@ Other distros and ARM are **not verified yet**. Wayland is **not supported** (lo
 
 ## Get the AppImage
 
-1. Download the published AppImage from the [v2.1.0 release](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/releases/tag/v2.1.0). That tag is this fork’s Linux build. The upstream `protocorn/clippy-vision` repo did not publish it.
+1. Download the published AppImage from the [GitHub releases page](https://github.com/protocorn/clippy-vision/releases) when a Linux build is published (artifact name `ClippyVision-Linux-x86_64-{version}.AppImage`). Until then, build from source with `npm run dist:linux` in `electron-ui/`.
 2. The release workflow and `electron-builder` name the artifact:
 
    `ClippyVision-Linux-x86_64-${version}.AppImage`
@@ -69,7 +69,7 @@ export CLIPPY_PYTHON=/path/to/venv/bin/python3
 
 CI unit tests and the AppImage dry-run use **Python 3.12**.
 
-**Published v2.1.0 AppImage:** v2.1.0 needs system Python 3.11 or newer, even though the v2.1.0 setup wizard text still says 3.9+ (a known copy bug). Python is not bundled. Do not treat 3.9 as enough ([CHANGELOG.md](../CHANGELOG.md) / [release notes](release-notes/v2.1.0.md)). Current `main` parses `--version` and rejects anything below 3.11.
+**Python 3.11+ is required.** The setup wizard parses `python --version` and rejects anything below 3.11. Python is not bundled. Do not treat 3.9 as enough ([CHANGELOG.md](../CHANGELOG.md) / [release notes](release-notes/v2.1.0.md)).
 
 ---
 

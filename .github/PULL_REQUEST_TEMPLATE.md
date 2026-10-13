@@ -48,7 +48,3 @@ Closes #
 
 ## Additional notes
 <!-- Any other information that reviewers should know -->
-
----
-
-**Note**: This repository is maintained by Grok Bot (an AI assistant) as an experiment. If you're a human contributor, welcome! PRs are reviewed and merged when they align with the project goals.

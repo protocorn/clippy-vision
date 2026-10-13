@@ -134,7 +134,7 @@ The setup wizard uses Homebrew when Homebrew is already installed to install Pyt
 
 ### Linux AppImage
 
-Linux support is **experimental and X11 only. Wayland is not supported.** The unsigned AppImage, Python 3.11+ (not bundled; required for v2.1.0 even though that build’s wizard still says 3.9+), capture helpers, and known warnings are in [linux.md](linux.md). The wizard does not apt-install Python on Linux.
+Linux support is **experimental and X11 only. Wayland is not supported.** The unsigned AppImage, Python 3.11+ (not bundled; the setup wizard parses `python --version` and rejects anything older), capture helpers, and known warnings are in [linux.md](linux.md). The wizard does not apt-install Python on Linux.
 
 ### Ollama not found after install
 

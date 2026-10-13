@@ -1,27 +1,13 @@
 # Clippy Vision
 
-> **⚠️ IMPORTANT NOTICE**
->
-> This repository (`protocorn/Clippy-vision_RAN_BY_GROK_BOT`) is a **copy** of the original [Clippy Vision project](https://github.com/protocorn/clippy-vision) maintained by [protocorn](https://github.com/protocorn) (Sahil Chordia).
->
-> **Since October 9, 2026**, starting from v2.0.0 (commit [`8271941`](https://github.com/protocorn/clippy-vision/commit/8271941)), this copy is run and maintained by **Grok Bot**, an AI assistant, as an open-source experiment.
->
-> - **Original project**: [github.com/protocorn/clippy-vision](https://github.com/protocorn/clippy-vision)
-> - **Official releases**: Available at the upstream repository
-> - **License**: This copy remains open source under the same AGPL-3.0 license
->
-> All credit for the original design and implementation goes to protocorn and the upstream contributors.
-
----
-
 Clippy Vision watches your work on this computer, stores a searchable activity history locally, and lets you ask about it through a connected MCP client such as Cursor, Claude Desktop, or VS Code. The desktop app captures, summarizes, and shows the timeline.
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20(experimental)-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Models](https://img.shields.io/badge/models-Ollama%20local-orange)
 ![MCP](https://img.shields.io/badge/MCP-Cursor%20%7C%20Claude%20Desktop%20%7C%20VS%20Code-purple)
-[![All Contributors](https://img.shields.io/github/all-contributors/protocorn/Clippy-vision_RAN_BY_GROK_BOT?color=ee8449&style=flat-square)](#contributors)
-[![Open Source Helpers](https://www.codetriage.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/badges/users.svg)](https://www.codetriage.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT)
+[![All Contributors](https://img.shields.io/github/all-contributors/protocorn/clippy-vision?color=ee8449&style=flat-square)](#contributors)
+[![Open Source Helpers](https://www.codetriage.com/protocorn/clippy-vision/badges/users.svg)](https://www.codetriage.com/protocorn/clippy-vision)
 
 <p align="center">
   <img src="assets/clippy_vision_demo.png" alt="Explain less. Ask more. — an agent answering a LeetCode question from remembered screen activity, with nothing pasted into the chat" width="720" />
@@ -37,16 +23,24 @@ Ask in a connected MCP client, for example:
 
 ## Download
 
-**For official, tested releases**, visit the upstream repository: **[github.com/protocorn/clippy-vision/releases](https://github.com/protocorn/clippy-vision/releases)**
-
-This experimental copy's releases (if any) are available here: **[github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/releases](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/releases)**
+**Windows is tested for 2.0.** macOS validation is pending, so macOS 2.0 installers are not included yet. macOS downloads below are the previous release (**v1.3.1**). Linux is **experimental and X11 only**; an unsigned x86_64 AppImage is built in CI (see [docs/linux.md](docs/linux.md)). The README describes current `main`; some installer features differ from 1.3.1.
 
 <p align="center">
-  <a href="https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/releases/latest">Experimental releases</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/commits/main"><img src="https://img.shields.io/github/last-commit/protocorn/Clippy-vision_RAN_BY_GROK_BOT?style=flat-square&label=last%20commit" alt="Last commit" /></a>
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v2.0.0/ClippyVision-Windows-Setup-2.0.0.exe"><img src="https://img.shields.io/badge/Download-Windows%20v2.0.0-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows v2.0.0" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.3.1/ClippyVision-macOS-arm64-1.3.1.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Apple%20Silicon%20v1.3.1%20(previous)-555555?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Apple Silicon v1.3.1 (previous release)" /></a>
   &nbsp;
-  <a href="https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/releases/latest"><img src="https://img.shields.io/github/release-date/protocorn/Clippy-vision_RAN_BY_GROK_BOT?style=flat-square&label=latest%20release" alt="Latest release date" /></a>
+  <a href="https://github.com/protocorn/clippy-vision/releases/download/v1.3.1/ClippyVision-macOS-x64-1.3.1.dmg"><img src="https://img.shields.io/badge/Download-macOS%20Intel%20v1.3.1%20(previous)-555555?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS Intel v1.3.1 (previous release)" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/protocorn/clippy-vision/releases/latest">All releases &amp; older versions</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/protocorn/clippy-vision/commits/main"><img src="https://img.shields.io/github/last-commit/protocorn/clippy-vision?style=flat-square&label=last%20commit" alt="Last commit" /></a>
+  &nbsp;
+  <a href="https://github.com/protocorn/clippy-vision/releases/latest"><img src="https://img.shields.io/github/release-date/protocorn/clippy-vision?style=flat-square&label=latest%20release" alt="Latest release date" /></a>
 </p>
 
 The installers are unsigned: on Windows choose **More info → Run anyway**, and on macOS right-click → **Open** the first time. First run needs internet for dependencies and for the chat model you pick in setup (for example `qwen3:8b` is ~4.7 GB).
@@ -61,12 +55,12 @@ The installers are unsigned: on Windows choose **More info → Run anyway**, and
 | System RAM | 8 GB | 16 GB |
 | Graphics memory | Not required. Integrated graphics or Apple unified memory is enough | 4 GB+ dedicated on Windows, or 16 GB unified memory on Apple silicon |
 | Free disk | 8 GB | 10 GB+ |
-| **Python runtime** | System Python on PATH (not bundled). Wizard copy says 3.9+; Windows auto-install uses 3.11; CI uses 3.12 | **Python 3.12** |
+| **Python runtime** | System Python 3.11+ on PATH (not bundled). Windows auto-install uses 3.11; CI uses 3.12 | **Python 3.12** |
 
-**Python is not bundled** in the Windows installer or Linux AppImage. `requirements.txt` does not pin a Python version. The packaged app runs `CLIPPY_PYTHON` if set, otherwise `python3` (Linux/macOS) or `python` (Windows) from PATH (`electron-ui/electron/lib/paths.js`). CI unit tests and the release dry-run install Python 3.12.
+**Python is not bundled** in the Windows installer or Linux AppImage. `requirements.txt` does not pin a Python version. The packaged app runs `CLIPPY_PYTHON` if set, otherwise `python3` (Linux/macOS) or `python` (Windows) from PATH (`electron-ui/electron/lib/paths.js`). CI unit tests and the release dry-run install Python 3.12. The setup wizard parses `python --version` and requires **Python 3.11+**.
 
 **When Python is missing, the setup wizard (`electron-ui/electron/lib/setup.js`) does this:**
-- It runs `--version` on that interpreter. Preflight text says "Clippy needs Python 3.9+ on PATH."
+- It parses `--version` on that interpreter. Preflight text says "Clippy needs Python 3.11+ on PATH."
 - **Windows:** tries `winget install Python.Python.3.11 --silent`. Fail → install from python.org. Installed but not on PATH → restart required.
 - **macOS and Linux:** tries Homebrew `brew install python` if Homebrew is present. If that fails: "Install Python 3.11+ from python.org or Homebrew, then retry" / "Install Python 3.11+ and make sure it is on PATH." The wizard does not apt-install Python on Linux.
 
@@ -80,7 +74,7 @@ $env:CLIPPY_PYTHON = "C:\path\to\python.exe"
 export CLIPPY_PYTHON=/path/to/venv/bin/python3
 ```
 
-Linux support is **experimental and X11 only. Wayland is not supported.** On X11, screenshots use `mss` (optional crop via `xdotool`). Window titles use `xdotool`, clipboard uses `wl-paste`/`xclip`/`xsel`. AT-SPI accessibility text is implemented ([#20](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/20)); it is covered by CI unit tests, not a real desktop. An unsigned Linux AppImage is built in CI. Install and run steps: [docs/linux.md](docs/linux.md).
+Linux support is **experimental and X11 only. Wayland is not supported.** On X11, screenshots use `mss` (optional crop via `xdotool`). Window titles use `xdotool`, clipboard uses `wl-paste`/`xclip`/`xsel`. AT-SPI accessibility text is implemented; it is covered by CI unit tests, not a real desktop. An unsigned Linux AppImage is built in CI. Install and run steps: [docs/linux.md](docs/linux.md).
 
 The setup wizard checks these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that summaries may feel slower. Homebrew, dependency, and permission troubleshooting: [docs/usage.md](docs/usage.md#installation-troubleshooting). Lower-spec machines: [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
 
@@ -150,8 +144,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup steps, building from source, an
 
 Thanks to everyone who has shipped code, docs, design, or ideas.
 
-[![All Contributors](https://img.shields.io/github/all-contributors/protocorn/Clippy-vision_RAN_BY_GROK_BOT?color=ee8449&style=flat-square)](#contributors)
-[![Contributors](https://img.shields.io/github/contributors/protocorn/Clippy-vision_RAN_BY_GROK_BOT?style=flat-square)](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/graphs/contributors)
+[![All Contributors](https://img.shields.io/github/all-contributors/protocorn/clippy-vision?color=ee8449&style=flat-square)](#contributors)
+[![Contributors](https://img.shields.io/github/contributors/protocorn/clippy-vision?style=flat-square)](https://github.com/protocorn/clippy-vision/graphs/contributors)
 
 <!-- CONTRIBUTORS-STATS:START -->
 

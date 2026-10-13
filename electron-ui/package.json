@@ -5,6 +5,14 @@
   "description": "Local AI desktop companion with screen awareness",
   "author": "Clippy Vision",
   "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/protocorn/clippy-vision",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/protocorn/clippy-vision.git"
+  },
+  "bugs": {
+    "url": "https://github.com/protocorn/clippy-vision/issues"
+  },
   "main": "electron/main.js",
   "scripts": {
     "test": "node --test electron/lib/mcp.test.js electron/lib/setup.test.js",
