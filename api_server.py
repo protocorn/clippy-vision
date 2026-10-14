@@ -1,9 +1,6 @@
-import json
 import os
 import sys
-import time
 from contextlib import asynccontextmanager
-from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -24,7 +21,7 @@ for _stream in (sys.stdout, sys.stderr):
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from agent.conversation import (
@@ -65,22 +62,9 @@ from core.user_controls import (
 )
 from core.workspace_roots import list_roots, remember_root, remove_root
 
-# Soft cap for any leftover composer text.
-# ARCHIVED UI: in-app chat shell moved to archive/in_app_chat/.
-# Home is the captured-session timeline. These /chat stubs remain so old
-# clients / restore paths do not 404.
-USER_MESSAGE_MAX_CHARS = 4000
-
-MCP_CHAT_GUIDANCE = (
-    "Clippy Vision captures what you do on this PC and keeps that history local.\n\n"
-    "In-app chat with a small local agent has been removed. "
-    "This app keeps capture, the session timeline, and settings.\n\n"
-    "Ask about your activity from Cursor, Claude Desktop, or any MCP client:\n\n"
-    "1. Open Settings → Connect apps\n"
-    "2. Copy the MCP launch config into your client\n"
-    "3. Use search_sessions / search_events / memory tools from a bigger model\n\n"
-    "Timeline, capture, privacy, and trusted folders stay in this app."
-)
+# ARCHIVED UI: in-app chat shell lives under archive/in_app_chat/.
+# Home is the captured-session timeline. Ask via MCP (Settings → Connect apps).
+# Conversation list/search/delete APIs remain for Settings data-clear and restore.
 
 
 @asynccontextmanager
@@ -128,14 +112,6 @@ app.add_middleware(
     allow_headers=["*"],
 
 )
-
-class QueryRequest(BaseModel):
-
-    message: str
-
-    conversation_id: str
-
-
 
 class NameRequest(BaseModel):
 
@@ -193,141 +169,6 @@ class TimeSpanRequest(BaseModel):
 
 class DataClearRequest(BaseModel):
     scopes: list[str]
-
-
-def _validate_user_message(message: str) -> str:
-    text = (message or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Message cannot be empty.")
-    if len(text) > USER_MESSAGE_MAX_CHARS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Message too long ({len(text)} chars). Limit is {USER_MESSAGE_MAX_CHARS}.",
-        )
-    return text
-
-
-def _user_facing_chat_error(exc: BaseException) -> tuple[str, dict]:
-    """Map chat failures to a message the UI can show, plus SSE extra fields."""
-    from core.ollama_client import OllamaError, OllamaUnavailable
-
-    if isinstance(exc, OllamaUnavailable):
-        return (
-            "Ollama is not running. Please start Ollama and try again.",
-            {"ollama_unavailable": True},
-        )
-    if isinstance(exc, OllamaError):
-        text = str(exc).lower()
-        if "404" in text or "not found" in text:
-            return (
-                "The chat model is not installed. Open Settings to download it, then try again.",
-                {"model_missing": True},
-            )
-        return (
-            "The local model could not answer. Check Ollama and your model in Settings, then try again.",
-            {},
-        )
-    return (str(exc) or "Chat failed.", {})
-
-
-# --- In-app chat endpoints ---
-
-@app.post("/chat")
-def chat(req: QueryRequest):
-    """Non-streaming chat endpoint. Returns complete response."""
-    import uuid
-    from agent.conversation import save_chat
-    from core.chat_context import build_chat_messages
-    from core.chat_model import get_chat_model
-    from core.llm_gateway import Priority, gateway
-    from core.ollama_client import OllamaError, OllamaUnavailable
-
-    message = _validate_user_message(req.message)
-    conversation_id = (req.conversation_id or "").strip() or str(uuid.uuid4())
-
-    try:
-        messages = build_chat_messages(message, conversation_id)
-        model = get_chat_model()
-        response = gateway.chat(messages, model, priority=Priority.INTERACTIVE, timeout=120)
-
-        if not response:
-            raise HTTPException(status_code=500, detail="No response from model")
-
-        assistant_message = response.get("message", {}).get("content", "")
-
-        save_chat(conversation_id, "user", message)
-        save_chat(conversation_id, "assistant", assistant_message)
-
-        return {
-            "result": assistant_message,
-            "conversation_id": conversation_id,
-            "chat_disabled": False,
-        }
-
-    except HTTPException:
-        raise
-    except (OllamaUnavailable, OllamaError) as e:
-        msg, _extra = _user_facing_chat_error(e)
-        raise HTTPException(status_code=503, detail=msg) from e
-    except Exception as e:
-        print(f"[chat] error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/chat/stream")
-def chat_stream(req: QueryRequest):
-    """Streaming chat endpoint. Returns SSE stream."""
-    import uuid
-    from agent.conversation import save_chat
-    from core.chat_context import build_chat_messages
-    from core.chat_model import get_chat_model
-    from core.llm_gateway import Priority, gateway
-
-    message = _validate_user_message(req.message)
-    conversation_id = (req.conversation_id or "").strip() or str(uuid.uuid4())
-
-    def event_gen():
-        accumulated = []
-        try:
-            yield f"data: {json.dumps({'type': 'status', 'text': 'Retrieving context...'}, ensure_ascii=False)}\n\n"
-
-            messages = build_chat_messages(message, conversation_id)
-
-            yield f"data: {json.dumps({'type': 'status', 'text': 'Generating response...'}, ensure_ascii=False)}\n\n"
-
-            model = get_chat_model()
-            stream = gateway.chat_stream(messages, model, priority=Priority.INTERACTIVE, timeout=120)
-
-            if not stream:
-                raise Exception("No stream returned from gateway")
-
-            for chunk in stream:
-                delta = chunk.get("message", {}).get("content", "")
-                if delta:
-                    accumulated.append(delta)
-                    yield f"data: {json.dumps({'type': 'content', 'delta': delta}, ensure_ascii=False)}\n\n"
-
-            assistant_message = "".join(accumulated)
-            save_chat(conversation_id, "user", message)
-            save_chat(conversation_id, "assistant", assistant_message)
-
-            yield f"data: {json.dumps({'type': 'done', 'result': assistant_message, 'conversation_id': conversation_id}, ensure_ascii=False)}\n\n"
-
-        except Exception as e:
-            print(f"[chat/stream] error: {e}")
-            msg, extra = _user_facing_chat_error(e)
-            payload = {"type": "error", "message": msg, **extra}
-            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-    return StreamingResponse(
-        event_gen(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
 
 
 # --- User profile ---

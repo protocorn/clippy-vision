@@ -35,58 +35,8 @@ async function getErrorMessage(response) {
 
 contextBridge.exposeInMainWorld('clippy', {
 
-    // Expose apiUrl helper for chat streaming
+    // Expose apiUrl for renderer fetch helpers
     apiUrl,
-
-    // ARCHIVED in-app chat — UI moved to archive/in_app_chat/. Stubs remain for restore.
-    chat: async (message, conversationId) => {
-        const response = await fetch(await apiUrl('/chat'), {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                message,
-                conversation_id: conversationId,
-            })
-        })
-        
-        if (!response.ok) throw new Error(await getErrorMessage(response))
-        return response.json()
-    },
-
-    chatStream: async (message, conversationId, onEvent) => {
-        const response = await fetch(await apiUrl('/chat/stream'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message,
-                conversation_id: conversationId,
-            }),
-        })
-        if (!response.ok) throw new Error(await getErrorMessage(response))
-        if (!response.body) throw new Error('No response body')
-
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-
-        while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-            buffer += decoder.decode(value, { stream: true })
-            const parts = buffer.split('\n\n')
-            buffer = parts.pop() || ''
-            for (const part of parts) {
-                const line = part.split('\n').find(l => l.startsWith('data: '))
-                if (!line) continue
-                try {
-                    const event = JSON.parse(line.slice(6))
-                    onEvent(event)
-                } catch (_) { /* ignore malformed chunk */ }
-            }
-        }
-    },
 
     getName: async () => {
         const response = await fetch(await apiUrl('/user/name'))

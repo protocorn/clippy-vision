@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Post-v2.1.0 work on main. Verification is **CI-only** unless a line says otherwise. Nothing below is **real machine** tested. The published v2.1.0 Windows installer and Linux AppImage were not rebuilt.
 
+### Removed
+- In-app chat UI and API ahead of v2.1.1: header/More-menu Chat controls, `#chat-view` panel, `electron-ui/src/js/chat.js` / `conversations.js` / `chat.test.js`, `/chat` and `/chat/stream`, and `core/chat_context.py` (with their pytest coverage). Ask via MCP under **Settings → Connect apps**. Day Cards, Connect apps, `agent/conversation.py` storage helpers, `/conversations*` for data-clear/restore, and `archive/in_app_chat/` are kept.
+
 ### Added
 - Linux install and run guide (`docs/linux.md`) ([#44](https://github.com/protocorn/clippy-vision/pull/44), part of [#5](https://github.com/protocorn/clippy-vision/issues/5)) — documentation. No real-machine testing.
 - Chat retrieval-time privacy (password-manager process opt-out, private/redacted/Clippy windows, selected-apps mode, private sessions; drop the event if a privacy check raises), NULL-safe prompt fields, session lookback from local midnight with 60-minute events, and untrusted/no-guess prompt instructions ([#34](https://github.com/protocorn/clippy-vision/pull/34), part of [#6](https://github.com/protocorn/clippy-vision/issues/6)) — **CI-only** (pytest chat context and endpoints on ubuntu-latest and windows-latest). Does not start Ollama.
