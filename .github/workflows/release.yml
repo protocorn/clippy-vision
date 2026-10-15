@@ -166,7 +166,7 @@ jobs:
           function Seed-ClippySetup([string]$UserData) {
             Write-Host "Seeding Electron userData: $UserData"
             Write-JsonFile (Join-Path $UserData "setup_complete.json") @{
-              version = "2.1.0"
+              version = "2.1.1"
               completedAt = (Get-Date).ToUniversalTime().ToString("o")
             }
             Write-JsonFile (Join-Path $UserData "data\llm_config.json") @{
@@ -626,7 +626,7 @@ jobs:
           seed_clippy_setup() {
             local user_data="$1"
             mkdir -p "$user_data/data"
-            printf '%s\n' '{"version":"2.1.0","completedAt":"2026-10-12T00:00:00.000Z"}' > "$user_data/setup_complete.json"
+            printf '%s\n' '{"version":"2.1.1","completedAt":"2026-10-15T00:00:00.000Z"}' > "$user_data/setup_complete.json"
             printf '%s\n' '{"provider":"ollama","base_url":"http://127.0.0.1:11555","api_key":"","chat_model":"test-model","embedding_model":"nomic-embed-text"}' > "$user_data/data/llm_config.json"
             echo "seeded $user_data/setup_complete.json"
             echo "seeded $user_data/data/llm_config.json"

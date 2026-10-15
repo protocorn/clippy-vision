@@ -7,14 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-Post-v2.1.0 work on main. Verification is **CI-only** unless a line says otherwise. Nothing below is **real machine** tested. The published v2.1.0 Windows installer and Linux AppImage were not rebuilt.
-
-### Removed
-- In-app chat UI and API ahead of v2.1.1: header/More-menu Chat controls, `#chat-view` panel, `electron-ui/src/js/chat.js` / `conversations.js` / `chat.test.js`, `/chat` and `/chat/stream`, and `core/chat_context.py` (with their pytest coverage). Ask via MCP under **Settings → Connect apps**. Day Cards, Connect apps, `agent/conversation.py` storage helpers, `/conversations*` for data-clear/restore, and `archive/in_app_chat/` are kept.
-
 ### Added
 - Linux install and run guide (`docs/linux.md`) ([#44](https://github.com/protocorn/clippy-vision/pull/44), part of [#5](https://github.com/protocorn/clippy-vision/issues/5)) — documentation. No real-machine testing.
-- Chat retrieval-time privacy (password-manager process opt-out, private/redacted/Clippy windows, selected-apps mode, private sessions; drop the event if a privacy check raises), NULL-safe prompt fields, session lookback from local midnight with 60-minute events, and untrusted/no-guess prompt instructions ([#34](https://github.com/protocorn/clippy-vision/pull/34), part of [#6](https://github.com/protocorn/clippy-vision/issues/6)) — **CI-only** (pytest chat context and endpoints on ubuntu-latest and windows-latest). Does not start Ollama.
+- Chat retrieval-time privacy (password-manager process opt-out, private/redacted/Clippy windows, selected-apps mode, private sessions; drop the event if a privacy check raises), NULL-safe prompt fields, session lookback from local midnight with 60-minute events, and untrusted/no-guess prompt instructions ([#34](https://github.com/protocorn/clippy-vision/pull/34), part of [#6](https://github.com/protocorn/clippy-vision/issues/6)) — **CI-only** (pytest chat context and endpoints on ubuntu-latest and windows-latest). Does not start Ollama. (In-app chat removed in 2.1.1; privacy rules applied while chat existed.)
 - Copy diagnostics button in Settings → About ([#42](https://github.com/protocorn/clippy-vision/pull/42), closes [#17](https://github.com/protocorn/clippy-vision/issues/17)) — **CI-only**. Copied JSON is counts, sizes, and machine/settings metadata only (no captured content). Not tested on a signed-in packaged Electron install. **Not real machine.**
 
 ### Changed
@@ -29,6 +24,20 @@ Post-v2.1.0 work on main. Verification is **CI-only** unless a line says otherwi
 - Private-browsing docs aligned with a coverage table ([#41](https://github.com/protocorn/clippy-vision/pull/41), closes [#16](https://github.com/protocorn/clippy-vision/issues/16)) — documentation / **CI-only** wording honesty, not real-machine browser tests.
 - Windows node spawn flake in `test_os_check` ([#40](https://github.com/protocorn/clippy-vision/pull/40)) — **CI-only** test deflake (`node --version` warm-up + 60s timeout).
 - Release workflow attaches `docs/release-notes/<tag>.md` as the GitHub draft body; Linux AppImage `artifactName` pinned to `x86_64` ([#33](https://github.com/protocorn/clippy-vision/pull/33)) — CI/docs only. Published v2.1.0 assets were not rebuilt.
+
+## [2.1.1] - 2026-10-15
+
+Patch over v2.1.0. Verification is **CI-only** unless a line says otherwise. No **real machine** testing. Unsigned Windows NSIS + Linux AppImage (macOS skipped).
+
+### Removed
+- In-app chat UI and API ([#65](https://github.com/protocorn/clippy-vision/pull/65)): header/More-menu Chat controls, `#chat-view` panel, `electron-ui/src/js/chat.js` / `conversations.js` / `chat.test.js`, `/chat` and `/chat/stream`, and `core/chat_context.py` (with their pytest coverage). Ask via MCP under **Settings → Connect apps**. Day Cards, Connect apps, `agent/conversation.py` storage helpers, `/conversations*` for data-clear/restore, and `archive/in_app_chat/` are kept.
+
+### Fixed
+- Setup wizard uses an app-managed Python virtualenv and surfaces Linux Ollama/`zstd` installer errors ([#62](https://github.com/protocorn/clippy-vision/pull/62)) — **CI-only**.
+- Linux setup installs `pynput` without `evdev`; pip error summary ignores harmless marker lines ([#63](https://github.com/protocorn/clippy-vision/pull/63)) — **CI-only**.
+- Electron loading screen hang from missing `chatBtn` imports ([#64](https://github.com/protocorn/clippy-vision/pull/64)) — **CI-only**.
+- Contributor wall de-dupes GitHub logins case-insensitively ([#61](https://github.com/protocorn/clippy-vision/pull/61)) — **CI-only**.
+- Tag-push release builds pass `--publish never` so electron-builder does not require `GH_TOKEN` ([#60](https://github.com/protocorn/clippy-vision/pull/60)) — CI only.
 
 ## [2.1.0] - 2026-10-12
 
@@ -93,6 +102,7 @@ Verification labels used below:
 
 Baseline v2.0.0 (commit [8271941](https://github.com/protocorn/clippy-vision/commit/8271941)). Changes above landed after that commit.
 
-[Unreleased]: https://github.com/protocorn/clippy-vision/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/protocorn/clippy-vision/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/protocorn/clippy-vision/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/protocorn/clippy-vision/compare/8271941...v2.1.0
 [2.0.0]: https://github.com/protocorn/clippy-vision/releases/tag/v2.0.0
