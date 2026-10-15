@@ -1,7 +1,6 @@
 import {
-  nameView, timelineView, loadingView, settingsView, chatView, appShell,
-  APP_PANELS, settingsBtn, navMoreBtn, homeBtn, homeMenuBtn, chatBtn, chatMenuBtn, wideLayoutMq,
-  welcomeInput, welcomeSend, inputBox, sendBtn, USER_MESSAGE_MAX_CHARS, CHAR_COUNT_SHOW_AT, store,
+  nameView, timelineView, loadingView, settingsView, appShell,
+  APP_PANELS, settingsBtn, navMoreBtn, homeBtn, homeMenuBtn, wideLayoutMq,
 } from './dom.js'
 
 export function setStatus(el, text, kind) {
@@ -11,28 +10,11 @@ export function setStatus(el, text, kind) {
   if (kind) el.classList.add(kind)
 }
 
-export function updateCharCount(inputEl, countEl) {
-  if (!inputEl || !countEl) return
-  const n = (inputEl.value || '').length
-  countEl.textContent = `${n} / ${USER_MESSAGE_MAX_CHARS}`
-  countEl.classList.toggle('is-visible', n >= CHAR_COUNT_SHOW_AT)
-  countEl.classList.toggle('is-warn', n >= CHAR_COUNT_SHOW_AT && n < USER_MESSAGE_MAX_CHARS)
-  countEl.classList.toggle('is-limit', n >= USER_MESSAGE_MAX_CHARS)
-  if (inputEl === welcomeInput) {
-    if (welcomeSend) welcomeSend.disabled = store.isLoading || n > USER_MESSAGE_MAX_CHARS
-  } else if (inputEl === inputBox) {
-    if (sendBtn) sendBtn.disabled = store.isLoading || n > USER_MESSAGE_MAX_CHARS
-  }
-}
-
 function syncNavActive(panel) {
   const onSessions = panel === timelineView
   const onSettings = panel === settingsView
-  const onChat = panel === chatView
   if (homeBtn) homeBtn.classList.toggle('is-nav-active', onSessions)
   if (homeMenuBtn) homeMenuBtn.classList.toggle('is-nav-active', onSessions)
-  if (chatBtn) chatBtn.classList.toggle('is-nav-active', onChat)
-  if (chatMenuBtn) chatMenuBtn.classList.toggle('is-nav-active', onChat)
   if (settingsBtn) settingsBtn.classList.toggle('is-nav-active', onSettings)
   if (navMoreBtn) navMoreBtn.classList.toggle('is-nav-active', onSettings)
 }
@@ -51,7 +33,7 @@ export function showView(view) {
     return
   }
 
-  // Insights / Settings / Timeline share the persistent top navbar.
+  // Settings / Timeline share the persistent top navbar.
   if (appShell) appShell.classList.add('active')
   const panel = APP_PANELS.includes(view) ? view : timelineView
   if (panel) panel.classList.add('active')

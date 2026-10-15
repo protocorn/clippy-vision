@@ -19,17 +19,19 @@ intact; do not rely on it from the live app.
 
 ## Backend notes
 
-- `POST /chat` and `POST /chat/stream` still exist but only return MCP guidance
-  (`chat_disabled: true`). See comments in `api_server.py`.
+- `POST /chat` and `POST /chat/stream` were removed ahead of v2.1.1 (with
+  `core/chat_context.py`). Restore must re-add those routes and context
+  builder.
 - Conversation list/search/delete APIs remain for Settings data-clear and a
   possible restore; the UI no longer calls them.
-- Preload still exposes `clippy.chat` / `clippy.chatStream` / conversation
-  helpers for restore; marked archived in comments.
+- Preload keeps conversation helpers for restore; `clippy.chat` /
+  `clippy.chatStream` were removed with the endpoints.
 
 ## Restore checklist
 
 1. Copy JS back under `electron-ui/src/js/`.
-2. Re-insert `chat-view.fragment.html` as `#chat-view` and wire header Chats /
-   New Chat buttons.
-3. Point `app.js` / `utils.js` / `dom.js` at chat as the default panel again.
-4. Re-enable real agent wiring in `/chat` if desired (currently stubbed).
+2. Re-insert `chat-view.fragment.html` as `#chat-view` and wire header Chat /
+   More-menu Chat buttons.
+3. Point `app.js` / `utils.js` / `dom.js` at chat panels again.
+4. Re-add `/chat` and `/chat/stream` (plus `core/chat_context.py`) and preload
+   `clippy.chat` / `clippy.chatStream` if desired.

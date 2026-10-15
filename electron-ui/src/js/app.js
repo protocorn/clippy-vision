@@ -1,6 +1,6 @@
 import {
   nameInput, nameSubmit, nameError, nameView, loadingView, loadingSub, loadingError,
-  appBrand, homeBtn, homeMenuBtn, chatBtn, chatMenuBtn, settingsBtn, captureBtn,
+  appBrand, homeBtn, homeMenuBtn, settingsBtn, captureBtn,
   pauseBtn, pauseMenu, pauseMenuPanel, connectBtn,
   timelineSearch, timelineHint, timelineHintDismiss, timelineLoadMore,
   timelineDetailBack, updateBanner, updateBannerText, updateBannerLink,
@@ -111,17 +111,6 @@ function wireUi() {
   })
   on(appBrand, 'click', () => openTimeline())
 
-  // Chat button handler - lazy load chat module
-  on(chatBtn, 'click', async () => {
-    const { openChat } = await import('./chat.js')
-    openChat()
-  })
-  on(chatMenuBtn, 'click', async () => {
-    setNavMoreOpen(false)
-    const { openChat } = await import('./chat.js')
-    openChat()
-  })
-
   function setNavMoreOpen(open) {
     if (!navMore || !navMoreBtn || !navMoreMenu) return
     navMore.classList.toggle('is-open', open)
@@ -133,7 +122,7 @@ function wireUi() {
     e.stopPropagation()
     setNavMoreOpen(navMoreMenu?.hidden !== false)
   })
-  for (const item of [homeMenuBtn, chatMenuBtn, settingsBtn]) {
+  for (const item of [homeMenuBtn, settingsBtn]) {
     on(item, 'click', () => setNavMoreOpen(false))
   }
   document.addEventListener('click', (e) => {
