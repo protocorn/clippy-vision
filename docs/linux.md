@@ -168,7 +168,7 @@ When Ollama is the managed local runtime (default base URL `http://127.0.0.1:114
 5. Download MiniLM embeddings (`python -m core.model_download`) and auto-pull the default chat model `llama3.2:3b` (or another tag you typed) (`python -m core.ollama_pull <model>`), with progress
 6. Warmup and write `setup_complete.json`
 
-Consent copy in the wizard: Ollama is installed only when missing, via “winget on Windows, Homebrew on macOS, official Linux script with consent, or ollama.com”. The default chat model is `llama3.2:3b` (~2 GB), downloaded automatically for session summaries. Change it later in Settings. Capture uses accessibility + OCR; no vision model is downloaded.
+Consent copy in the wizard: a checksum-verified CPython 3.12 from python-build-standalone (~25–30 MB, skipped if Python 3.11+ is already present), Ollama (installed only when missing, via “winget on Windows, Homebrew on macOS, official Linux script with consent, or ollama.com”), and the default chat model `llama3.2:3b` (~2 GB). Change the model later in Settings. Capture uses accessibility + OCR; no vision model is downloaded.
 
 You can point at a specific `ollama` binary with `CLIPPY_OLLAMA` (`paths.js`). That override is **not verified yet** on a Linux desktop.
 

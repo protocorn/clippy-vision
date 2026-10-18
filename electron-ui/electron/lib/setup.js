@@ -1154,13 +1154,6 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         }
 
         const chatModel = String(readLLMConfig().chat_model || DEFAULT_CHAT_MODEL).trim()
-        if (!chatModel) {
-            stepProgress('models', 100)
-            log('No local AI model selected — skipping Ollama pull.', 'info')
-            markDone('models', 'Local ML models ready (no model pull)')
-            return
-        }
-
         const models = [{ name: chatModel, label: chatModel }]
 
         stepUpdate('models', 'running', `Checking for ${chatModel}...`)

@@ -25,7 +25,28 @@ jobs:
 
       - name: Run MCP config path tests
         working-directory: electron-ui
-        run: node --test electron/lib/mcp.test.js electron/lib/setup.test.js electron/lib/managed-python.test.js
+        run: node --test electron/lib/mcp.test.js electron/lib/setup.test.js electron/lib/managed-python.test.js electron/lib/llm-config.test.js
+
+  managed-python-venv:
+    name: Managed Python download-to-venv on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download pinned CPython, verify SHA-256, create venv
+        working-directory: electron-ui
+        run: node scripts/ci-managed-python.js
 
   electron-renderer-lint:
     name: Electron renderer lint

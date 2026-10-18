@@ -18,6 +18,8 @@ const {
     managedPythonExecutable,
     isHealthyManagedPython,
     tarExtractArgs,
+    tarCommand,
+    isAllowedDownloadUrl,
     sha256Buffer,
     downloadToFile,
     extractTarGz,
@@ -91,6 +93,24 @@ test('tar extract args are non-shell and relocatable', () => {
         tarExtractArgs('/tmp/python.tgz', '/tmp/dest'),
         ['-xf', '/tmp/python.tgz', '-C', '/tmp/dest'],
     )
+})
+
+test('Windows tar uses System32 tar.exe so GNU tar does not treat C:\\ as a remote', () => {
+    assert.equal(
+        tarCommand('win32', { SystemRoot: 'C:\\Windows' }),
+        'C:\\Windows\\System32\\tar.exe',
+    )
+    assert.equal(tarCommand('linux'), 'tar')
+    assert.equal(tarCommand('darwin'), 'tar')
+})
+
+test('isAllowedDownloadUrl allows https and localhost http only', () => {
+    assert.equal(isAllowedDownloadUrl('https://github.com/astral-sh/python-build-standalone/releases/download/x'), true)
+    assert.equal(isAllowedDownloadUrl('http://127.0.0.1:9/file.tar.gz'), true)
+    assert.equal(isAllowedDownloadUrl('http://localhost:9/file.tar.gz'), true)
+    assert.equal(isAllowedDownloadUrl('http://[::1]:9/file.tar.gz'), true)
+    assert.equal(isAllowedDownloadUrl('http://example.com/file.tar.gz'), false)
+    assert.equal(isAllowedDownloadUrl('ftp://127.0.0.1/file.tar.gz'), false)
 })
 
 test('sha256Buffer matches Node crypto for the same bytes', () => {
@@ -185,6 +205,53 @@ test('installManagedPython stages, extracts, and returns the relocatable interpr
         assert.equal(fs.existsSync(expected), true)
         assert.equal(fs.existsSync(`${pythonRuntimeDir(tmp)}.partial`), false)
     } finally {
+        fs.rmSync(tmp, { recursive: true, force: true })
+    }
+})
+
+test('extractTarGz on win32 spawns System32 tar.exe', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'clippy-tar-win-'))
+    const archive = path.join(tmp, 'python.tgz')
+    const calls = []
+    try {
+        await extractTarGz(archive, tmp, {
+            platform: 'win32',
+            env: { SystemRoot: 'C:\\Windows' },
+            spawnFn: (cmd, args) => {
+                calls.push([cmd, args])
+                return {
+                    stderr: { on() {} },
+                    on(event, cb) {
+                        if (event === 'exit') queueMicrotask(() => cb(0))
+                    },
+                }
+            },
+        })
+        assert.equal(calls.length, 1)
+        assert.equal(calls[0][0], 'C:\\Windows\\System32\\tar.exe')
+        assert.deepEqual(calls[0][1], tarExtractArgs(archive, tmp))
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true })
+    }
+})
+
+test('downloadToFile refuses a non-https redirect off localhost', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'clippy-py-'))
+    const dest = path.join(tmp, 'runtime.tar.gz')
+    const server = http.createServer((_req, res) => {
+        res.writeHead(302, { Location: 'http://example.com/cpython.tar.gz' })
+        res.end()
+    })
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address()
+    try {
+        await assert.rejects(
+            () => downloadToFile(`http://127.0.0.1:${port}/start`, dest),
+            /Refusing Python download redirect/,
+        )
+        assert.equal(fs.existsSync(dest), false)
+    } finally {
+        server.close()
         fs.rmSync(tmp, { recursive: true, force: true })
     }
 })

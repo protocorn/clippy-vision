@@ -1,7 +1,7 @@
 /**
  * App-managed CPython runtime for packaged Clippy Vision.
  *
- * The Windows NSIS installer and Linux AppImage do not bundle Python (keeps
+ * Packaged Windows, macOS, and Linux apps do not bundle Python (keeps
  * installer size unchanged). First-run setup downloads a relocatable
  * python-build-standalone CPython 3.12 into Electron userData, then the
  * existing app-managed venv is created from that interpreter.
@@ -100,6 +100,32 @@ function tarExtractArgs(archivePath, destDir) {
     return ['-xf', archivePath, '-C', destDir]
 }
 
+function tarCommand(platform = process.platform, env = process.env) {
+    // Windows PATH can put Git's GNU tar first. GNU tar treats C:\Users\... as
+    // a remote host:path unless --force-local is set. bsdtar in System32 does
+    // not, so always use that binary on win32.
+    if (platform === 'win32') {
+        const root = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows'
+        return path.win32.join(root, 'System32', 'tar.exe')
+    }
+    return 'tar'
+}
+
+function isAllowedDownloadUrl(url) {
+    let parsed
+    try {
+        parsed = new URL(url)
+    } catch (_) {
+        return false
+    }
+    if (parsed.protocol === 'https:') return true
+    if (parsed.protocol === 'http:') {
+        const host = String(parsed.hostname || '').toLowerCase()
+        return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]'
+    }
+    return false
+}
+
 function sha256FileSync(filePath) {
     const hash = crypto.createHash('sha256')
     hash.update(fs.readFileSync(filePath))
@@ -111,6 +137,10 @@ function sha256Buffer(buffer) {
 }
 
 function followRedirectsGet(url, callback, redirectsLeft = MAX_REDIRECTS) {
+    if (!isAllowedDownloadUrl(url)) {
+        callback(new Error(`Refusing Python download from ${url}`))
+        return
+    }
     const parsed = new URL(url)
     const lib = parsed.protocol === 'http:' ? http : https
     const req = lib.get({
@@ -131,6 +161,10 @@ function followRedirectsGet(url, callback, redirectsLeft = MAX_REDIRECTS) {
                 return
             }
             const next = new URL(res.headers.location, url).toString()
+            if (!isAllowedDownloadUrl(next)) {
+                callback(new Error(`Refusing Python download redirect to ${next}`))
+                return
+            }
             followRedirectsGet(next, callback, redirectsLeft - 1)
             return
         }
@@ -205,10 +239,14 @@ function downloadToFile(url, destPath, { onProgress, expectedSha256, getFn = fol
     })
 }
 
-function extractTarGz(archivePath, destDir, { spawnFn = spawn } = {}) {
+function extractTarGz(archivePath, destDir, {
+    spawnFn = spawn,
+    platform = process.platform,
+    env = process.env,
+} = {}) {
     return new Promise((resolve, reject) => {
         fs.mkdirSync(destDir, { recursive: true })
-        const proc = spawnFn('tar', tarExtractArgs(archivePath, destDir), {
+        const proc = spawnFn(tarCommand(platform, env), tarExtractArgs(archivePath, destDir), {
             windowsHide: true,
         })
         let stderr = ''
@@ -294,6 +332,8 @@ module.exports = {
     managedPythonExecutable,
     isHealthyManagedPython,
     tarExtractArgs,
+    tarCommand,
+    isAllowedDownloadUrl,
     sha256FileSync,
     sha256Buffer,
     downloadToFile,

@@ -821,7 +821,7 @@
       </div>
 
       <p class="note" id="hardware-note">
-        llama3.2:3b downloads automatically unless you pick a different tag. Next you will review each download and accept it before anything is installed.
+        llama3.2:3b (~2 GB) and, if needed, a checksum-verified CPython 3.12 from python-build-standalone (~25–30 MB) download automatically. Next you will review each download and accept it before anything is installed.
       </p>
 
       <label class="override" id="override-row">
@@ -1037,8 +1037,8 @@
       // Hosted and subscription modes remain a comment-only future extension.
       $('hardware-summary').textContent = check.level === 'ready' ? 'Ready' : check.level === 'warn' ? 'Review' : 'Blocked'
       $('hardware-note').textContent = check.mode === 'external'
-        ? 'Your local API supplies the AI model. Next you will review the remaining downloads (packages and capture stack) before anything installs.'
-        : 'Setup downloads llama3.2:3b (~2 GB) automatically for summaries. Capture uses accessibility + OCR and does not download a vision model. Next: review and accept each download. Change the model later in Settings.'
+        ? 'Your local API supplies the AI model. Next you will review remaining downloads (Python runtime if needed, packages, capture stack) before anything installs.'
+        : 'Setup downloads llama3.2:3b (~2 GB) for summaries and, if Python 3.11+ is missing, a checksum-verified CPython 3.12 from python-build-standalone (~25–30 MB). Capture uses accessibility + OCR and does not download a vision model. Next: review and accept each download. Change the model later in Settings.'
 
       const verdict = $('verdict')
       const continueBtn = $('btn-continue')
@@ -1088,6 +1088,13 @@
       const safeModel = escapeHtml(model)
       const items = [
         {
+          id: 'python-runtime',
+          title: 'Python runtime (CPython 3.12)',
+          why: 'Clippy downloads a relocatable CPython 3.12 from python-build-standalone (~25–30 MB, checksum-verified) so you do not need to install Python yourself. This download is skipped if Python 3.11+ is already on this machine.',
+          meta: 'One-time GitHub download (astral-sh/python-build-standalone) · SHA-256 verified · ~25–30 MB · skipped when Python 3.11+ is present',
+          required: true,
+        },
+        {
           id: 'packages',
           title: 'Python packages',
           why: 'Needed for the local API, screen capture, OCR, and privacy helpers. Installed into Clippy’s app-managed Python environment from requirements.txt.',
@@ -1096,7 +1103,7 @@
         },
       ]
       if (mode !== 'external') {
-        items.unshift({
+        items.splice(1, 0, {
           id: 'ollama',
           title: 'Ollama (local model runtime)',
           why: 'Runs the local AI model you chose entirely on this machine. Clippy installs Ollama only if it is missing; if you already have it, this step just verifies it.',

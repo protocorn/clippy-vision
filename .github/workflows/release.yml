@@ -140,7 +140,8 @@ jobs:
           #
           # Python is not bundled in the installer. CLIPPY_PYTHON points at
           # the runner interpreter that already has requirements.txt, so this
-          # test does not exercise the first-run CPython download.
+          # test does not exercise the first-run CPython download. That path
+          # is covered by the managed-python-venv job in tests.yml.
           #
           # Proves: packaged app spawns the backend and GET /health returns 200
           # once setup is already complete.
@@ -609,7 +610,8 @@ jobs:
           #
           # Python is not bundled in the AppImage. CLIPPY_PYTHON is the
           # runner interpreter that already has requirements.txt (same 3.12
-          # as tests.yml), so this test does not download CPython.
+          # as tests.yml), so this test does not download CPython. That
+          # path is covered by the managed-python-venv job in tests.yml.
           #
           # Proves: packaged AppImage spawns the backend and GET /health
           # returns 200 once setup is already complete.

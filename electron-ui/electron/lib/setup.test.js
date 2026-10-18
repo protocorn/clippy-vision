@@ -2,6 +2,7 @@
  * Setup preflight must require Python 3.11+.
  * Run with: node --test electron/lib/setup.test.js
  */
+const fs = require('node:fs')
 const path = require('path')
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
@@ -203,6 +204,14 @@ test('unsupported Python platform falls back to a python.org link', () => {
 test('default chat model is the small llama3.2:3b summary model', () => {
     assert.equal(DEFAULT_CHAT_MODEL, 'llama3.2:3b')
     assert.equal(DEFAULT_CHAT_MODEL_SIZE_LABEL, '~2 GB')
+})
+
+test('setup consent screen names the python-build-standalone download', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../../src/setup.html'), 'utf8')
+    assert.match(html, /python-build-standalone/)
+    assert.match(html, /checksum-verified/)
+    assert.match(html, /~25–30 MB/)
+    assert.match(html, /skipped if Python 3\.11\+ is already on this machine/)
 })
 
 test('darwin Ollama known paths include Homebrew prefixes', () => {
