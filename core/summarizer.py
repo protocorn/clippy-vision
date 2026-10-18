@@ -46,6 +46,9 @@ MAX_SESSION_DURATION_SECS = 30 * 60  # hard cap so backlog cannot form multi-hou
 MAX_PROMPT_CHARS = 7000
 PER_EVENT_SCREEN_CHARS = 1200
 DEDUP_LOOKBACK_SECS = 30 * 60
+# Soft-skip cooldown so a bad "not real activity" verdict can be retried.
+SKIP_RETRY_SECS = 3 * 60
+RETRYABLE_SKIP_REASONS = frozenset({"model skipped", "not real activity"})
 # Vision-refresh hot-loop guard: timeouts must not re-queue the same session every tick.
 REFRESH_FAIL_MARK_AFTER = 3
 REFRESH_BACKOFF_BASE_SECS = 120
@@ -75,24 +78,34 @@ SUMMARY_SCHEMA = {
         "entities"
     ],
 }
-SYSTEM_PROMPT = """You summarize computer work sessions from content-bearing events only
+SYSTEM_PROMPT = """You summarize computer activity from content-bearing events
 (pastes, clipboard copies, screen text, and window titles that name a real file, page, or project).
 
-You are also a filter. If the events are not a real activity — an idle desktop, a lock screen, a status bar, a bookmark bar, a file dialog, or a picture of some other program — do not summarize them.
+Reading, browsing, and research count as real activity. Documentation, wikis,
+product pages, release notes, Wikipedia, GitHub issues, and similar pages
+must be summarized — do not skip them.
+
+Skip only when there is no real page or document: an idle desktop, a lock
+screen, a status bar, a bookmark bar, a file dialog, or empty window chrome.
 
 Produce a JSON object with:
-- skip: true when this is not real work, otherwise false
-- summary: 2-4 sentence plain English description of the actual work when skip is false, otherwise ""
-- active_task: the concrete task when skip is false, otherwise ""
+- skip: true only for idle or empty chrome as above, otherwise false
+- summary: 2-4 sentence plain English description of what was on screen when skip is false, otherwise ""
+- active_task: the concrete task or page when skip is false, otherwise ""
 - entities: specific things from the content (file names, URLs, error messages, people, ticket IDs), otherwise []
 
 Rules:
 - Use past tense. Be specific.
 - When a window title names the application and a file, project, or page, mention both. A file titled report.md in a Notes workspace, open in an editor, is the editor and Notes, not only Notes.
-- Never treat typing speed, word counts, revision ratios, or bare app switches as the work itself.
-- Screen text is what was visible. Code, terminals, file lists, and pages made of short lines are the work. Describe that, not the fact that a screenshot was taken.
+- Never treat typing speed, word counts, revision ratios, or bare app switches as the activity itself.
+- Screen text is what was visible. Code, terminals, file lists, and pages made of short lines are the activity. Describe that, not the fact that a screenshot was taken.
 - Never describe an idle screen. Set skip to true instead.
 Respond ONLY with valid JSON, no other text."""
+RETRY_SYSTEM_PROMPT = (
+    SYSTEM_PROMPT
+    + "\n\nThis window already has readable page or document text. "
+    "Set skip to false and summarize what was on the page."
+)
 
 
 class SkipWindow:
@@ -353,6 +366,30 @@ def _skip_span(events: list[dict], reason: str) -> SkipWindow:
     return SkipWindow(start, end, reason)
 
 
+def skip_retry_expires_at(reason: str, now: float | None = None) -> float | None:
+    """Soft-skip expiry, or None when the skip should stay permanent."""
+    if reason not in RETRYABLE_SKIP_REASONS:
+        return None
+    return (now if now is not None else time.time()) + SKIP_RETRY_SECS
+
+
+def _parse_summary_response(content) -> dict:
+    return json.loads(content) if isinstance(content, str) else content
+
+
+def _request_summary(prompt: str, system: str) -> dict:
+    body = gateway.chat(
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+        model=MODEL, format=SUMMARY_SCHEMA, think=False,
+        options={"temperature": 0}, priority=Priority.BACKGROUND,
+        timeout=120,
+    )
+    return _parse_summary_response(body["message"]["content"])
+
+
 def summarize_window(events: list[dict], session_id: str) -> dict | SkipWindow | None:
     contentful = _contentful_events(events)
     if len(contentful) < MIN_EVENTS:
@@ -366,18 +403,9 @@ def summarize_window(events: list[dict], session_id: str) -> dict | SkipWindow |
     if prompt.strip() == "Events:" or len(prompt) < 40:
         return _skip_span(events, "not real activity")
 
-    body = gateway.chat(
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt}
-        ],
-        model=MODEL, format=SUMMARY_SCHEMA, think=False,
-        options={"temperature": 0}, priority=Priority.BACKGROUND,
-        timeout=120,
-    )
-
-    content = body["message"]["content"]
-    result = json.loads(content) if isinstance(content, str) else content
+    result = _request_summary(prompt, SYSTEM_PROMPT)
+    if _model_skipped(result) and _window_has_useful_screen_text(events):
+        result = _request_summary(prompt, RETRY_SYSTEM_PROMPT)
     if _model_skipped(result):
         return _skip_span(events, "model skipped")
 
@@ -535,12 +563,22 @@ def summarizer_loop():
                     f"/{contentful_n} contentful events "
                     f"(window from {source_session_id[:8]}, {len(session_events)} raw)"
                 )
-                summary = summarize_window(session_events, source_session_id)
+                try:
+                    summary = summarize_window(session_events, source_session_id)
+                except Exception as exc:
+                    # Leave the window in the queue so a failed call is retried.
+                    print(f"  [SUMMARIZER] Error summarizing window: {exc}")
+                    continue
                 if isinstance(summary, SkipWindow):
+                    expires_at = skip_retry_expires_at(summary.reason)
                     record_summarizer_skip(
-                        summary.window_start, summary.window_end, summary.reason
+                        summary.window_start,
+                        summary.window_end,
+                        summary.reason,
+                        expires_at=expires_at,
                     )
-                    print(f"  [SUMMARIZER] Skipped — {summary.reason}")
+                    retry_note = " (will retry)" if expires_at else ""
+                    print(f"  [SUMMARIZER] Skipped — {summary.reason}{retry_note}")
                 elif summary:
                     store_summary(summary, vision_enriched=False, embedding=summary.pop("embedding", None))
                     print(f"  [SUMMARIZER] Done — {summary['active_task']}")

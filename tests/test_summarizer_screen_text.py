@@ -3,6 +3,8 @@ import unittest
 
 from core.summarizer import (
     MAX_PROMPT_CHARS,
+    SKIP_RETRY_SECS,
+    SYSTEM_PROMPT,
     _activity_fingerprint,
     _awaiting_screen_text,
     _build_prompt,
@@ -11,6 +13,7 @@ from core.summarizer import (
     _screen_text_fingerprint,
     is_contentful_for_summary,
     is_useful_screen_text,
+    skip_retry_expires_at,
 )
 
 
@@ -157,6 +160,20 @@ class SummarizerScreenTextTests(unittest.TestCase):
             "skip": False,
             "summary": "The user edited supero_launchway_one_pager.md in Cursor.",
         }))
+
+    def test_prompt_treats_reading_and_research_as_activity(self):
+        text = SYSTEM_PROMPT.casefold()
+        self.assertIn("reading", text)
+        self.assertIn("wikis", text)
+        self.assertIn("release notes", text)
+        self.assertIn("skip only", text)
+        self.assertNotIn("picture of some other program", text)
+
+    def test_model_and_empty_skips_are_retryable(self):
+        now = 1_800_000_000.0
+        self.assertEqual(skip_retry_expires_at("model skipped", now), now + SKIP_RETRY_SECS)
+        self.assertEqual(skip_retry_expires_at("not real activity", now), now + SKIP_RETRY_SECS)
+        self.assertIsNone(skip_retry_expires_at("duplicate activity", now))
 
     def test_fingerprint_ignores_chrome_lines(self):
         left = "Real page title about embeddings\nMinimize\nClose"
