@@ -43,7 +43,7 @@ Ask in a connected MCP client, for example:
   <a href="https://github.com/protocorn/clippy-vision/releases/latest"><img src="https://img.shields.io/github/release-date/protocorn/clippy-vision?style=flat-square&label=latest%20release" alt="Latest release date" /></a>
 </p>
 
-The installers are unsigned: on Windows choose **More info → Run anyway**, and on macOS right-click → **Open** the first time. First run needs internet for dependencies and for the chat model you pick in setup (for example `qwen3:8b` is ~4.7 GB).
+The installers are unsigned: on Windows choose **More info → Run anyway**, and on macOS right-click → **Open** the first time. First run needs internet for an app-managed Python runtime (if you do not already have Python 3.11+), Python packages, and the default summary model (`llama3.2:3b`, about 2 GB). You can pick a different model later in Settings.
 
 **Trying Clippy?** [Share feedback (5 min)](https://docs.google.com/forms/d/e/1FAIpQLScqsgeWGLdUS_Ba0Me0LPQH8QRrwnIgGiGGHwLElVuqIpfcxQ/viewform).
 
@@ -55,15 +55,15 @@ The installers are unsigned: on Windows choose **More info → Run anyway**, and
 | System RAM | 8 GB | 16 GB |
 | Graphics memory | Not required. Integrated graphics or Apple unified memory is enough | 4 GB+ dedicated on Windows, or 16 GB unified memory on Apple silicon |
 | Free disk | 8 GB | 10 GB+ |
-| **Python runtime** | System Python 3.11+ on PATH (not bundled). Windows auto-install uses 3.11; CI uses 3.12 | **Python 3.12** |
+| **Python runtime** | No system Python required for the packaged app. Setup downloads a relocatable CPython 3.12 if needed. | **Python 3.12** (app-managed or `CLIPPY_PYTHON`) |
 
-**Python is not bundled** in the Windows installer or Linux AppImage. `requirements.txt` does not pin a Python version. The packaged app runs `CLIPPY_PYTHON` if set, otherwise `python3` (Linux/macOS) or `python` (Windows) from PATH (`electron-ui/electron/lib/paths.js`). CI unit tests and the release dry-run install Python 3.12. The setup wizard parses `python --version` and requires **Python 3.11+**.
+**Python is not inside the Windows installer or Linux AppImage** (keeps those artifacts around 100–130 MB). First-run setup downloads a relocatable [python-build-standalone](https://github.com/astral-sh/python-build-standalone) CPython 3.12 into app data and then creates the same app-managed venv as before. `requirements.txt` does not pin a Python version. Resolution order (`electron-ui/electron/lib/paths.js`): `CLIPPY_PYTHON` if set, else a healthy app venv, else the downloaded runtime, else `python3` / `python` from PATH. CI unit tests and the release dry-run still install Python 3.12 on the runner and set `CLIPPY_PYTHON`. The setup wizard parses `python --version` and requires **Python 3.11+**.
 
 **When Python is missing, the setup wizard (`electron-ui/electron/lib/setup.js`) does this:**
-- It parses `--version` on that interpreter and requires Python 3.11+. Preflight text says "Clippy needs Python 3.11+ on PATH." It then re-resolves known install locations before declaring failure.
-- **Windows:** tries `winget install Python.Python.3.11 --silent`. If winget is missing or the install cannot be found on PATH, it shows [python.org/downloads](https://www.python.org/downloads/) and probes `%LOCALAPPDATA%\Programs\Python\Python311\python.exe`.
-- **macOS:** tries Homebrew `brew install python` when Homebrew is present. If Homebrew is missing, it shows a manual-install message with the python.org link.
-- **Linux:** stays a manual install. The wizard does not try Homebrew or apt; it shows a python.org link.
+- It parses `--version` and requires Python 3.11+. A healthy system 3.11+ interpreter is used when present so the extra download is skipped.
+- If nothing suitable is found (or PATH Python is older than 3.11), it **downloads a relocatable CPython 3.12** (~25–30 MB) with a progress bar, verifies the SHA-256, and extracts it under app data (`python-runtime/`). No winget, Homebrew, or apt install of system Python.
+- Packages still go into the app-managed venv (`python-venv/`). Linux `python3-venv` / Ollama `zstd` error handling is unchanged.
+- If the download fails, Retry and an optional [python.org/downloads](https://www.python.org/downloads/) link. Advanced: set `CLIPPY_PYTHON`.
 
 **Advanced:** point Clippy at a specific interpreter before launch:
 
@@ -83,8 +83,8 @@ The setup wizard checks these numbers before installing. Below minimum → setup
 
 ## Quick Start
 
-1. Download and install Clippy.
-2. Complete the setup wizard and grant required permissions.
+1. Download and install Clippy. You do not need to install Python first.
+2. Complete the setup wizard (Ollama if missing, then Python packages). Setup downloads `llama3.2:3b` automatically for summaries; change it later in Settings.
 3. Leave Clippy running to build your activity history.
 4. Open **Settings → Connect apps**, connect your agent, and ask about your activity.
 
@@ -125,7 +125,7 @@ Full guide (retention defaults and detailed behavior): [docs/usage.md](docs/usag
 | Guide | Contents |
 |-------|----------|
 | [docs/usage.md](docs/usage.md) | Capture controls, privacy, accessibility, install troubleshooting |
-| [docs/linux.md](docs/linux.md) | Experimental Linux install and run (X11 only; AppImage, Python, capture tools) |
+| [docs/linux.md](docs/linux.md) | Experimental Linux install and run (X11 only; AppImage, first-run Python download, capture tools) |
 | [docs/mcp.md](docs/mcp.md) | Supported clients, Copy JSON, tool reference, access permissions |
 | [docs/mcp-clients/claude-desktop.md](docs/mcp-clients/claude-desktop.md) | Step-by-step Claude Desktop setup: config location, restart, verification |
 | [docs/mcp-clients/lm-studio.md](docs/mcp-clients/lm-studio.md) | Step-by-step LM Studio setup: MCP configuration, local model, test query, privacy |

@@ -52,10 +52,13 @@ def test_models():
         with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=10) as response:
             payload = json.loads(response.read())
         models = [str(item.get("name") or "") for item in payload.get("models", [])]
-        if any(name == "qwen3:8b" or name.startswith("qwen3:8b-") for name in models):
-            print("  ✓ qwen3:8b")
+        from core.chat_model import DEFAULT_CHAT_MODEL, get_chat_model
+
+        expected = get_chat_model() or DEFAULT_CHAT_MODEL
+        if any(name == expected or name.startswith(f"{expected}-") for name in models):
+            print(f"  ✓ {expected}")
             return True
-        print("  ✗ qwen3:8b is not installed")
+        print(f"  ✗ {expected} is not installed")
         return False
     except Exception as e:
         print(f"  ✗ Error checking models: {e}")

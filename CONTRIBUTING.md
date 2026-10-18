@@ -73,7 +73,7 @@ Clippy Vision supports Windows and macOS. Linux support is experimental: X11 cap
    npm install
    npm start
    ```
-   The setup wizard runs on first launch (Python, Ollama, models, `requirements.txt`).
+   The setup wizard runs on first launch (app Python runtime if needed, Ollama, `llama3.2:3b`, `requirements.txt`).
 4. Create a branch: `git checkout -b feature/your-feature-name`
 
 ### Building from source
@@ -119,7 +119,7 @@ When a change alters setup, connect, privacy, or the timeline, update the matchi
 
 ### Lower-spec machines
 
-Current `main` uses accessibility text + OCR for capture and does not download a vision model in setup. Only the chat text model is required by default (`qwen3:8b`). If that is still heavy on your machine, set a smaller chat model in the setup wizard.
+Current `main` uses accessibility text + OCR for capture and does not download a vision model in setup. The default chat text model is `llama3.2:3b` (~2 GB), downloaded automatically. Change it in Settings if you want a larger model such as `qwen3:8b`.
 
 ## Code Style
 
@@ -182,7 +182,7 @@ The Electron MCP path test is also part of CI. From the repository root, install
 ```bash
 cd electron-ui
 npm install
-node --test electron/lib/mcp.test.js
+node --test electron/lib/mcp.test.js electron/lib/setup.test.js electron/lib/managed-python.test.js
 ```
 
 The six pytest markers used by CI are:
@@ -218,7 +218,7 @@ The six pytest markers used by CI are:
 
 ### Medium Priority
 - [ ] Docker/containerization support
-- [x] Choose the local chat model in setup (any Ollama tag; `qwen3:8b` is only the suggestion)
+- [x] Default local chat model `llama3.2:3b` auto-downloaded in setup; any Ollama tag can be set in Settings
 - [ ] Web UI for database exploration
 - [ ] Import of an exported archive (export and clear already exist under Settings)
 - [x] Configurable retention for events, screenshots, and session summaries

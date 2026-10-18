@@ -2,7 +2,13 @@ const path = require('path')
 const fs   = require('fs')
 const os   = require('os')
 const http = require('http')
-const { pythonVenvDir, venvPythonPath, isHealthyVenv } = require('./paths')
+const { pythonVenvDir, venvPythonPath, isHealthyVenv, DEFAULT_CHAT_MODEL } = require('./paths')
+const {
+    archiveSpec,
+    pythonRuntimeDir,
+    managedPythonExecutable,
+    installManagedPython,
+} = require('./managed-python')
 
 const MIN_PYTHON_MAJOR = 3
 const MIN_PYTHON_MINOR = 11
@@ -36,12 +42,6 @@ const LINUX_OLLAMA_INSTALL_COMMAND = 'curl -fsSL https://ollama.com/install.sh |
 const LINUX_OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download/linux'
 const OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download'
 const PYTHON_DOWNLOAD_URL = 'https://www.python.org/downloads/'
-const WINGET_PYTHON_ARGS = [
-    'install', 'Python.Python.3.11',
-    '--silent',
-    '--accept-package-agreements',
-    '--accept-source-agreements',
-]
 const WINGET_OLLAMA_ARGS = [
     'install', 'Ollama.Ollama',
     '--silent',
@@ -133,61 +133,28 @@ function decideOllamaInstall({ platform, userConsent, brewAvailable, wingetAvail
     }
 }
 
-function decidePythonInstall({ platform, brewAvailable, wingetAvailable } = {}) {
-    if (platform === 'linux') {
+function decidePythonInstall({ platform, arch } = {}) {
+    const spec = archiveSpec(platform, arch)
+    if (spec) {
         return {
-            action: 'linux-manual',
-            runInstall: false,
+            action: 'standalone',
+            runInstall: true,
             command: null,
             args: null,
-            downloadUrl: PYTHON_DOWNLOAD_URL,
-            instructions: `Python 3.11+ was not found. Install it from ${PYTHON_DOWNLOAD_URL}, then retry. The wizard does not install Python on Linux.`,
-        }
-    }
-    if (platform === 'darwin') {
-        if (brewAvailable === false) {
-            return {
-                action: 'manual',
-                runInstall: false,
-                command: null,
-                args: null,
-                downloadUrl: PYTHON_DOWNLOAD_URL,
-                instructions: `Python 3.11+ was not found and Homebrew is not installed. Install it from ${PYTHON_DOWNLOAD_URL}, then retry.`,
-            }
-        }
-        return {
-            action: 'homebrew',
-            runInstall: true,
-            command: 'brew',
-            args: ['install', 'python'],
-            downloadUrl: PYTHON_DOWNLOAD_URL,
-        }
-    }
-    if (platform === 'win32') {
-        if (wingetAvailable === false) {
-            return {
-                action: 'manual',
-                runInstall: false,
-                command: null,
-                args: null,
-                downloadUrl: PYTHON_DOWNLOAD_URL,
-                instructions: `Python 3.11+ was not found and winget is not available. Install it from ${PYTHON_DOWNLOAD_URL}, then retry.`,
-            }
-        }
-        return {
-            action: 'winget',
-            runInstall: true,
-            command: 'winget',
-            args: WINGET_PYTHON_ARGS.slice(),
-            downloadUrl: PYTHON_DOWNLOAD_URL,
+            downloadUrl: spec.url,
+            filename: spec.filename,
+            sha256: spec.sha256,
+            version: spec.version,
+            instructions: `Download a relocatable CPython ${spec.version} runtime (python-build-standalone) so Clippy does not need a system Python.`,
         }
     }
     return {
-        action: 'unsupported',
+        action: 'manual',
         runInstall: false,
         command: null,
         args: null,
         downloadUrl: PYTHON_DOWNLOAD_URL,
+        instructions: `No relocatable Python build is available for ${platform}-${arch}. Install Python 3.11+ from ${PYTHON_DOWNLOAD_URL}, or set CLIPPY_PYTHON, then retry.`,
     }
 }
 
@@ -461,8 +428,9 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
     }
 
     function requiredChatModels() {
-        // Only the local AI model the user chose in setup — never force a default pull.
-        const chatModel = String(readLLMConfig().chat_model || '').trim()
+        // Pull the configured chat model (defaults to llama3.2:3b). Do not
+        // force a second model if the user picked a different tag.
+        const chatModel = String(readLLMConfig().chat_model || DEFAULT_CHAT_MODEL).trim()
         return chatModel ? [chatModel] : []
     }
 
@@ -513,7 +481,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         const copy = {
             python: {
                 title: 'Python is missing',
-                detail: 'Clippy needs Python 3.11+ on PATH. Install it, then continue.',
+                detail: 'Clippy needs a Python 3.11+ runtime. Retry setup to download one, or set CLIPPY_PYTHON.',
             },
             ollama: {
                 title: 'Ollama is not installed',
@@ -613,7 +581,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
 
     async function verifyWithKnownPaths(command, extraCandidates, args = ['--version']) {
         let result = await runCommand(command, args)
-        if (result.code === 0) return result
+        if (result.code === 0) return { ...result, command }
         for (const candidate of extraCandidates || []) {
             if (!candidate) continue
             try {
@@ -621,9 +589,9 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
             } catch (_) { continue }
             addDirToPath(path.dirname(candidate))
             result = await runCommand(candidate, args)
-            if (result.code === 0) return result
+            if (result.code === 0) return { ...result, command: candidate }
         }
-        return result
+        return { ...result, command }
     }
 
     function runtimeOllamaPaths() {
@@ -635,11 +603,27 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
     }
 
     function runtimePythonPaths() {
-        return knownPythonInstallPaths({
-            platform: process.platform,
-            env: process.env,
-            home: os.homedir(),
-        })
+        const managed = managedPythonExecutable(pythonRuntimeDir(USER_DATA), process.platform)
+        return [
+            managed,
+            ...knownPythonInstallPaths({
+                platform: process.platform,
+                env: process.env,
+                home: os.homedir(),
+            }),
+        ]
+    }
+
+    function adoptPython(command) {
+        if (!command) return
+        paths.SYSTEM_PYTHON_COMMAND = command
+        if (!process.env.CLIPPY_PYTHON) {
+            const dir = venvDir()
+            if (!isHealthyVenv(dir)) paths.PYTHON_COMMAND = command
+        }
+        try {
+            if (path.isAbsolute(command)) addDirToPath(path.dirname(command))
+        } catch (_) { /* ignore */ }
     }
 
     async function verifyOllamaAfterInstall() {
@@ -656,9 +640,10 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         return verifyWithKnownPaths(systemPythonCommand(), extra)
     }
 
-    function acceptPythonVersion(raw) {
+    function acceptPythonVersion(raw, command) {
         const check = evaluatePythonVersion(raw)
         if (check.ok) {
+            if (command) adoptPython(command)
             const label = String(raw || '').trim() || `Python ${check.version}`
             log(label, 'ok')
             markDone('python', label)
@@ -669,85 +654,88 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         return false
     }
 
+    async function downloadStandalonePython() {
+        const spec = archiveSpec(process.platform, process.arch)
+        if (!spec) return null
+
+        log(`Python 3.11+ was not found. Downloading CPython ${spec.version} (relocatable, ~${Math.round(spec.approxBytes / 1_000_000)} MB)...`, 'info')
+        stepUpdate('python', 'running', `Downloading Python ${spec.version}...`)
+        log(`> ${spec.url}`, 'dim')
+        stepProgress('python', 0)
+
+        const exe = await installManagedPython({
+            userData: USER_DATA,
+            platform: process.platform,
+            arch: process.arch,
+            onProgress: ({ received, total }) => {
+                if (total > 0) {
+                    const pct = Math.min(99, Math.round((received / total) * 100))
+                    stepProgress('python', pct)
+                    const receivedMb = Math.round(received / 1_000_000)
+                    const totalMb = Math.round(total / 1_000_000)
+                    stepUpdate('python', 'running', `Downloading Python ${spec.version}: ${pct}% (${receivedMb} / ${totalMb} MB)`)
+                } else {
+                    stepProgress('python', -1)
+                }
+            },
+        })
+        stepProgress('python', 100)
+        log(`App Python runtime ready at ${exe}`, 'ok')
+        return exe
+    }
+
     async function stepCheckPython() {
-        // Windows installs a missing Python with winget. macOS uses Homebrew
-        // when Homebrew is already installed. Linux stays a manual install.
+        // Prefer CLIPPY_PYTHON, then an existing app-managed runtime, then a
+        // system 3.11+ interpreter. If none of those work, download a
+        // relocatable CPython so packaged installs do not need system Python.
         stepUpdate('python', 'running', 'Checking for Python 3.11+...')
+        stepProgress('python', -1)
         log('> python --version', 'dim')
 
         const found = await verifyWithKnownPaths(systemPythonCommand(), runtimePythonPaths())
         const version = found.stdout || found.stderr
 
         if (found.code === 0 && version) {
-            if (acceptPythonVersion(version)) return
-            throw new Error('python-version-required')
-        }
-
-        const plan = decidePythonInstall({
-            platform: process.platform,
-            brewAvailable: process.platform === 'darwin' ? await brewIsAvailable() : undefined,
-            wingetAvailable: process.platform === 'win32' ? await wingetIsAvailable() : undefined,
-        })
-        const invocation = installCommandToRun(plan)
-
-        if (!invocation) {
-            log(plan.instructions || 'Python 3.11+ was not found.', 'err')
-            if (plan.downloadUrl) log(`Download: ${plan.downloadUrl}`, 'info')
-            throw setupManualError(
-                'python-install-required',
-                plan.instructions || `Install Python 3.11+ from ${PYTHON_DOWNLOAD_URL}, then retry.`,
-                { downloadUrl: plan.downloadUrl || PYTHON_DOWNLOAD_URL },
-            )
-        }
-
-        if (plan.action === 'homebrew') {
-            log('Python not found. Trying Homebrew...', 'info')
-            stepUpdate('python', 'running', 'Installing Python via Homebrew...')
-            const installed = await installWithBrew('python')
-            if (installed) {
-                const verify = await verifyPythonAfterInstall()
-                const verifiedVersion = verify.stdout || verify.stderr
-                if (verify.code === 0 && verifiedVersion) {
-                    if (acceptPythonVersion(verifiedVersion)) return
-                    throw new Error('python-version-required')
-                }
+            const check = evaluatePythonVersion(version)
+            if (check.ok) {
+                if (acceptPythonVersion(version, found.command)) return
+            } else if (process.env.CLIPPY_PYTHON) {
+                if (acceptPythonVersion(version, found.command)) return
+                throw new Error('python-version-required')
+            } else {
+                log(`${check.message} Downloading an app-managed Python 3.12 instead.`, 'info')
             }
-            log(`Python was not found on PATH. Install Python 3.11+ from ${PYTHON_DOWNLOAD_URL}, then retry.`, 'err')
+        }
+
+        try {
+            const exe = await downloadStandalonePython()
+            if (exe) {
+                const verify = await runCommand(exe, ['--version'])
+                const verifiedVersion = verify.stdout || verify.stderr
+                if (verify.code === 0 && verifiedVersion && acceptPythonVersion(verifiedVersion, exe)) return
+                throw setupManualError(
+                    'python-standalone-invalid',
+                    'Downloaded Python runtime but could not run it. Retry setup, or set CLIPPY_PYTHON to a Python 3.11+ interpreter.',
+                    { downloadUrl: PYTHON_DOWNLOAD_URL },
+                )
+            }
+        } catch (err) {
+            if (err && err.stepSub) throw err
+            log(err && err.message ? err.message : String(err), 'err')
             throw setupManualError(
-                'python-install-required',
-                `Install Python 3.11+ from ${PYTHON_DOWNLOAD_URL}, then retry.`,
+                'python-standalone-failed',
+                `${err && err.message ? err.message : 'Could not download a Python runtime.'} Retry setup, or set CLIPPY_PYTHON to a Python 3.11+ interpreter.`,
                 { downloadUrl: PYTHON_DOWNLOAD_URL },
             )
         }
 
-        log('Python not found. Installing via winget...', 'info')
-        stepUpdate('python', 'running', 'Installing Python 3.11 via winget...')
-        log('> winget install Python.Python.3.11 --silent', 'dim')
-
-        const install = await runCommand(invocation.command, invocation.args)
-
-        if (install.code !== 0) {
-            log(install.stderr || 'winget failed', 'err')
-            log(`Install Python 3.11+ from ${PYTHON_DOWNLOAD_URL}, then retry.`, 'err')
-            throw setupManualError(
-                'python-install-failed',
-                `Could not install Python via winget. Install it from ${PYTHON_DOWNLOAD_URL}, then retry.`,
-                { downloadUrl: PYTHON_DOWNLOAD_URL },
-            )
-        }
-
-        const verify = await verifyPythonAfterInstall()
-        if (verify.code !== 0) {
-            throw setupManualError(
-                'python-path',
-                `Python installed but is not on PATH. Install location was probed; if it still fails, install from ${PYTHON_DOWNLOAD_URL} and retry.`,
-                { downloadUrl: PYTHON_DOWNLOAD_URL },
-            )
-        }
-
-        const verifiedVersion = verify.stdout || verify.stderr || 'Python installed.'
-        if (acceptPythonVersion(verifiedVersion)) return
-        throw new Error('python-version-required')
+        const plan = decidePythonInstall({ platform: process.platform, arch: process.arch })
+        log(plan.instructions || 'Python 3.11+ was not found.', 'err')
+        throw setupManualError(
+            'python-install-required',
+            plan.instructions || `Install Python 3.11+ from ${PYTHON_DOWNLOAD_URL}, then retry.`,
+            { downloadUrl: plan.downloadUrl || PYTHON_DOWNLOAD_URL },
+        )
     }
 
     async function confirmLinuxOllamaInstall() {
@@ -1165,7 +1153,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
             log(`HF model download error: ${error.message}`, 'err')
         }
 
-        const chatModel = String(readLLMConfig().chat_model || '').trim()
+        const chatModel = String(readLLMConfig().chat_model || DEFAULT_CHAT_MODEL).trim()
         if (!chatModel) {
             stepProgress('models', 100)
             log('No local AI model selected — skipping Ollama pull.', 'info')

@@ -5,11 +5,11 @@
 Download `ClippyVision-Windows-Setup-{version}.exe` on Windows, or `ClippyVision-macOS-arm64-{version}.dmg` (Apple Silicon) / `ClippyVision-macOS-x64-{version}.dmg` (Intel) on macOS, from the [latest release](https://github.com/protocorn/clippy-vision/releases/latest).
 
 The installer's built-in setup wizard will:
-- Check for Python. Windows installs it with winget when it is missing (or links [python.org](https://www.python.org/downloads/) if winget is not available). macOS installs it with Homebrew when Homebrew is already installed; otherwise it links python.org. Linux is a manual Python install.
+- Check for Python 3.11+. If none is on PATH, it downloads a relocatable CPython 3.12 into app data (no system Python install). `CLIPPY_PYTHON` still overrides.
 - Check for Ollama the same way on Windows and macOS. On Linux it shows the official install command and can run it only with your consent.
 - Start the Ollama service
-- Install all Python packages from `requirements.txt`
-- Download the text model you picked in setup (the suggested default is `qwen3:8b`)
+- Install all Python packages from `requirements.txt` into the app-managed venv
+- Download `llama3.2:3b` automatically for session summaries (about 2 GB), with progress. Change the model later in Settings.
 - Warm that text model into memory
 
 After setup completes, click **Launch**. Closing the window leaves the tray icon running. Launch at login is not turned on for you.
@@ -25,7 +25,7 @@ The home screen is the timeline. Open a session to see the events Clippy stored.
 
 Ask your questions in the connected app. Clippy does not answer them inside its own window.
 
-**Requirements:** Windows 10/11 (64-bit) or macOS 12+. Internet is needed on first run for the text model. Screen capture uses accessibility APIs and local OCR. It does not load a vision model.
+**Requirements:** Windows 10/11 (64-bit) or macOS 12+. Internet is needed on first run for Python packages and the default text model (`llama3.2:3b`, about 2 GB). You do not need to install Python yourself. Screen capture uses accessibility APIs and local OCR. It does not load a vision model.
 
 On macOS, allow Screen Recording and Accessibility when Clippy asks. Both are required for screenshots, window titles, and password-field painting. If a prompt is dismissed, turn them on in System Settings → Privacy & Security.
 
@@ -50,7 +50,7 @@ The setup wizard runs automatically on first launch.
 
 | Model | Size | Purpose |
 |-------|------|---------|
-| The Ollama model you pick (suggested `qwen3:8b`) | about 4.7 GB for `qwen3:8b` | Classification, session summaries, and long-term memory |
+| Default Ollama model `llama3.2:3b` (changeable in Settings) | about 2 GB | Classification, session summaries, and long-term memory |
 | `all-MiniLM-L6-v2` | about 90 MB, downloaded from Hugging Face on first run | Optional local semantic retrieval. It is not bundled in the installer |
 
 Pipeline details: [docs/architecture.md](docs/architecture.md).

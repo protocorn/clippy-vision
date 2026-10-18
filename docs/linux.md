@@ -14,7 +14,7 @@ Day-to-day capture and privacy: [usage.md](usage.md). Connecting an agent: [mcp.
 | Architecture | Linux AppImage is **x86_64 only** (`electron-ui/package.json` `build.linux.artifactName`: `ClippyVision-Linux-x86_64-${version}.AppImage`; #33 pinned that name). |
 | Recommended hardware | Same wizard minima as Windows: 8 GB RAM and 8 GB free disk to continue; 16 GB RAM and 10 GB disk recommended. Below minimum blocks setup. Between minimum and recommended, you can continue with a warning. Linux with no discrete NVIDIA GPU (nvidia-smi reports 0) grades VRAM from system RAM (`hardware.js`). |
 | **CI (pytest)** | Ubuntu runner, Python 3.12. Platform-filtered unit tests, plus an Xvfb screenshot test: `xvfb-run -a pytest tests/test_linux_screenshot_capture.py -v -m "linux" -k "xvfb"` (`.github/workflows/tests.yml`). That Xvfb job installs `xvfb`, `x11-xserver-utils`, and `xterm` only. |
-| **CI (AppImage)** | Unsigned AppImage built with `npm run dist:linux`. Smoke check: `chmod +x`, then `./…AppImage --appimage-extract`, then looks for `squashfs-root/clippy-vision` or `squashfs-root/AppRun`. Launch test: Xvfb `:99`, `libfuse2` installed, setup pre-seeded, Ollama stubbed, `CLIPPY_PYTHON` pointed at the runner’s Python 3.12. Proves the packaged app can spawn the backend and `GET /health` returns 200. **Does not prove** the setup wizard, Ollama, a real model, or a real desktop (`.github/workflows/release.yml`). |
+| **CI (AppImage)** | Unsigned AppImage built with `npm run dist:linux`. Smoke check: `chmod +x`, then `./…AppImage --appimage-extract`, then looks for `squashfs-root/clippy-vision` or `squashfs-root/AppRun`. Launch test: Xvfb `:99`, `libfuse2` installed, setup pre-seeded, Ollama stubbed, `CLIPPY_PYTHON` pointed at the runner’s Python 3.12 (skips the first-run CPython download). Proves the packaged app can spawn the backend and `GET /health` returns 200. **Does not prove** the setup wizard, Ollama, a real model, or a real desktop (`.github/workflows/release.yml`). |
 | **Real desktop** | Nobody has run Linux capture, wizard, or AppImage on a physical desktop. Treat every capture path below as **not verified yet** on GNOME, KDE, Sway, or any other compositor. |
 
 Other distros and ARM are **not verified yet**. Wayland is **not supported** (log in to X11).
@@ -23,7 +23,7 @@ Other distros and ARM are **not verified yet**. Wayland is **not supported** (lo
 
 ## Prerequisites
 
-Install these **before** first launch. The Linux setup wizard does not silently install them.
+Install Ollama **before** first launch if you want to skip the wizard prompt. The Linux setup wizard does not silently install Ollama or system packages.
 
 1. **Install Ollama first.** Official command:
 
@@ -32,7 +32,7 @@ Install these **before** first launch. The Linux setup wizard does not silently 
    ```
 
    Download page: [https://ollama.com/download/linux](https://ollama.com/download/linux). If Ollama is missing, the wizard shows that command and a link. It can optionally run the official installer only after you click **Install** and confirm it needs sudo/admin rights. It never tries Homebrew on Linux.
-2. **Python 3.11+** on PATH (next section). Python is not inside the AppImage.
+2. **Python is not required on PATH.** The AppImage does not contain an interpreter (keeps the artifact smaller). First-run setup downloads a relocatable CPython 3.12 into `~/.config/Clippy Vision/python-runtime/` if no Python 3.11+ is found. Set `CLIPPY_PYTHON` to override.
 
 ---
 
@@ -63,20 +63,22 @@ If `libfuse2` is missing, you can still run the AppImage without FUSE:
 ./ClippyVision-Linux-x86_64-2.1.0.AppImage --appimage-extract-and-run
 ```
 
-Python is **not** inside the AppImage. Install Ollama and Python 3.11+ first (see Prerequisites), then run the AppImage so the first-run wizard can find them.
+Python is **not** inside the AppImage. Install Ollama first (see Prerequisites), then run the AppImage. The first-run wizard downloads a Python 3.12 runtime if needed and pulls `llama3.2:3b` for summaries.
 
 Packaged Linux `userData` is `~/.config/Clippy Vision` (Electron `productName`; confirmed in the release workflow). First-run setup writes `setup_complete.json` there. Until that file exists, the backend does not start.
 
 ---
 
-## Python 3.11+ (not bundled)
+## Python runtime (downloaded on first run)
 
-`requirements.txt` does not pin a Python version. Current source (`electron-ui/electron/lib/setup.js`) parses `python --version` and requires **Python 3.11+**. Preflight copy: “Clippy needs Python 3.11+ on PATH.”
+`requirements.txt` does not pin a Python version. Current source (`electron-ui/electron/lib/setup.js`) parses `python --version` and requires **Python 3.11+**. Preflight copy: “Clippy needs a Python 3.11+ runtime. Retry setup to download one, or set CLIPPY_PYTHON.”
 
 The packaged app (`electron-ui/electron/lib/paths.js`) runs, in order:
 
 1. `CLIPPY_PYTHON` if that environment variable is set
-2. otherwise `python3` from `PATH` on Linux
+2. a healthy app venv at `~/.config/Clippy Vision/python-venv/`
+3. a downloaded relocatable CPython at `~/.config/Clippy Vision/python-runtime/`
+4. otherwise `python3` from `PATH` on Linux
 
 There are no extra PATH hints on Linux (those exist only on macOS).
 
@@ -86,11 +88,11 @@ To point Clippy at a specific interpreter **before** launch:
 export CLIPPY_PYTHON=/path/to/venv/bin/python3
 ```
 
-**The wizard does not install Python on Linux.** If `python3` is missing, it does **not** try Homebrew. It shows a clear manual-install message with a link to [https://www.python.org/downloads/](https://www.python.org/downloads/). Retry after you install Python 3.11+ and put it on PATH. Comment in `setup.js`: “Linux stays a manual install.”
+**The wizard does not apt-install a system Python.** If `python3` is missing or older than 3.11, it downloads a relocatable CPython 3.12 (python-build-standalone, SHA-256 checked, ~30 MB) into app data and creates the app-managed venv from that. It does **not** try Homebrew. If the download fails, Retry; a [python.org/downloads](https://www.python.org/downloads/) link remains as a last resort.
 
-CI unit tests and the AppImage dry-run use **Python 3.12**.
+CI unit tests and the AppImage dry-run use **Python 3.12** via `CLIPPY_PYTHON`.
 
-**Python 3.11+ is required.** The setup wizard parses `python --version` and rejects anything below 3.11. Python is not bundled. Do not treat 3.9 as enough ([CHANGELOG.md](../CHANGELOG.md) / [release notes](release-notes/v2.1.0.md)).
+**Python 3.11+ is required.** The setup wizard parses `python --version` and rejects anything below 3.11 as a *system* interpreter, then falls back to the downloaded 3.12 runtime. Do not treat 3.9 as enough ([CHANGELOG.md](../CHANGELOG.md) / [release notes](release-notes/v2.1.0.md)).
 
 ---
 
@@ -159,14 +161,14 @@ On first launch the setup wizard runs (`electron-ui/electron/lib/setup.js`, `ele
 
 When Ollama is the managed local runtime (default base URL `http://127.0.0.1:11434`):
 
-1. Python 3.11+ on PATH (see above)
+1. Python 3.11+ (PATH, `CLIPPY_PYTHON`, or a downloaded relocatable CPython 3.12 — see above)
 2. Ollama on PATH — `ollama --version`. If missing, Linux does **not** try Homebrew. The wizard shows the official command (`curl -fsSL https://ollama.com/install.sh | sh`) and https://ollama.com/download/linux. An **Install** button can run that script only after you confirm it needs sudo/admin rights (`pkexec`, or a visible terminal if `pkexec` is missing). After it runs, the wizard re-checks that Ollama is reachable and fails with a clear message if it is not. The wizard does **not** apt-install Ollama and never runs the installer silently.
 3. Start/configure Ollama (`ollama serve` / wait until reachable)
-4. `pip install -r requirements.txt` into the interpreter from `CLIPPY_PYTHON` / `python3`
-5. Download MiniLM embeddings (`python -m core.model_download`) and pull **only** the chat model you selected (`python -m core.ollama_pull <model>`)
+4. `pip install -r requirements.txt` into the app-managed venv
+5. Download MiniLM embeddings (`python -m core.model_download`) and auto-pull the default chat model `llama3.2:3b` (or another tag you typed) (`python -m core.ollama_pull <model>`), with progress
 6. Warmup and write `setup_complete.json`
 
-Consent copy in the wizard: Ollama is installed only when missing, via “winget on Windows, Homebrew on macOS, official Linux script with consent, or ollama.com”. Suggested chat models in the wizard include `qwen3:8b` (hint: balanced; README says ~4.7 GB). Capture uses accessibility + OCR; no vision model is downloaded.
+Consent copy in the wizard: Ollama is installed only when missing, via “winget on Windows, Homebrew on macOS, official Linux script with consent, or ollama.com”. The default chat model is `llama3.2:3b` (~2 GB), downloaded automatically for session summaries. Change it later in Settings. Capture uses accessibility + OCR; no vision model is downloaded.
 
 You can point at a specific `ollama` binary with `CLIPPY_OLLAMA` (`paths.js`). That override is **not verified yet** on a Linux desktop.
 
@@ -204,6 +206,8 @@ Linux AppImage from a checkout: `cd electron-ui` then `npm run dist:linux` (same
 | Item | Path |
 |------|------|
 | App data (DB, screenshots, `llm_config.json`) | `~/.config/Clippy Vision/data/` |
+| App Python runtime | `~/.config/Clippy Vision/python-runtime/` |
+| App Python venv | `~/.config/Clippy Vision/python-venv/` |
 | Setup flag | `~/.config/Clippy Vision/setup_complete.json` |
 | API port | `~/.config/Clippy Vision/api_process.json` |
 
@@ -223,7 +227,7 @@ That snippet is the macOS check from `docs/usage.md` with the Linux `userData` p
 
 | You see | Meaning | What to do (from the code / existing docs) |
 |---------|---------|--------------------------------------------|
-| Wizard: “Python is missing” / python.org link | No usable 3.11+ interpreter | Install Python 3.11+ from [python.org/downloads](https://www.python.org/downloads/). Set `CLIPPY_PYTHON` if it is not `python3` on PATH. The wizard will not `apt-get install` Python. |
+| Wizard: “Python is missing” / python.org link | Could not download or run the app Python runtime | Retry setup (needs internet). Or set `CLIPPY_PYTHON` to a Python 3.11+ interpreter. The wizard will not `apt-get install` Python. |
 | Wizard: “Ollama is not installed” / install from ollama.com | `ollama` not on PATH | Install with `curl -fsSL https://ollama.com/install.sh \| sh`, or click **Install** in the wizard (needs sudo). See [https://ollama.com/download/linux](https://ollama.com/download/linux) and [usage.md](usage.md#ollama-not-found-after-install). |
 | `[platform_support] xdotool not found; window metadata will be limited` | No `xdotool` | Install `xdotool`. Titles and focused-window crop stay limited until it is on PATH. |
 | `[platform_support] Linux idle detection unavailable (xprintidle or xdotool not found)` | Neither idle helper found | Install `xprintidle` and/or `xdotool`. |
