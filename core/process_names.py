@@ -1,8 +1,9 @@
-"""One name for an app on Windows and macOS.
+"""One name for an app on Windows, macOS, and Linux.
 
 Windows reports a file name (``chrome.exe``). macOS reports the application
-name (``Google Chrome``). Settings store whichever the user typed, so both
-have to mean the same app.
+name (``Google Chrome``). Linux reports the executable (``chrome``,
+``chromium``, ``google-chrome-stable``). Settings store whichever the user
+typed, so all of those have to mean the same app.
 """
 
 from __future__ import annotations
@@ -11,11 +12,16 @@ from __future__ import annotations
 _ALIASES = {
     "chrome": "chrome",
     "google chrome": "chrome",
+    "google-chrome": "chrome",
+    "google-chrome-stable": "chrome",
+    "chromium": "chromium",
+    "chromium-browser": "chromium",
     "msedge": "edge",
     "microsoft edge": "edge",
     "brave": "brave",
     "brave browser": "brave",
     "firefox": "firefox",
+    "firefox-bin": "firefox",
     "mozilla firefox": "firefox",
     "opera": "opera",
     "vivaldi": "vivaldi",

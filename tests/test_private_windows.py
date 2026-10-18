@@ -239,6 +239,9 @@ class VivaldiPrivateNameTests(unittest.TestCase):
 class ProcessNameTests(unittest.TestCase):
     def test_windows_file_and_mac_app_are_the_same(self):
         self.assertEqual(process_key("chrome.exe"), process_key("Google Chrome"))
+        self.assertEqual(process_key("google-chrome-stable"), process_key("chrome"))
+        self.assertEqual(process_key("chromium-browser"), process_key("chromium"))
+        self.assertEqual(process_key("firefox-bin"), process_key("firefox"))
         self.assertEqual(process_key("msedge.exe"), process_key("Microsoft Edge"))
         self.assertEqual(process_key("brave.exe"), process_key("Brave Browser"))
         self.assertEqual(process_key("firefox.exe"), process_key("Mozilla Firefox"))
