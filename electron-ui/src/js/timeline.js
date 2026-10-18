@@ -1,6 +1,7 @@
 import { timelineView, timelineBody, timelineList, timelineLoadMore, timelineDetailWrap, timelineDetailScroll, timelineDetailContent, TIMELINE_PAGE_SIZE, store } from './dom.js'
 import { showView, startOfDay, formatConversationTime } from './utils.js'
 import { confirmDialog } from './dialogs.js'
+import { refreshFirstAnswerPrompt } from './first-answer.js'
 
 const shotUrls = []
 const groupToggle = new Map()
@@ -510,6 +511,7 @@ export async function loadTimelineSessions({ reset = false } = {}) {
    : store.timelineSessions.concat(data.sessions || [])
   store.timelineOffset = store.timelineSessions.length
   renderTimelineList()
+  await refreshFirstAnswerPrompt({ searching: Boolean(store.timelineQuery) })
  } catch (error) {
   if (reset) {
    timelineList.innerHTML = `<div class="timeline-error">Failed to load sessions: ${error.message}</div>`

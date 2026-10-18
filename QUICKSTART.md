@@ -23,7 +23,7 @@ The home screen is the timeline. Open a session to see the events Clippy stored.
 - Connecting lets that app call Clippy's tools. A cloud model receives those replies. Disconnect the app to stop.
 - **Settings** is also where you black out apps, turn private-browsing capture off, and change how long events, screenshots, and summaries are kept.
 
-Ask your questions in the connected app. Clippy does not answer them inside its own window.
+Ask your questions in the connected app. Clippy does not answer them inside its own window. After the first session summary (or about 30 minutes of capture), the timeline offers one copyable question you can paste there. Dismiss hides it for good.
 
 **Requirements:** Windows 10/11 (64-bit) or macOS 12+. Internet is needed on first run for the text model. Screen capture uses accessibility APIs and local OCR. It does not load a vision model.
 
