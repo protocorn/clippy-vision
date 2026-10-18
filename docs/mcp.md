@@ -30,7 +30,7 @@ Open **Settings → Connect apps**.
 
 ### One-click clients
 
-**Cursor**, **Claude Desktop**, and **VS Code** have a Connect button. It writes the config on this machine.
+**Cursor**, **Claude Desktop**, and **VS Code** have a Connect button. It writes the config on this machine. Linux AppImage builds copy the MCP Python runtime into `userData` and refresh those configs on startup so they do not keep a `/tmp/.mount_*` path that dies after Clippy restarts. Windows and source-tree launches keep their existing resource paths.
 
 Step-by-step client guides:
 

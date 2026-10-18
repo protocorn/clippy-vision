@@ -143,8 +143,10 @@ class TestLinuxMetadata(unittest.TestCase):
             del sys.modules["core.platform_support"]
         
         from core import platform_support
-        
-        idle_seconds = platform_support.get_idle_seconds()
+        platform_support._linux_idle_warned = False
+
+        with patch.object(platform_support, "_linux_xscreensaver_idle_seconds", return_value=None):
+            idle_seconds = platform_support.get_idle_seconds()
         
         # Should return None, not crash
         assert idle_seconds is None
@@ -155,18 +157,70 @@ class TestLinuxMetadata(unittest.TestCase):
     @patch("core.platform_support._run_command")
     def test_xprintidle_returns_idle_time(self, mock_run_cmd, mock_which):
         """When xprintidle is available, idle time is returned."""
-        mock_which.return_value = "/usr/bin/xprintidle"
+        mock_which.side_effect = lambda cmd: "/usr/bin/xprintidle" if cmd == "xprintidle" else None
         mock_run_cmd.return_value = "5000"  # 5000 milliseconds
         
         if "core.platform_support" in sys.modules:
             del sys.modules["core.platform_support"]
         
         from core import platform_support
-        
-        idle_seconds = platform_support.get_idle_seconds()
+
+        with patch.object(platform_support, "_linux_xscreensaver_idle_seconds") as mock_xss:
+            idle_seconds = platform_support.get_idle_seconds()
+            mock_xss.assert_not_called()
         
         # Should return 5.0 seconds
         assert idle_seconds == 5.0
+
+    @pytest.mark.linux
+    @patch("sys.platform", "linux")
+    @patch("shutil.which")
+    @patch("core.platform_support._run_command")
+    def test_xscreensaver_fallback_when_xprintidle_missing(self, mock_run_cmd, mock_which):
+        """XScreenSaver is used when xprintidle is missing; xdotool get_idle_time is not."""
+        mock_which.side_effect = lambda cmd: "/usr/bin/xdotool" if cmd == "xdotool" else None
+        mock_run_cmd.return_value = ""
+
+        if "core.platform_support" in sys.modules:
+            del sys.modules["core.platform_support"]
+
+        from core import platform_support
+
+        with patch.object(platform_support, "_linux_xscreensaver_idle_seconds", return_value=12.5):
+            idle_seconds = platform_support.get_idle_seconds()
+
+        assert idle_seconds == 12.5
+        for call in mock_run_cmd.call_args_list:
+            args = call.args[0] if call.args else []
+            assert "get_idle_time" not in args
+
+    @pytest.mark.linux
+    @patch("sys.platform", "linux")
+    @patch("shutil.which")
+    @patch("core.platform_support._run_command")
+    def test_idle_unavailable_logs_once(self, mock_run_cmd, mock_which):
+        """When no idle source works, log one clear warning instead of failing silently."""
+        from io import StringIO
+
+        mock_which.side_effect = lambda cmd: "/usr/bin/xdotool" if cmd == "xdotool" else None
+        mock_run_cmd.return_value = ""
+
+        if "core.platform_support" in sys.modules:
+            del sys.modules["core.platform_support"]
+
+        from core import platform_support
+        platform_support._linux_idle_warned = False
+
+        stderr = StringIO()
+        with patch.object(platform_support, "_linux_xscreensaver_idle_seconds", return_value=None), \
+             patch.object(platform_support.sys, "stderr", stderr):
+            assert platform_support.get_idle_seconds() is None
+            assert platform_support.get_idle_seconds() is None
+
+        logged = stderr.getvalue()
+        assert logged.count("Linux idle detection unavailable") == 1
+        assert "xprintidle" in logged
+        assert "xdotool get_idle_time" not in logged
 
 
 class TestLinuxClipboard(unittest.TestCase):

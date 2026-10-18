@@ -253,6 +253,14 @@ app.whenReady().then(async () => {
     console.log(`[paths] DATA_DIR=${paths.DATA_DIR}`)
 
     setup.syncSetupFlagVersion()
+    try {
+        const refresh = await mcp.refreshStaleMcpClientConfigs()
+        if (refresh.refreshed && refresh.refreshed.length) {
+            console.log(`[mcp] refreshed stale AppImage paths for ${refresh.refreshed.map((row) => row.clientId).join(', ')}`)
+        }
+    } catch (error) {
+        console.warn('[mcp] could not refresh client configs:', error.message || error)
+    }
     const setupDone = fs.existsSync(paths.SETUP_FLAG)
 
     if (setupDone) {

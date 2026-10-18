@@ -210,10 +210,94 @@ def _macos_idle_seconds() -> float | None:
 
 
 _linux_idle_warned = False
+_xss_lock = threading.Lock()
+_xss_libs: tuple[Any, Any] | None | bool = False
+
+
+def _load_xscreensaver_libs() -> tuple[Any, Any] | None:
+    """Load libX11 + libXss once. False sentinel means 'not tried yet'."""
+    global _xss_libs
+    if _xss_libs is not False:
+        return _xss_libs
+    try:
+        import ctypes
+        import ctypes.util
+
+        x11_name = ctypes.util.find_library("X11")
+        xss_name = ctypes.util.find_library("Xss")
+        if not x11_name or not xss_name:
+            _xss_libs = None
+            return None
+        _xss_libs = (ctypes.cdll.LoadLibrary(x11_name), ctypes.cdll.LoadLibrary(xss_name))
+        return _xss_libs
+    except Exception:
+        _xss_libs = None
+        return None
+
+
+def _linux_xscreensaver_idle_seconds() -> float | None:
+    """Idle milliseconds via the XScreenSaver extension (libXss), or None.
+
+    ``xdotool get_idle_time`` is not a real xdotool command, so this is the
+    in-process fallback when ``xprintidle`` is missing.
+    """
+    display = os.environ.get("DISPLAY")
+    if not display:
+        return None
+    try:
+        libs = _load_xscreensaver_libs()
+        if not libs:
+            return None
+
+        import ctypes
+
+        class XScreenSaverInfo(ctypes.Structure):
+            _fields_ = [
+                ("window", ctypes.c_ulong),
+                ("state", ctypes.c_int),
+                ("kind", ctypes.c_int),
+                ("til_or_since", ctypes.c_ulong),
+                ("idle", ctypes.c_ulong),
+                ("event_mask", ctypes.c_ulong),
+            ]
+
+        x11, xss = libs
+        DisplayPtr = ctypes.c_void_p
+        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        x11.XOpenDisplay.restype = DisplayPtr
+        x11.XDefaultRootWindow.argtypes = [DisplayPtr]
+        x11.XDefaultRootWindow.restype = ctypes.c_ulong
+        x11.XCloseDisplay.argtypes = [DisplayPtr]
+        x11.XCloseDisplay.restype = ctypes.c_int
+        x11.XFree.argtypes = [ctypes.c_void_p]
+        x11.XFree.restype = ctypes.c_int
+        xss.XScreenSaverAllocInfo.argtypes = []
+        xss.XScreenSaverAllocInfo.restype = ctypes.POINTER(XScreenSaverInfo)
+        xss.XScreenSaverQueryInfo.argtypes = [DisplayPtr, ctypes.c_ulong, ctypes.POINTER(XScreenSaverInfo)]
+        xss.XScreenSaverQueryInfo.restype = ctypes.c_int
+
+        with _xss_lock:
+            dpy = x11.XOpenDisplay(display.encode("utf-8"))
+            if not dpy:
+                return None
+            info = None
+            try:
+                info = xss.XScreenSaverAllocInfo()
+                if not info:
+                    return None
+                if xss.XScreenSaverQueryInfo(dpy, x11.XDefaultRootWindow(dpy), info) == 0:
+                    return None
+                return float(info.contents.idle) / 1000.0
+            finally:
+                if info:
+                    x11.XFree(info)
+                x11.XCloseDisplay(dpy)
+    except Exception:
+        return None
 
 
 def _linux_idle_seconds() -> float | None:
-    """Linux idle time via xprintidle or xdotool, returning None if unavailable."""
+    """Linux idle time via xprintidle, then XScreenSaver; None if unavailable."""
     global _linux_idle_warned
     try:
         # Try xprintidle first (returns milliseconds since last input)
@@ -221,16 +305,19 @@ def _linux_idle_seconds() -> float | None:
             result = _run_command(["xprintidle"])
             if result:
                 return int(result) / 1000.0
-        # Fall back to xdotool
-        if shutil.which("xdotool"):
-            result = _run_command(["xdotool", "get_idle_time"])
-            if result:
-                return int(result) / 1000.0
+        idle = _linux_xscreensaver_idle_seconds()
+        if idle is not None:
+            return idle
     except (ValueError, OSError):
         pass
     if not _linux_idle_warned:
         _linux_idle_warned = True
-        print("[platform_support] Linux idle detection unavailable (xprintidle or xdotool not found)", file=sys.stderr)
+        print(
+            "[platform_support] Linux idle detection unavailable "
+            "(install xprintidle, or libxss1 for XScreenSaver). "
+            "Capture will not slow down while you are away.",
+            file=sys.stderr,
+        )
     return None
 
 
