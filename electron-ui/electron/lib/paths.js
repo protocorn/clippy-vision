@@ -72,6 +72,9 @@ function createPaths(app, electronDir) {
         ? [
             '/opt/homebrew/bin',
             '/usr/local/bin',
+            '/Applications/Ollama.app/Contents/Resources',
+            '/Library/Frameworks/Python.framework/Versions/3.12/bin',
+            '/Library/Frameworks/Python.framework/Versions/3.11/bin',
             path.join(os.homedir(), '.local/bin'),
             path.join(os.homedir(), '.npm-global/bin'),
             path.join(os.homedir(), 'Library/pnpm'),

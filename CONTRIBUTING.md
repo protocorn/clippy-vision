@@ -169,26 +169,28 @@ PYTHONPATH=. xvfb-run -a pytest tests/test_linux_screenshot_capture.py -v -m "li
 
 #### macOS
 
-macOS has no CI job. You can run the platform-filtered tests locally:
+Pytest still skips `@pytest.mark.macos` AX/AppleScript tests in CI. You can run the platform-filtered tests locally:
 
 ```bash
 PYTHONPATH=. pytest tests/ -v -m "not windows and not linux and not requires_gui and not requires_ollama and not integration"
 ```
 
+Unsigned macOS `dmg`/`zip` (arm64 and x64) are built in CI on `macos-latest` (`.github/workflows/release.yml` job `build-macos`). The Electron path tests also run on `macos-latest`. Install and Gatekeeper notes: [docs/macos.md](docs/macos.md).
+
 #### Electron MCP path tests
 
-The Electron MCP path test is also part of CI. From the repository root, install the Electron dependencies first, then run:
+The Electron MCP path test is also part of CI (Ubuntu, Windows, and macOS). From the repository root, install the Electron dependencies first, then run:
 
 ```bash
 cd electron-ui
 npm install
-node --test electron/lib/mcp.test.js
+npm test
 ```
 
 The six pytest markers used by CI are:
 
 - `windows`: tests that require Windows or Windows-specific APIs
-- `macos`: tests that require macOS or macOS-specific APIs
+- `macos`: tests that require macOS or macOS-specific APIs (AX/AppleScript pytest; skipped in the Python CI matrix)
 - `linux`: tests that require Linux-specific tools
 - `requires_ollama`: tests that require a running Ollama server
 - `requires_gui`: tests that require a display server or GUI
