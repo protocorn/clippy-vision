@@ -99,17 +99,19 @@ def _load_minilm_from_disk():
 
 
 def _try_refill_after_weights_error(exc: BaseException) -> bool:
-    """Discard and refill the app-managed folder once. Never touches a user override.
+    """Refill the app-managed folder once. Never touches a user override.
 
-    The attempt is persisted next to the managed folder so a later launch does
-    not delete and download again. A new model id/revision can refill once more.
+    dest is not deleted until a validated replacement is in the temp folder.
+    The attempt is persisted with the failing files' fingerprint so a later
+    launch does not retry the same files. A new fingerprint or revision can
+    refill once more.
     """
     global _refill_attempted
     from core.model_download import (
-        discard_managed_embedding_dir,
-        ensure_embedding_model,
         is_user_embedding_override,
+        model_files_fingerprint,
         record_refill_attempt,
+        refill_managed_embedding_dir,
         refill_recorded_for_current_model,
     )
 
@@ -121,14 +123,13 @@ def _try_refill_after_weights_error(exc: BaseException) -> bool:
     if refill_recorded_for_current_model(path):
         return False
     _refill_attempted = True
+    failed_fingerprint = model_files_fingerprint(path)
     print(f"[local-embeddings] MiniLM weights look corrupt at {path}; refilling once: {exc}")
     try:
-        if not discard_managed_embedding_dir(path):
-            return False
-        ensure_embedding_model()
+        refill_managed_embedding_dir(path)
         return True
     finally:
-        record_refill_attempt(path)
+        record_refill_attempt(path, failed_fingerprint=failed_fingerprint)
 
 
 def _load_bundle():
