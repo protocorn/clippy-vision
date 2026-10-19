@@ -9,6 +9,7 @@ const { execFileSync } = require('child_process')
 const { createPaths }     = require('./lib/paths')
 const { createLlmConfig } = require('./lib/llm-config')
 const { createApiSpawn }  = require('./lib/api-spawn')
+const { createLlmConfigApply } = require('./lib/llm-config-apply')
 const { createMcp }       = require('./lib/mcp')
 const { createHardware }  = require('./lib/hardware')
 const { createUpdates }   = require('./lib/updates')
@@ -53,7 +54,25 @@ const state = {
 }
 
 const api = createApiSpawn({ paths, llmConfig, state })
-const mcp = createMcp({ paths, runCommand: api.runCommand, shell, version: app.getVersion() })
+const mcp = createMcp({ paths, runCommand: api.runCommand, shell, version: app.getVersion(), llmConfig })
+
+async function refreshMcpClientConfigs() {
+    try {
+        const refresh = await mcp.refreshStaleMcpClientConfigs()
+        if (refresh.refreshed && refresh.refreshed.length) {
+            console.log(`[mcp] refreshed client configs for ${refresh.refreshed.map((row) => row.clientId).join(', ')}`)
+        }
+    } catch (error) {
+        console.warn('[mcp] could not refresh client configs:', error.message || error)
+    }
+}
+
+const llmConfigApply = createLlmConfigApply({
+    llmConfig,
+    api,
+    refreshMcpClientConfigs,
+})
+
 const hardware = createHardware({ paths, llmConfig, runCommand: api.runCommand })
 const updates = createUpdates({ paths, app, getMainWindow: () => state.mainWindow })
 const windows = createWindows({ paths, state, api, updates, shell, app })
@@ -206,7 +225,7 @@ mcp.registerMcpIpc(ipcMain, clipboard)
 
 ipcMain.handle('get-hardware-check', async () => hardware.getHardwareCheck())
 ipcMain.handle('get-llm-config', () => llmConfig.publicLLMConfig())
-ipcMain.handle('save-llm-config', (_event, values = {}) => llmConfig.saveLLMConfig(values))
+ipcMain.handle('save-llm-config', (_event, values = {}) => llmConfigApply.saveAndApplyLLMConfig(values))
 ipcMain.handle('open-provider-auth', (_event, provider) => llmConfig.openProviderAuth(String(provider || '')))
 
 setup.registerSetupIpc(ipcMain, hardware.getHardwareCheck)
@@ -255,19 +274,7 @@ app.whenReady().then(async () => {
     setup.syncSetupFlagVersion()
     const setupDone = fs.existsSync(paths.SETUP_FLAG)
 
-    async function refreshMcpClientConfigs() {
-        try {
-            const refresh = await mcp.refreshStaleMcpClientConfigs()
-            if (refresh.refreshed && refresh.refreshed.length) {
-                console.log(`[mcp] refreshed stale AppImage paths for ${refresh.refreshed.map((row) => row.clientId).join(', ')}`)
-            }
-        } catch (error) {
-            console.warn('[mcp] could not refresh client configs:', error.message || error)
-        }
-    }
-
     if (setupDone) {
-
         windows.createTray()
         await api.ensureApiPort()
         windows.createMainWindow()

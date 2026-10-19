@@ -51,6 +51,21 @@ if [[ -n "${CLIPPY_EMBEDDING_MODEL_DIR:-}" ]]; then
   export CLIPPY_EMBEDDING_MODEL_DIR
 fi
 
+# Match Python: CLIPPY_OLLAMA_URL, then OLLAMA_HOST, then llm_config, then default.
+if [[ -z "${CLIPPY_OLLAMA_URL:-}" && -z "${OLLAMA_HOST:-}" ]]; then
+  _llm_config="${CLIPPY_DATA_DIR%/}/llm_config.json"
+  if [[ -f "${_llm_config}" ]]; then
+    CLIPPY_OLLAMA_URL="$("${CLIPPY_PYTHON}" -c 'import json,sys; print((json.load(open(sys.argv[1], encoding="utf-8")).get("base_url") or "").strip())' "${_llm_config}" 2>/dev/null || true)"
+  fi
+  unset _llm_config
+  if [[ -z "${CLIPPY_OLLAMA_URL:-}" ]]; then
+    CLIPPY_OLLAMA_URL="http://127.0.0.1:11434"
+  fi
+fi
+if [[ -n "${CLIPPY_OLLAMA_URL:-}" ]]; then
+  export CLIPPY_OLLAMA_URL
+fi
+
 export PYTHONPATH="${CLIPPY_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 export PYTHONIOENCODING=utf-8
 export PYTHONUTF8=1
