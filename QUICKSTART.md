@@ -25,7 +25,7 @@ The home screen is the timeline. Open a session to see the events Clippy stored.
 
 Ask your questions in the connected app. Clippy does not answer them inside its own window.
 
-**Requirements:** Windows 10/11 (64-bit) or macOS 12+. **16 GB of system RAM is recommended.** **8 GB is not enough** for the default `qwen3:8b` over a long session (see the [README hardware table](README.md#requirements)). Internet is needed on first run for the text model. Screen capture uses accessibility APIs and local OCR. It does not load a vision model.
+**Requirements:** Windows 10/11 (64-bit) or macOS 12+. **16 GB of system RAM is recommended** for default Ollama settings. **8 GB is not enough** for the default `qwen3:8b` over a long session (see the [README hardware table](README.md#requirements)). Setting `LLAMA_ARG_CACHE_RAM=0` before `ollama serve` stops Ollama's prompt-cache memory growth; `ollama ps` does not count that cache (it can under-report by up to ~8 GiB). Internet is needed on first run for the text model. Screen capture uses accessibility APIs and local OCR. It does not load a vision model.
 
 On macOS, allow Screen Recording and Accessibility when Clippy asks. Both are required for screenshots, window titles, and password-field painting. If a prompt is dismissed, turn them on in System Settings → Privacy & Security.
 
@@ -53,7 +53,7 @@ The setup wizard runs automatically on first launch.
 | The Ollama model you pick (suggested `qwen3:8b`) | about 4.7 GB download for `qwen3:8b` | Classification, session summaries, and long-term memory |
 | `all-MiniLM-L6-v2` | about 90 MB, downloaded from Hugging Face on first run | Optional local semantic retrieval. It is not bundled in the installer |
 
-The 4.7 GB figure is the download, not runtime RAM. **16 GB of system RAM is recommended** for `qwen3:8b`; **8 GB is not enough** over a long session ([README requirements](README.md#requirements)).
+The 4.7 GB figure is the download, not runtime RAM. **16 GB of system RAM is recommended** for `qwen3:8b` with default Ollama settings; **8 GB is not enough** over a long session. Setting `LLAMA_ARG_CACHE_RAM=0` before `ollama serve` stops prompt-cache growth; `ollama ps` can under-report that cache by up to ~8 GiB ([README requirements](README.md#requirements)).
 
 Pipeline details: [docs/architecture.md](docs/architecture.md).
 
