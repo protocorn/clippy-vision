@@ -1,6 +1,7 @@
 const path = require('path')
 const fs   = require('fs')
 const os   = require('os')
+const crypto = require('crypto')
 
 function resolveUserConfigDir({ platform = process.platform, env = process.env, home = os.homedir() } = {}) {
     if (platform === 'darwin') {
@@ -13,6 +14,10 @@ function resolveUserConfigDir({ platform = process.platform, env = process.env, 
 }
 
 const MCP_RUNTIME_DIRNAME = 'mcp-runtime'
+// Python sources the MCP server imports. Packaged ROOT also has api_server.py
+// and capture code that clients never load from this copy.
+const MCP_RUNTIME_SOURCE_ENTRIES = ['mcp_server.py', 'agent', 'core', 'classifier']
+const MCP_RUNTIME_STAMP_VERSION = 'v1'
 
 function isAppImageMountPath(filePath) {
     const normalized = String(filePath || '').replace(/\\/g, '/')
@@ -72,11 +77,80 @@ function mcpClientDefinitions({ platform = process.platform, env = process.env, 
     }
 }
 
-function createMcp({ paths, runCommand, shell, runtime } = {}) {
+function posixRel(root, filePath) {
+    return path.relative(root, filePath).split(path.sep).join('/')
+}
+
+function isSkippedMcpRuntimeRel(rel) {
+    const parts = String(rel || '').split('/').filter(Boolean)
+    if (parts.includes('__pycache__')) return true
+    if (parts.some((part) => part.endsWith('.pyc') || part.endsWith('.pyo'))) return true
+    if (parts[0] === 'core' && parts[1] === 'data') return true
+    return false
+}
+
+function listMcpRuntimeFiles(root) {
+    const files = []
+    function walk(absDir) {
+        let entries
+        try {
+            entries = fs.readdirSync(absDir, { withFileTypes: true })
+        } catch (_) {
+            return
+        }
+        entries.sort((a, b) => a.name.localeCompare(b.name))
+        for (const entry of entries) {
+            const abs = path.join(absDir, entry.name)
+            const rel = posixRel(root, abs)
+            if (isSkippedMcpRuntimeRel(rel)) continue
+            if (entry.isDirectory()) {
+                walk(abs)
+                continue
+            }
+            if (entry.isFile() || entry.isSymbolicLink()) files.push(rel)
+        }
+    }
+    for (const entry of MCP_RUNTIME_SOURCE_ENTRIES) {
+        const abs = path.join(root, entry)
+        if (!fs.existsSync(abs)) continue
+        const st = fs.lstatSync(abs)
+        if (st.isDirectory()) walk(abs)
+        else if (st.isFile() || st.isSymbolicLink()) files.push(entry)
+    }
+    files.sort()
+    return files
+}
+
+function hashMcpRuntimeContents(root) {
+    const hash = crypto.createHash('sha256')
+    for (const rel of listMcpRuntimeFiles(root)) {
+        hash.update(rel)
+        hash.update('\0')
+        hash.update(fs.readFileSync(path.join(root, rel)))
+        hash.update('\0')
+    }
+    return hash.digest('hex')
+}
+
+function copyMcpRuntimeSources(srcRoot, destRoot) {
+    fs.mkdirSync(destRoot, { recursive: true })
+    for (const entry of MCP_RUNTIME_SOURCE_ENTRIES) {
+        const from = path.join(srcRoot, entry)
+        if (!fs.existsSync(from)) continue
+        fs.cpSync(from, path.join(destRoot, entry), {
+            recursive: true,
+            dereference: true,
+            filter: (src) => !isSkippedMcpRuntimeRel(posixRel(srcRoot, src)),
+        })
+    }
+}
+
+function createMcp({ paths, runCommand, shell, runtime, version } = {}) {
     const { ROOT, DATA_DIR } = paths
     const USER_DATA = paths.USER_DATA || DATA_DIR
     const runtimePlatform = runtime?.platform || process.platform
     const runtimeEnv = runtime ? (runtime.env || {}) : process.env
+    const appVersion = String(version || runtime?.version || paths.APP_VERSION || '').trim()
 
     const MCP_SERVER_KEY = 'clippy-vision'
 
@@ -93,36 +167,36 @@ function createMcp({ paths, runCommand, shell, runtime } = {}) {
         return path.join(USER_DATA, MCP_RUNTIME_DIRNAME)
     }
 
-    function stableLauncherPath() {
-        return path.join(USER_DATA, runtimePlatform === 'win32' ? 'clippy-mcp.cmd' : 'clippy-mcp')
+    function versionedRuntimeDir(contentHash) {
+        return path.join(USER_DATA, `${MCP_RUNTIME_DIRNAME}-${contentHash.slice(0, 16)}`)
     }
 
-    function mcpPythonRoot() {
-        return usesAppImageRuntime() ? stableRuntimeDir() : ROOT
+    function stableLauncherPath() {
+        return path.join(USER_DATA, runtimePlatform === 'win32' ? 'clippy-mcp.cmd' : 'clippy-mcp')
     }
 
     function mcpLauncherPath() {
         return usesAppImageRuntime() ? stableLauncherPath() : bundledLauncherPath()
     }
 
-    function mcpServerPath() {
-        return path.join(mcpPythonRoot(), 'mcp_server.py')
+    function appImageRuntimeStamp() {
+        // Never include ROOT / APPDIR / the FUSE mount path: those change every
+        // AppImage launch and would force a recopy. Version + content hash are
+        // stable across remounts and still change on upgrade or a rebuild.
+        const contentHash = hashMcpRuntimeContents(ROOT)
+        return `${MCP_RUNTIME_STAMP_VERSION}\n${appVersion}\n${contentHash}\n`
     }
 
-    function appImageRuntimeStamp() {
-        const appImage = String(runtimeEnv.APPIMAGE || '')
-        let mtime = ''
-        try {
-            if (appImage && fs.existsSync(appImage)) mtime = String(fs.statSync(appImage).mtimeMs)
-        } catch (_) { /* ignore */ }
-        return `${appImage}\n${mtime}\n${ROOT}\n`
+    function stampContentHash(stamp) {
+        const lines = String(stamp || '').split('\n')
+        return String(lines[2] || '')
     }
 
     function writeStableLinuxLauncher({ launcherPath, python, serverEntry, dataDir, pythonPath }) {
         const script = [
             '#!/usr/bin/env bash',
-            '# Stable stdio entrypoint for MCP clients. Clippy rewrites this when the',
-            '# AppImage remounts under a new /tmp/.mount_* path.',
+            '# Manual stdio helper. Connect apps spawn python + mcp_server.py directly;',
+            '# this script is for running the same server from a terminal.',
             'set -euo pipefail',
             `export CLIPPY_DATA_DIR=${shSingleQuote(dataDir)}`,
             `export PYTHONPATH=${shSingleQuote(pythonPath)}`,
@@ -136,31 +210,40 @@ function createMcp({ paths, runCommand, shell, runtime } = {}) {
     }
 
     function syncAppImageMcpRuntime() {
-        if (!usesAppImageRuntime()) return { ok: true, root: ROOT }
-        const dest = stableRuntimeDir()
-        const stampPath = `${dest}.stamp`
-        const stamp = appImageRuntimeStamp()
+        if (!usesAppImageRuntime()) return { ok: true, root: ROOT, copied: false }
+        const stampPath = path.join(USER_DATA, `${MCP_RUNTIME_DIRNAME}.stamp`)
+        let stamp
         try {
-            if (fs.existsSync(stampPath) && fs.existsSync(path.join(dest, 'mcp_server.py'))) {
-                if (fs.readFileSync(stampPath, 'utf8') === stamp) {
-                    return { ok: true, root: dest }
+            stamp = appImageRuntimeStamp()
+        } catch (error) {
+            return { ok: false, root: stableRuntimeDir(), copied: false, error: error.message || String(error) }
+        }
+        const contentHash = stampContentHash(stamp)
+        const dest = contentHash ? versionedRuntimeDir(contentHash) : stableRuntimeDir()
+        try {
+            if (fs.existsSync(path.join(dest, 'mcp_server.py'))) {
+                if (!fs.existsSync(stampPath) || fs.readFileSync(stampPath, 'utf8') !== stamp) {
+                    fs.mkdirSync(USER_DATA, { recursive: true })
+                    fs.writeFileSync(stampPath, stamp, 'utf8')
                 }
+                return { ok: true, root: dest, copied: false }
             }
             fs.mkdirSync(USER_DATA, { recursive: true })
             const tmpDest = `${dest}.tmp-${process.pid}`
             try { fs.rmSync(tmpDest, { recursive: true, force: true }) } catch (_) { /* ignore */ }
-            fs.cpSync(ROOT, tmpDest, { recursive: true, dereference: true })
-            try { fs.rmSync(dest, { recursive: true, force: true }) } catch (_) { /* ignore */ }
+            copyMcpRuntimeSources(ROOT, tmpDest)
+            // Atomic install into a new versioned folder. Never delete an existing
+            // dest: Cursor/Claude may still be running mcp_server.py from it.
             fs.renameSync(tmpDest, dest)
             fs.writeFileSync(stampPath, stamp, 'utf8')
             const appImage = String(runtimeEnv.APPIMAGE || '').trim()
             if (appImage) {
                 fs.writeFileSync(path.join(USER_DATA, 'appimage.path'), `${appImage}\n`, 'utf8')
             }
-            return { ok: true, root: dest }
+            return { ok: true, root: dest, copied: true }
         } catch (error) {
             try { fs.rmSync(`${dest}.tmp-${process.pid}`, { recursive: true, force: true }) } catch (_) { /* ignore */ }
-            return { ok: false, root: dest, error: error.message || String(error) }
+            return { ok: false, root: dest, copied: false, error: error.message || String(error) }
         }
     }
 
@@ -189,9 +272,9 @@ function createMcp({ paths, runCommand, shell, runtime } = {}) {
 
     async function getMcpLaunchConfig() {
         const sync = syncAppImageMcpRuntime()
-        const pythonRoot = mcpPythonRoot()
+        const pythonRoot = usesAppImageRuntime() ? sync.root : ROOT
         const launcher = mcpLauncherPath()
-        const serverEntry = mcpServerPath()
+        const serverEntry = path.join(pythonRoot, 'mcp_server.py')
         const python = await resolvePythonExecutable()
         const issues = []
         if (!sync.ok) {
@@ -236,6 +319,7 @@ function createMcp({ paths, runCommand, shell, runtime } = {}) {
             dataDir: DATA_DIR,
             ready: issues.length === 0,
             issues,
+            runtimeCopied: Boolean(sync.copied),
             clientConfig: {
                 command: python,
                 args: [serverEntry],
@@ -482,7 +566,11 @@ function createMcp({ paths, runCommand, shell, runtime } = {}) {
             const doc = readJsonObject(def.configPath)
             const found = findClippyEntry(doc, launch)
             if (!found) continue
-            if (!entryHasStaleAppImageMount(found.entry, runtimeEnv)) continue
+            const staleMount = entryHasStaleAppImageMount(found.entry, runtimeEnv)
+            const wantedServer = path.normalize(String(serverEntry))
+            const args = Array.isArray(found.entry.args) ? found.entry.args.map(String) : []
+            const pointsAtCurrent = args.some((arg) => path.normalize(arg) === wantedServer)
+            if (!staleMount && pointsAtCurrent) continue
             mergeMcpServerIntoFile(def.configPath, launch, def.id)
             refreshed.push({ clientId: def.id, configPath: def.configPath })
         }
@@ -566,4 +654,7 @@ module.exports = {
     isAppImageMountPath,
     looksLikeAppImageRuntime,
     entryHasStaleAppImageMount,
+    hashMcpRuntimeContents,
+    MCP_RUNTIME_DIRNAME,
+    MCP_RUNTIME_SOURCE_ENTRIES,
 }

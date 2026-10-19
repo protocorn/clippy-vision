@@ -8,7 +8,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
-const { createMcp, mcpClientDefinitions, isAppImageMountPath, looksLikeAppImageRuntime, entryHasStaleAppImageMount } = require('./mcp')
+const { createMcp, mcpClientDefinitions, isAppImageMountPath, looksLikeAppImageRuntime, entryHasStaleAppImageMount, hashMcpRuntimeContents } = require('./mcp')
 
 function seedClippyRoot(root) {
     fs.mkdirSync(path.join(root, 'scripts'), { recursive: true })
@@ -20,6 +20,34 @@ function seedClippyRoot(root) {
 function seedPython(pythonPath) {
     fs.mkdirSync(path.dirname(pythonPath), { recursive: true })
     fs.writeFileSync(pythonPath, '')
+}
+
+function createAppImageMcp({ home, mountRoot, userData, python, appImage, appDir, version = '2.1.1' }) {
+    return createMcp({
+        paths: {
+            ROOT: mountRoot,
+            DATA_DIR: path.join(userData, 'data'),
+            USER_DATA: userData,
+            PYTHON_COMMAND: python,
+        },
+        runCommand: async () => ({ code: 1, stdout: '' }),
+        shell: { openExternal: async () => {} },
+        version,
+        runtime: {
+            platform: 'linux',
+            home,
+            env: { APPIMAGE: appImage, APPDIR: appDir },
+        },
+    })
+}
+
+function mcpRuntimeDirs(userData) {
+    if (!fs.existsSync(userData)) return []
+    return fs.readdirSync(userData).filter((name) => {
+        if (!name.startsWith('mcp-runtime-')) return false
+        if (name.includes('.tmp-')) return false
+        return fs.statSync(path.join(userData, name)).isDirectory()
+    })
 }
 
 function vscodePath(runtime) {
@@ -200,27 +228,23 @@ test('AppImage launch config copies python runtime into userData instead of /tmp
         const appImage = path.join(home, 'ClippyVision-Linux-x86_64-2.1.1.AppImage')
         fs.writeFileSync(appImage, '')
 
-        const mcp = createMcp({
-            paths: {
-                ROOT: mountRoot,
-                DATA_DIR: path.join(userData, 'data'),
-                USER_DATA: userData,
-                PYTHON_COMMAND: python,
-            },
-            runCommand: async () => ({ code: 1, stdout: '' }),
-            shell: { openExternal: async () => {} },
-            runtime: {
-                platform: 'linux',
-                home,
-                env: { APPIMAGE: appImage, APPDIR: path.join(home, 'tmp', '.mount_ClippyABC123') },
-            },
+        fs.writeFileSync(path.join(mountRoot, 'api_server.py'), '# not needed by MCP clients\n')
+
+        const mcp = createAppImageMcp({
+            home,
+            mountRoot,
+            userData,
+            python,
+            appImage,
+            appDir: path.join(home, 'tmp', '.mount_ClippyABC123'),
         })
 
         const launch = await mcp.getMcpLaunchConfig()
         assert.equal(launch.ready, true, launch.issues && launch.issues.join(' '))
+        assert.equal(launch.runtimeCopied, true)
         assert.equal(launch.command, python)
-        assert.equal(launch.args[0], path.join(userData, 'mcp-runtime', 'mcp_server.py'))
-        assert.equal(launch.env.PYTHONPATH, path.join(userData, 'mcp-runtime'))
+        assert.ok(path.basename(launch.env.PYTHONPATH).startsWith('mcp-runtime-'))
+        assert.equal(launch.args[0], path.join(launch.env.PYTHONPATH, 'mcp_server.py'))
         assert.equal(launch.env.CLIPPY_DATA_DIR, path.join(userData, 'data'))
         assert.ok(!String(launch.args[0]).includes('.mount_'))
         assert.ok(!String(launch.env.PYTHONPATH).includes('.mount_'))
@@ -228,6 +252,7 @@ test('AppImage launch config copies python runtime into userData instead of /tmp
         assert.equal(launch.launcher, path.join(userData, 'clippy-mcp'))
         assert.equal(fs.existsSync(launch.args[0]), true)
         assert.equal(fs.existsSync(launch.launcher), true)
+        assert.equal(fs.existsSync(path.join(launch.env.PYTHONPATH, 'api_server.py')), false)
         const launcherText = fs.readFileSync(launch.launcher, 'utf8')
         assert.match(launcherText, /mcp-runtime/)
         assert.match(launcherText, /^exec /m)
@@ -235,6 +260,10 @@ test('AppImage launch config copies python runtime into userData instead of /tmp
         assert.ok(execLine)
         assert.ok(!execLine.includes('.mount_'))
         assert.ok(!launcherText.includes(mountRoot))
+        const stamp = fs.readFileSync(path.join(userData, 'mcp-runtime.stamp'), 'utf8')
+        assert.ok(!stamp.includes('.mount_'))
+        assert.ok(!stamp.includes(mountRoot))
+        assert.match(stamp, /^v1\n2\.1\.1\n[a-f0-9]{64}\n$/)
     } finally {
         fs.rmSync(home, { recursive: true, force: true })
     }
@@ -350,14 +379,122 @@ test('startup refresh rewrites stale /tmp/.mount_* MCP configs and leaves others
         const result = await mcp.refreshStaleMcpClientConfigs()
         assert.deepEqual(result.refreshed.map((row) => row.clientId), ['cursor'])
 
+        const launch = await mcp.getMcpLaunchConfig()
         const cursorDoc = JSON.parse(fs.readFileSync(cursorPath, 'utf8'))
-        assert.equal(cursorDoc.mcpServers['clippy-vision'].args[0], path.join(userData, 'mcp-runtime', 'mcp_server.py'))
-        assert.equal(cursorDoc.mcpServers['clippy-vision'].env.PYTHONPATH, path.join(userData, 'mcp-runtime'))
+        assert.equal(cursorDoc.mcpServers['clippy-vision'].args[0], launch.args[0])
+        assert.equal(cursorDoc.mcpServers['clippy-vision'].env.PYTHONPATH, launch.env.PYTHONPATH)
+        assert.ok(path.basename(launch.env.PYTHONPATH).startsWith('mcp-runtime-'))
         assert.equal(cursorDoc.mcpServers['other-app'].command, 'npx')
 
         const vscodeDoc = JSON.parse(fs.readFileSync(vscodePath, 'utf8'))
         assert.deepEqual(vscodeDoc.servers, { unrelated: { command: 'node', args: ['server.js'] } })
         assert.equal(entryHasStaleAppImageMount(cursorDoc.mcpServers['clippy-vision']), false)
+    } finally {
+        fs.rmSync(home, { recursive: true, force: true })
+    }
+})
+
+test('AppImage runtime is copied once across two launches with different mount paths', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'clippy-mcp-stamp-'))
+    try {
+        const mountA = path.join(home, 'tmp', '.mount_ClippyAAA', 'usr', 'lib', 'clippy-vision', 'resources', 'clippy')
+        const mountB = path.join(home, 'tmp', '.mount_ClippyBBB', 'usr', 'lib', 'clippy-vision', 'resources', 'clippy')
+        seedClippyRoot(mountA)
+        seedClippyRoot(mountB)
+        const userData = path.join(home, 'user-data')
+        const python = path.join(userData, 'python-venv', 'bin', 'python')
+        seedPython(python)
+        const appImage = path.join(home, 'ClippyVision.AppImage')
+        fs.writeFileSync(appImage, '')
+
+        assert.equal(hashMcpRuntimeContents(mountA), hashMcpRuntimeContents(mountB))
+
+        const first = createAppImageMcp({
+            home,
+            mountRoot: mountA,
+            userData,
+            python,
+            appImage,
+            appDir: path.join(home, 'tmp', '.mount_ClippyAAA'),
+            version: '2.1.1',
+        })
+        const firstLaunch = await first.getMcpLaunchConfig()
+        assert.equal(firstLaunch.ready, true, firstLaunch.issues && firstLaunch.issues.join(' '))
+        assert.equal(firstLaunch.runtimeCopied, true)
+        assert.deepEqual(mcpRuntimeDirs(userData), [path.basename(firstLaunch.env.PYTHONPATH)])
+
+        const sentinel = path.join(firstLaunch.env.PYTHONPATH, 'copied-once.marker')
+        fs.writeFileSync(sentinel, 'keep\n')
+        const copiedMtime = fs.statSync(firstLaunch.args[0]).mtimeMs
+        const stampAfterFirst = fs.readFileSync(path.join(userData, 'mcp-runtime.stamp'), 'utf8')
+        assert.ok(!stampAfterFirst.includes('.mount_'))
+        assert.ok(!stampAfterFirst.includes(mountA))
+        assert.ok(!stampAfterFirst.includes(mountB))
+
+        const second = createAppImageMcp({
+            home,
+            mountRoot: mountB,
+            userData,
+            python,
+            appImage,
+            appDir: path.join(home, 'tmp', '.mount_ClippyBBB'),
+            version: '2.1.1',
+        })
+        const secondLaunch = await second.getMcpLaunchConfig()
+        assert.equal(secondLaunch.ready, true, secondLaunch.issues && secondLaunch.issues.join(' '))
+        assert.equal(secondLaunch.runtimeCopied, false)
+        assert.equal(secondLaunch.env.PYTHONPATH, firstLaunch.env.PYTHONPATH)
+        assert.equal(secondLaunch.args[0], firstLaunch.args[0])
+        assert.equal(fs.existsSync(sentinel), true)
+        assert.equal(fs.readFileSync(sentinel, 'utf8'), 'keep\n')
+        assert.equal(fs.statSync(secondLaunch.args[0]).mtimeMs, copiedMtime)
+        assert.deepEqual(mcpRuntimeDirs(userData), [path.basename(firstLaunch.env.PYTHONPATH)])
+        assert.equal(
+            fs.readFileSync(path.join(userData, 'mcp-runtime.stamp'), 'utf8'),
+            stampAfterFirst,
+        )
+    } finally {
+        fs.rmSync(home, { recursive: true, force: true })
+    }
+})
+
+test('AppImage runtime swap keeps the previous folder when contents change', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'clippy-mcp-swap-'))
+    try {
+        const mountA = path.join(home, 'tmp', '.mount_ClippyOLD', 'usr', 'lib', 'clippy-vision', 'resources', 'clippy')
+        const mountB = path.join(home, 'tmp', '.mount_ClippyNEW', 'usr', 'lib', 'clippy-vision', 'resources', 'clippy')
+        seedClippyRoot(mountA)
+        seedClippyRoot(mountB)
+        fs.writeFileSync(path.join(mountB, 'mcp_server.py'), '# upgraded mcp server\n')
+        const userData = path.join(home, 'user-data')
+        const python = path.join(userData, 'python-venv', 'bin', 'python')
+        seedPython(python)
+        const appImage = path.join(home, 'ClippyVision.AppImage')
+        fs.writeFileSync(appImage, '')
+
+        const first = createAppImageMcp({
+            home, mountRoot: mountA, userData, python, appImage,
+            appDir: path.join(home, 'tmp', '.mount_ClippyOLD'),
+        })
+        const firstLaunch = await first.getMcpLaunchConfig()
+        const oldRoot = firstLaunch.env.PYTHONPATH
+        const sentinel = path.join(oldRoot, 'still-running.marker')
+        fs.writeFileSync(sentinel, 'do-not-delete\n')
+
+        const second = createAppImageMcp({
+            home, mountRoot: mountB, userData, python, appImage,
+            appDir: path.join(home, 'tmp', '.mount_ClippyNEW'),
+        })
+        const secondLaunch = await second.getMcpLaunchConfig()
+        assert.equal(secondLaunch.runtimeCopied, true)
+        assert.notEqual(secondLaunch.env.PYTHONPATH, oldRoot)
+        assert.equal(fs.existsSync(sentinel), true)
+        assert.equal(fs.readFileSync(path.join(oldRoot, 'mcp_server.py'), 'utf8'), '# fake mcp server\n')
+        assert.equal(fs.readFileSync(secondLaunch.args[0], 'utf8'), '# upgraded mcp server\n')
+        assert.deepEqual(mcpRuntimeDirs(userData).sort(), [
+            path.basename(oldRoot),
+            path.basename(secondLaunch.env.PYTHONPATH),
+        ].sort())
     } finally {
         fs.rmSync(home, { recursive: true, force: true })
     }

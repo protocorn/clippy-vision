@@ -53,7 +53,7 @@ const state = {
 }
 
 const api = createApiSpawn({ paths, llmConfig, state })
-const mcp = createMcp({ paths, runCommand: api.runCommand, shell })
+const mcp = createMcp({ paths, runCommand: api.runCommand, shell, version: app.getVersion() })
 const hardware = createHardware({ paths, llmConfig, runCommand: api.runCommand })
 const updates = createUpdates({ paths, app, getMainWindow: () => state.mainWindow })
 const windows = createWindows({ paths, state, api, updates, shell, app })
@@ -253,15 +253,18 @@ app.whenReady().then(async () => {
     console.log(`[paths] DATA_DIR=${paths.DATA_DIR}`)
 
     setup.syncSetupFlagVersion()
-    try {
-        const refresh = await mcp.refreshStaleMcpClientConfigs()
-        if (refresh.refreshed && refresh.refreshed.length) {
-            console.log(`[mcp] refreshed stale AppImage paths for ${refresh.refreshed.map((row) => row.clientId).join(', ')}`)
-        }
-    } catch (error) {
-        console.warn('[mcp] could not refresh client configs:', error.message || error)
-    }
     const setupDone = fs.existsSync(paths.SETUP_FLAG)
+
+    async function refreshMcpClientConfigs() {
+        try {
+            const refresh = await mcp.refreshStaleMcpClientConfigs()
+            if (refresh.refreshed && refresh.refreshed.length) {
+                console.log(`[mcp] refreshed stale AppImage paths for ${refresh.refreshed.map((row) => row.clientId).join(', ')}`)
+            }
+        } catch (error) {
+            console.warn('[mcp] could not refresh client configs:', error.message || error)
+        }
+    }
 
     if (setupDone) {
 
@@ -269,6 +272,9 @@ app.whenReady().then(async () => {
         await api.ensureApiPort()
         windows.createMainWindow()
         await windows.waitForMainWindowLoad()
+        // Stamp check is cheap after the first copy. Do it after the window is
+        // up so a rare upgrade copy cannot hold the splash closed.
+        await refreshMcpClientConfigs()
         windows.sendLoadingStatus(
             null,
             'Checking dependencies…'
@@ -324,6 +330,7 @@ app.whenReady().then(async () => {
     } else {
         state.setupStartFrom = 'python'
         windows.createSetupWindow()
+        await refreshMcpClientConfigs()
     }
 
     app.on('activate', () => {

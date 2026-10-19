@@ -65,7 +65,7 @@ If `libfuse2` is missing, you can still run the AppImage without FUSE:
 
 Python is **not** inside the AppImage. Install Ollama and Python 3.11+ first (see Prerequisites), then run the AppImage so the first-run wizard can find them.
 
-Packaged Linux `userData` is `~/.config/Clippy Vision` (Electron `productName`; confirmed in the release workflow). First-run setup writes `setup_complete.json` there. Until that file exists, the backend does not start. On AppImage, Connect apps copies the Python MCP runtime into that folder (`mcp-runtime/`) so Cursor / Claude Desktop / VS Code are not pointed at `/tmp/.mount_*`, which changes every launch. Stale mount paths in those configs are rewritten on startup.
+Packaged Linux `userData` is `~/.config/Clippy Vision` (Electron `productName`; confirmed in the release workflow). First-run setup writes `setup_complete.json` there. Until that file exists, the backend does not start. On AppImage, Connect apps copies the MCP Python sources into a versioned folder there (`mcp-runtime-<content-hash>/`) so Cursor / Claude Desktop / VS Code are not pointed at `/tmp/.mount_*`, which changes every launch. The copy stamp is app version plus a content hash, so a new mount path does not recopy. Stale mount paths in those configs are rewritten on startup. The `clippy-mcp` helper in `userData` is for manual launches; Connect apps spawn `python` + `mcp_server.py` directly.
 
 ---
 
