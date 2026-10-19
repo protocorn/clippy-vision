@@ -1187,7 +1187,9 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertTrue(is_useful_accessibility_text(ui_text))
         remember_accessibility_text(path, ui_text)
 
-        with patch.object(residency, "can_run_ocr", return_value=False), patch(
+        with patch.object(
+            residency, "ocr_unavailable_reason", return_value="CPU: system usage >= 80%"
+        ), patch.object(residency, "can_run_ocr", return_value=False), patch(
             "core.screenshot_enrichment.get_capture_settings",
             return_value={"ocr_enabled": True, "image_embeddings_enabled": False},
         ):

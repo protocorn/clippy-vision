@@ -12,6 +12,26 @@ _engine = None
 _engine_lock = threading.Lock()
 _engine_error = None
 _space_re = re.compile(r"\s+")
+# Last extract_text_detail() gate, so screenshot OCR can tell "skipped" from
+# "ran and found nothing" without changing extract_text()'s string return.
+_last_gate_reason: str | None = None
+_log_label: str | None = None
+
+
+def last_gate_reason() -> str | None:
+    """Pressure-gate reason for the most recent extract, or None if it ran."""
+    return _last_gate_reason
+
+
+def clear_last_gate_reason() -> None:
+    global _last_gate_reason
+    _last_gate_reason = None
+
+
+def set_ocr_log_label(name: str | None) -> None:
+    """Prefer this filename in skip logs (the real JPEG, not a crop temp)."""
+    global _log_label
+    _log_label = name
 
 
 def _ocr_thread_count() -> int:
@@ -158,19 +178,30 @@ def extract_text_detail(
     Run OCR and return structured debug info.
     Used by probes; production uses extract_text() which only needs the joined string.
     """
-    from core.model_residency import can_run_ocr
+    from core.model_residency import ocr_unavailable_reason
+    from core.performance_metrics import increment
 
+    global _last_gate_reason
+    _last_gate_reason = None
     threshold = OCR_MIN_CONFIDENCE if min_confidence is None else float(min_confidence)
     detail = {
         "text": "",
         "lines": [],  # list[{text, score, accepted}]
         "gated": False,
+        "gate_reason": None,
         "engine_error": None,
         "elapsed_ms": 0.0,
     }
-    if not bypass_memory_gate and not can_run_ocr():
-        detail["gated"] = True
-        return detail
+    if not bypass_memory_gate:
+        reason = ocr_unavailable_reason()
+        if reason:
+            detail["gated"] = True
+            detail["gate_reason"] = reason
+            _last_gate_reason = reason
+            label = _log_label or path.name
+            print(f"[ocr] skipped {label} — {reason}")
+            increment("ocr.skipped_pressure")
+            return detail
 
     engine = _get_engine()
     if engine is None:

@@ -132,6 +132,26 @@ def pressure_reason() -> str | None:
     return None
 
 
+def ocr_unavailable_reason(available: int | None = None) -> str | None:
+    """Why OCR should not start right now, or None if it can run.
+
+    Covers the RAM floor and the same commit/CPU pressure signals as
+    can_run_ocr(), so skip logs can say CPU, memory, or other instead of
+    returning empty text with no line at all.
+    """
+    free = _available() if available is None else available
+    if free < _OCR_FLOOR:
+        return (
+            f"memory: free RAM {free / _GB:.1f}GB is below the "
+            f"{_OCR_FLOOR / _GB:.1f}GB OCR floor"
+        )
+    if _commit_pressured():
+        return f"memory: commit/swap >= {_COMMIT_PRESSURE_PCT:.0f}%"
+    if _cpu_pressured():
+        return f"CPU: system usage >= {_CPU_PRESSURE_PCT:.0f}%"
+    return None
+
+
 def _ollama_loaded_models() -> set[str]:
     """Names currently resident in Ollama (/api/ps). Cached briefly."""
     global _ps_cache, _gpu_resident
@@ -267,8 +287,7 @@ def can_run_ocr(available: int | None = None) -> bool:
     "fits" in RAM but runs 15-20x slower than normal because it's contending
     for cycles or the OS is paging.
     """
-    free = _available() if available is None else available
-    return free >= _OCR_FLOOR and not _under_pressure()
+    return ocr_unavailable_reason(available) is None
 
 
 def load_residency() -> dict:
