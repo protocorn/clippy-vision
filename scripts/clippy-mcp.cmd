@@ -47,9 +47,11 @@ if not defined CLIPPY_EMBEDDING_MODEL_DIR (
 )
 
 rem Match Python: CLIPPY_OLLAMA_URL, then OLLAMA_HOST, then llm_config, then default.
+rem Read the path from CLIPPY_DATA_DIR in the child env. Do not use sys.argv[1]
+rem here: cmd expands %1 as this script's first argument.
 if not defined CLIPPY_OLLAMA_URL if not defined OLLAMA_HOST (
     if exist "%CLIPPY_DATA_DIR%\llm_config.json" (
-        for /f "usebackq delims=" %%U in (`"%CLIPPY_PYTHON%" -c "import json,sys; print((json.load(open(sys.argv[1], encoding='utf-8')).get('base_url') or '').strip())" "%CLIPPY_DATA_DIR%\llm_config.json" 2^>nul`) do set "CLIPPY_OLLAMA_URL=%%U"
+        for /f "usebackq delims=" %%U in (`"%CLIPPY_PYTHON%" -c "import json,os; p=os.path.join(os.environ.get('CLIPPY_DATA_DIR',''),'llm_config.json'); print((json.load(open(p, encoding='utf-8')).get('base_url') or '').strip())" 2^>nul`) do set "CLIPPY_OLLAMA_URL=%%U"
     )
 )
 if not defined CLIPPY_OLLAMA_URL if not defined OLLAMA_HOST (
