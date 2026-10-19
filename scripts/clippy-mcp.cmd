@@ -42,9 +42,8 @@ if not defined CLIPPY_EMBEDDING_MODEL_DIR (
         )
     )
 )
-if not defined CLIPPY_EMBEDDING_MODEL_DIR (
-    set "CLIPPY_EMBEDDING_MODEL_DIR=%CLIPPY_DATA_DIR%\models\embeddings\all-MiniLM-L6-v2"
-)
+rem A custom CLIPPY_DATA_DIR that is not a userData\data folder is left unset
+rem so Python uses the repo models\ path instead of treating this as an override.
 
 if defined PYTHONPATH (
     set "PYTHONPATH=%CLIPPY_ROOT%;%PYTHONPATH%"

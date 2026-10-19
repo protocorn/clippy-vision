@@ -8,7 +8,7 @@ A source checkout still uses `models/embeddings/all-MiniLM-L6-v2/` in this repos
 - macOS: `~/Library/Application Support/Clippy Vision/models/embeddings/all-MiniLM-L6-v2/`
 - Windows: `%APPDATA%\Clippy Vision\models\embeddings\all-MiniLM-L6-v2\`
 
-`CLIPPY_EMBEDDING_MODEL_DIR` overrides that location. When it points at a folder you chose (not the default userData path the app manages), Clippy will not delete, clean, or refill it — a missing or broken folder is reported as an error instead. A leftover copy inside the code folder or an old `mcp-runtime-*` directory is moved or copied once into the app-managed folder.
+`CLIPPY_EMBEDDING_MODEL_DIR` overrides that location. When it points at a folder you chose (not the default userData path the app manages), Clippy will not delete, clean, or refill it — a missing or broken folder is reported as an error instead. A leftover copy inside the code folder or an old `mcp-runtime-*` directory is moved or copied once into the app-managed folder. If an app-managed folder fails to load, Clippy refills it once and writes a sibling `*.refill.json` marker so the next launch does not download again. A successful load, or a new model id/revision, clears that marker.
 
 | Path | Source |
 |------|--------|

@@ -12,6 +12,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -171,6 +172,96 @@ def is_protected_override_dir(path: Path | None = None) -> bool:
     return _paths_equal(target, embedding_model_dir())
 
 
+def embedding_revision() -> str:
+    """Pinned HF revision for MiniLM, or ``main`` when unset."""
+    return (os.environ.get("CLIPPY_EMBEDDING_HF_REVISION") or "main").strip() or "main"
+
+
+def embedding_model_identity() -> dict[str, str]:
+    return {"model_id": EMBEDDING_REPO, "revision": embedding_revision()}
+
+
+def refill_marker_path(model_dir: Path) -> Path:
+    """Sibling JSON next to the managed folder, not inside it (rmtree-safe)."""
+    return model_dir.with_name(f"{model_dir.name}.refill.json")
+
+
+def _weights_fingerprint(model_dir: Path) -> str:
+    for name in ("model.safetensors", "pytorch_model.bin"):
+        path = model_dir / name
+        try:
+            if path.is_file():
+                stat = path.stat()
+                return f"{name}:{stat.st_size}:{stat.st_mtime_ns}"
+        except OSError:
+            continue
+    return ""
+
+
+def read_refill_marker(model_dir: Path) -> dict | None:
+    path = refill_marker_path(model_dir)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def refill_recorded_for_current_model(model_dir: Path | None = None) -> bool:
+    """True when a refill was already persisted for this repo + revision."""
+    dest = model_dir if model_dir is not None else embedding_model_dir()
+    if is_protected_override_dir(dest):
+        return False
+    marker = read_refill_marker(dest)
+    if not marker:
+        return False
+    identity = embedding_model_identity()
+    return (
+        str(marker.get("model_id") or "") == identity["model_id"]
+        and str(marker.get("revision") or "") == identity["revision"]
+    )
+
+
+def record_refill_attempt(model_dir: Path) -> None:
+    """Atomically write the refill marker. No-op for a user override."""
+    if is_protected_override_dir(model_dir):
+        return
+    dest = refill_marker_path(model_dir)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    prefix = f"{dest.name}.tmp-"
+    if dest.parent.is_dir():
+        for child in dest.parent.iterdir():
+            if child.name.startswith(prefix) and child.is_file():
+                child.unlink(missing_ok=True)
+    payload = {
+        **embedding_model_identity(),
+        "fingerprint": _weights_fingerprint(model_dir),
+        "attempted": True,
+        "attempted_at": time.time(),
+    }
+    tmp = dest.with_name(f"{dest.name}.tmp-{os.getpid()}")
+    try:
+        tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        os.replace(str(tmp), str(dest))
+    except Exception:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+        raise
+
+
+def clear_refill_marker(model_dir: Path) -> None:
+    """Remove the refill marker after a successful load. No-op for overrides."""
+    if is_protected_override_dir(model_dir):
+        return
+    dest = refill_marker_path(model_dir)
+    try:
+        dest.unlink()
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
+
+
 def _nonempty_file(path: Path) -> bool:
     try:
         return path.is_file() and path.stat().st_size > 0
@@ -267,6 +358,8 @@ def cleanup_stale_embedding_temps(dest: Path) -> None:
 
 def _remove_if_incomplete(path: Path) -> None:
     if is_protected_override_dir(path):
+        return
+    if refill_recorded_for_current_model(path):
         return
     if path.exists() and not embedding_ready(path):
         shutil.rmtree(path, ignore_errors=True)
@@ -390,6 +483,8 @@ def _migrate_legacy_embedding_model_unlocked(
 ) -> Path:
     if is_protected_override_dir(dest):
         return dest
+    if refill_recorded_for_current_model(dest):
+        return dest
     cleanup_stale_embedding_temps(dest)
     _remove_if_incomplete(dest)
     if embedding_ready(dest):
@@ -430,6 +525,8 @@ def migrate_legacy_embedding_model(
     root = Path(project_root) if project_root is not None else _PROJECT_ROOT
     if is_protected_override_dir(dest):
         return dest
+    if refill_recorded_for_current_model(dest):
+        return dest
     scan_runtime = not is_user_embedding_override()
     if embedding_ready(dest):
         return dest
@@ -469,6 +566,15 @@ def ensure_embedding_model(*, force: bool = False) -> Path:
             return path
         raise FileNotFoundError(
             f"CLIPPY_EMBEDDING_MODEL_DIR is missing or incomplete: {path}"
+        )
+    if not force and refill_recorded_for_current_model(path):
+        if embedding_ready(path):
+            return path
+        identity = embedding_model_identity()
+        raise FileNotFoundError(
+            f"MiniLM model is missing or incomplete at {path} "
+            f"(a refill was already attempted for {identity['model_id']}@"
+            f"{identity['revision']})"
         )
     with _embedding_lock:
         try:
