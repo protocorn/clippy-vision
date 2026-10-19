@@ -111,14 +111,80 @@ def embedding_model_dir() -> Path:
     )
 
 
+def _nonempty_file(path: Path) -> bool:
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def embedding_ready(path: Path | None = None) -> bool:
+    """True only when the folder has a usable MiniLM checkpoint.
+
+    A cut-off copy can leave ``config.json`` plus a truncated weights file.
+    Require the tokenizer as well, and ignore empty placeholders.
+    """
     root = path or embedding_model_dir()
-    return (root / "config.json").is_file() and (
-        (root / "model.safetensors").is_file() or (root / "pytorch_model.bin").is_file()
-    )
+    has_config = _nonempty_file(root / "config.json")
+    has_weights = _nonempty_file(root / "model.safetensors") or _nonempty_file(root / "pytorch_model.bin")
+    has_tokenizer = _nonempty_file(root / "tokenizer.json") or _nonempty_file(root / "tokenizer_config.json")
+    return has_config and has_weights and has_tokenizer
 
 
-def _legacy_embedding_sources(project_root: Path, dest: Path) -> list[Path]:
+def _temp_sibling(dest: Path) -> Path:
+    return dest.with_name(f"{dest.name}.tmp-{os.getpid()}")
+
+
+def cleanup_stale_embedding_temps(dest: Path) -> None:
+    """Remove leftover ``<dest>.tmp-*`` folders from a crashed copy or download."""
+    parent = dest.parent
+    if not parent.is_dir():
+        return
+    prefix = f"{dest.name}.tmp-"
+    for child in parent.iterdir():
+        if child.name.startswith(prefix) and child.is_dir():
+            shutil.rmtree(child, ignore_errors=True)
+
+
+def _remove_if_incomplete(path: Path) -> None:
+    if path.exists() and not embedding_ready(path):
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def commit_model_dir(tmp: Path, dest: Path) -> Path:
+    """Atomically install a complete tmp folder over dest.
+
+    Incomplete dest is treated as missing and replaced. If another process
+    already left a ready dest, that is a win and tmp is discarded.
+    """
+    if not embedding_ready(tmp):
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise FileNotFoundError(f"Model copy at {tmp} is incomplete")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if embedding_ready(dest):
+        shutil.rmtree(tmp, ignore_errors=True)
+        return dest
+    _remove_if_incomplete(dest)
+    try:
+        os.replace(str(tmp), str(dest))
+    except OSError:
+        if embedding_ready(dest):
+            shutil.rmtree(tmp, ignore_errors=True)
+            return dest
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    if not embedding_ready(dest):
+        _remove_if_incomplete(dest)
+        raise FileNotFoundError(f"Atomic install of MiniLM at {dest} did not produce a complete model")
+    return dest
+
+
+def _legacy_embedding_sources(
+    project_root: Path,
+    dest: Path,
+    *,
+    scan_runtime_copies: bool = True,
+) -> list[Path]:
     """Places a previous install may have written MiniLM weights."""
     seen: set[Path] = set()
     out: list[Path] = []
@@ -139,18 +205,19 @@ def _legacy_embedding_sources(project_root: Path, dest: Path) -> list[Path]:
     except OSError:
         dest_key = dest
     add(dest_key)
-    try:
-        user_data = dest.parents[2]
-    except IndexError:
-        user_data = None
-    if user_data is not None and user_data.is_dir():
+    if scan_runtime_copies:
         try:
-            children = sorted(user_data.iterdir(), key=lambda item: item.name)
-        except OSError:
-            children = []
-        for child in children:
-            if child.name.startswith("mcp-runtime"):
-                add(child / EMBEDDING_MODEL_RELATIVE)
+            user_data = dest.parents[2]
+        except IndexError:
+            user_data = None
+        if user_data is not None and user_data.is_dir():
+            try:
+                children = sorted(user_data.iterdir(), key=lambda item: item.name)
+            except OSError:
+                children = []
+            for child in children:
+                if child.name.startswith("mcp-runtime"):
+                    add(child / EMBEDDING_MODEL_RELATIVE)
     return [path for path in out if path != dest and path != dest_key]
 
 
@@ -160,15 +227,19 @@ def _should_move_legacy(src: Path) -> bool:
 
 
 def _transfer_model(src: Path, dest: Path, *, prefer_move: bool) -> None:
+    """Copy into a temp sibling, verify it, then rename into place."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if prefer_move and not dest.exists():
-        try:
-            shutil.move(str(src), str(dest))
-            return
-        except OSError:
-            pass
-    shutil.copytree(src, dest, dirs_exist_ok=True)
-    if prefer_move:
+    cleanup_stale_embedding_temps(dest)
+    tmp = _temp_sibling(dest)
+    if tmp.exists():
+        shutil.rmtree(tmp, ignore_errors=True)
+    try:
+        shutil.copytree(src, tmp)
+        commit_model_dir(tmp, dest)
+    except Exception:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    if prefer_move and src.exists() and embedding_ready(dest):
         shutil.rmtree(src, ignore_errors=True)
 
 
@@ -176,10 +247,15 @@ def _migrate_legacy_embedding_model_unlocked(
     dest: Path,
     *,
     project_root: Path,
+    scan_runtime_copies: bool = True,
 ) -> Path:
+    cleanup_stale_embedding_temps(dest)
+    _remove_if_incomplete(dest)
     if embedding_ready(dest):
         return dest
-    for src in _legacy_embedding_sources(project_root, dest):
+    for src in _legacy_embedding_sources(
+        project_root, dest, scan_runtime_copies=scan_runtime_copies
+    ):
         try:
             if src.resolve() == dest.resolve():
                 continue
@@ -211,42 +287,60 @@ def migrate_legacy_embedding_model(
     """
     dest = dest or embedding_model_dir()
     root = Path(project_root) if project_root is not None else _PROJECT_ROOT
+    scan_runtime = not bool(os.environ.get("CLIPPY_EMBEDDING_MODEL_DIR", "").strip())
     if embedding_ready(dest):
         return dest
     with _embedding_lock:
-        return _migrate_legacy_embedding_model_unlocked(dest, project_root=root)
+        return _migrate_legacy_embedding_model_unlocked(
+            dest, project_root=root, scan_runtime_copies=scan_runtime
+        )
 
 
 def _snapshot(repo_id: str, local_dir: Path) -> Path:
     from huggingface_hub import snapshot_download
 
-    local_dir.mkdir(parents=True, exist_ok=True)
-    snapshot_download(
-        repo_id=repo_id,
-        local_dir=str(local_dir),
-    )
-    return local_dir
+    cleanup_stale_embedding_temps(local_dir)
+    tmp = _temp_sibling(local_dir)
+    if tmp.exists():
+        shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True, exist_ok=True)
+    try:
+        snapshot_download(
+            repo_id=repo_id,
+            local_dir=str(tmp),
+        )
+        return commit_model_dir(tmp, local_dir)
+    except Exception:
+        shutil.rmtree(tmp, ignore_errors=True)
+        _remove_if_incomplete(local_dir)
+        raise
 
 
 def ensure_embedding_model(*, force: bool = False) -> Path:
     """Ensure official MiniLM weights exist in the resolved model folder."""
     path = embedding_model_dir()
     with _embedding_lock:
-        if not force:
-            if embedding_ready(path):
-                return path
-            migrated = _migrate_legacy_embedding_model_unlocked(path, project_root=_PROJECT_ROOT)
-            if embedding_ready(migrated):
-                return migrated
-            path = embedding_model_dir()
-        print(f"[models] Downloading embeddings from {EMBEDDING_REPO} -> {path}")
-        _snapshot(EMBEDDING_REPO, path)
-        if not embedding_ready(path):
-            raise FileNotFoundError(
-                f"Downloaded {EMBEDDING_REPO} but weights are missing under {path}"
-            )
-        print(f"[models] Embeddings ready at {path}")
-        return path
+        try:
+            if not force:
+                _remove_if_incomplete(path)
+                if embedding_ready(path):
+                    return path
+                migrated = _migrate_legacy_embedding_model_unlocked(path, project_root=_PROJECT_ROOT)
+                if embedding_ready(migrated):
+                    return migrated
+                path = embedding_model_dir()
+            print(f"[models] Downloading embeddings from {EMBEDDING_REPO} -> {path}")
+            _snapshot(EMBEDDING_REPO, path)
+            if not embedding_ready(path):
+                _remove_if_incomplete(path)
+                raise FileNotFoundError(
+                    f"Downloaded {EMBEDDING_REPO} but weights are missing under {path}"
+                )
+            print(f"[models] Embeddings ready at {path}")
+            return path
+        except Exception:
+            _remove_if_incomplete(path)
+            raise
 
 
 def ensure_all(*, force: bool = False) -> dict[str, str]:

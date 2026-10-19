@@ -120,7 +120,13 @@ def memory_query(query: str = "", q_vec: list | None = None) -> str:
         try:
             q_vec = embed_text(query)
         except Exception as e:
-            return f"memory_query: embedding failed — {e}"
+            from agent.tool_result import ToolResult
+            from core.local_embeddings import EmbeddingUnavailable
+
+            text = f"memory_query: embedding failed — {e}"
+            if isinstance(e, EmbeddingUnavailable):
+                return ToolResult(text=text, error=str(e))
+            return text
     result = _fetch_memory(q_vec)
     return result if result else "No relevant memory facts found."
 

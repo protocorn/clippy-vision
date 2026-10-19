@@ -6,16 +6,21 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from core.diagnostics import get_diagnostics
 from core.local_embeddings import (
     HASH_MODEL_ID,
     MODEL_ID,
+    EmbeddingUnavailable,
     embed_texts,
+    embedding_status,
     hash_fallback_allowed,
     reset_runtime_state_for_tests,
 )
 from core.model_download import (
     EMBEDDING_MODEL_RELATIVE,
+    _transfer_model,
     embedding_ready,
+    ensure_embedding_model,
     migrate_legacy_embedding_model,
     resolve_embedding_model_dir,
 )
@@ -25,6 +30,7 @@ def _write_dummy_minilm(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     (path / "config.json").write_text('{"hidden_size": 384}\n', encoding="utf-8")
     (path / "model.safetensors").write_bytes(b"fake-weights")
+    (path / "tokenizer.json").write_text('{"version": "1.0"}\n', encoding="utf-8")
     return path
 
 
@@ -148,6 +154,61 @@ class EmbeddingModelMigrationTests(unittest.TestCase):
             self.assertTrue(embedding_ready(dest))
             self.assertTrue(embedding_ready(src))
 
+    def test_interrupted_copy_leaves_no_complete_looking_destination(self):
+        with tempfile.TemporaryDirectory(prefix="clippy-embed-interrupt-") as raw:
+            src = _write_dummy_minilm(Path(raw) / "src")
+            dest = Path(raw) / "all-MiniLM-L6-v2"
+
+            def partial_copy(source, target, **_kwargs):
+                target = Path(target)
+                target.mkdir(parents=True)
+                (target / "config.json").write_text("{}", encoding="utf-8")
+                raise OSError("disk full")
+
+            with patch("core.model_download.shutil.copytree", side_effect=partial_copy):
+                with self.assertRaises(OSError):
+                    _transfer_model(src, dest, prefer_move=False)
+
+            self.assertFalse(embedding_ready(dest))
+            self.assertFalse(dest.exists() or (dest.is_dir() and any(dest.iterdir())))
+            leftovers = list(dest.parent.glob(f"{dest.name}.tmp-*"))
+            self.assertEqual(leftovers, [])
+
+    def test_empty_destination_is_refilled_atomically(self):
+        with tempfile.TemporaryDirectory(prefix="clippy-embed-empty-") as raw:
+            repo = Path(raw) / "repo"
+            dest = Path(raw) / "Clippy Vision" / EMBEDDING_MODEL_RELATIVE
+            dest.mkdir(parents=True)
+            (dest / "config.json").write_text("", encoding="utf-8")
+            src = _write_dummy_minilm(repo / EMBEDDING_MODEL_RELATIVE)
+
+            migrated = migrate_legacy_embedding_model(dest, project_root=repo)
+            self.assertEqual(migrated, dest)
+            self.assertTrue(embedding_ready(dest))
+            self.assertTrue((dest / "tokenizer.json").is_file())
+            self.assertEqual(list(dest.parent.glob(f"{dest.name}.tmp-*")), [])
+
+    def test_failed_download_leaves_no_empty_folder(self):
+        with tempfile.TemporaryDirectory(prefix="clippy-embed-dl-") as raw:
+            dest = Path(raw) / "all-MiniLM-L6-v2"
+            dest.mkdir()
+            (dest / "orphan").write_text("stale\n", encoding="utf-8")
+
+            def fail_snapshot(_repo, local_dir):
+                raise OSError("offline")
+
+            with patch("core.model_download.embedding_model_dir", return_value=dest), \
+                 patch("core.model_download._snapshot", side_effect=fail_snapshot), \
+                 patch(
+                     "core.model_download._migrate_legacy_embedding_model_unlocked",
+                     return_value=dest,
+                 ):
+                with self.assertRaises(OSError):
+                    ensure_embedding_model()
+
+            self.assertFalse(dest.exists())
+            self.assertEqual(list(Path(raw).glob(f"{dest.name}.tmp-*")), [])
+
 
 class HashFallbackGuardTests(unittest.TestCase):
     def tearDown(self):
@@ -164,7 +225,7 @@ class HashFallbackGuardTests(unittest.TestCase):
             import core.local_embeddings as local_embeddings
 
             local_embeddings._load_error = RuntimeError("offline")
-            with self.assertRaises(RuntimeError) as ctx:
+            with self.assertRaises(EmbeddingUnavailable) as ctx:
                 embed_texts(["favorite editor"])
         message = str(ctx.exception)
         self.assertIn("MiniLM embeddings are required", message)
@@ -204,6 +265,46 @@ class HashFallbackGuardTests(unittest.TestCase):
         ensure.assert_called_once_with(HASH_MODEL_ID, None)
         self.assertIn("WARNING", stdout.getvalue())
         self.assertIn("no MiniLM vectors are stored", stdout.getvalue())
+
+
+class EmbeddingStatusDiagnosticsTests(unittest.TestCase):
+    def tearDown(self):
+        reset_runtime_state_for_tests()
+
+    def test_embedding_status_flags_missing_folder_without_loading(self):
+        with tempfile.TemporaryDirectory(prefix="clippy-embed-status-") as raw:
+            missing = Path(raw) / "missing-minilm"
+            with patch("core.local_embeddings.model_dir", return_value=missing), \
+                 patch("core.local_embeddings.hash_fallback_allowed", return_value=False):
+                reset_runtime_state_for_tests()
+                status = embedding_status()
+        self.assertFalse(status["bundled"])
+        self.assertFalse(status["ready"])
+        self.assertFalse(status["loaded"])
+        self.assertIsNotNone(status["error"])
+        self.assertIn("missing or incomplete", status["error"])
+
+    def test_diagnostics_include_missing_model_error(self):
+        status = {
+            "provider": "local",
+            "model": MODEL_ID,
+            "dimension": 384,
+            "model_path": "/tmp/missing-minilm",
+            "bundled": False,
+            "ready": False,
+            "loaded": False,
+            "error": "MiniLM model is missing or incomplete at /tmp/missing-minilm",
+        }
+        with patch("core.diagnostics.embedding_status", return_value=status), \
+             patch("core.diagnostics.get_capture_status", return_value={}), \
+             patch("core.diagnostics.get_capture_settings", return_value={}), \
+             patch("core.diagnostics.get_data_stats", return_value={}), \
+             patch("core.diagnostics.get_performance_snapshot", return_value={}), \
+             patch("core.diagnostics._package_status", return_value=[]), \
+             patch("core.diagnostics._permission_status", return_value={}):
+            data = get_diagnostics()
+        self.assertEqual(data["embeddings"]["error"], status["error"])
+        self.assertFalse(data["embeddings"]["bundled"])
 
 
 if __name__ == "__main__":

@@ -20,6 +20,10 @@ MAX_TOKENS = 256
 _MODEL_META_KEY = "embeddings.model"
 _TOKEN_RE = re.compile(r"[\w][\w./:-]*", re.UNICODE)
 
+class EmbeddingUnavailable(RuntimeError):
+    """MiniLM is required but the checkpoint is missing or failed to load."""
+
+
 _bundle = None
 _load_error: Exception | None = None
 _load_lock = threading.Lock()
@@ -289,7 +293,7 @@ def embed_texts(texts: Iterable[str]) -> list[list[float]]:
                 f"embeddings use {expected}; refusing hash fallback "
                 f"(results would not match). Model dir: {model_dir()}. {reason}"
             )
-            raise RuntimeError(
+            raise EmbeddingUnavailable(
                 f"MiniLM embeddings are required ({expected}) but the model "
                 f"is unavailable at {model_dir()}: {reason}"
             )
@@ -312,7 +316,12 @@ def embedding_status() -> dict:
     bundle = _bundle
     from core.model_download import embedding_ready
 
-    ready = embedding_ready(model_dir())
+    path = model_dir()
+    ready = embedding_ready(path)
+    folder_error = None
+    if not ready:
+        folder_error = f"MiniLM model is missing or incomplete at {path}"
+    load_error = str(_load_error) if _load_error else None
     if ready and _load_error is None:
         active_model = MODEL_ID
     elif hash_fallback_allowed():
@@ -323,8 +332,9 @@ def embedding_status() -> dict:
         "provider": "local",
         "model": active_model,
         "dimension": MODEL_DIMENSION,
-        "model_path": str(model_dir()),
+        "model_path": str(path),
         "bundled": ready,
+        "ready": ready and _load_error is None,
         "loaded": bundle is not None,
-        "error": str(_load_error) if _load_error else None,
+        "error": folder_error or load_error,
     }

@@ -6,9 +6,10 @@ from difflib import get_close_matches
 
 from agent.helpers.keywords import keywords_from_query
 from agent.helpers.time_resolver import resolve_temporal_range
+from agent.tool_result import keyword_fallback_result
 from core.chat_model import get_chat_model
 from core.llm_gateway import Priority, gateway
-from core.local_embeddings import embed_text, embed_texts
+from core.local_embeddings import EmbeddingUnavailable, embed_text, embed_texts
 from core.rag import search_event_rag
 from core.storage import conn
 
@@ -627,12 +628,22 @@ def search_sessions(question: str) -> str:
 
     # Fix 3: use semantic re-ranking when we can extract a date filter
     where_fragment = _extract_where_fragment(sql)
+    embedding_error = None
     if where_fragment:
         try:
             rows, total = _semantic_sessions(question, where_fragment)
-        except Exception:
-
-            # Fall back to plain SQL on any embedding failure
+        except EmbeddingUnavailable as exc:
+            print(f"[search_sessions] MiniLM unavailable; using keyword fallback: {exc}")
+            embedding_error = exc
+            try:
+                rows, total = _run_sql(sql)
+            except Exception as e:
+                return keyword_fallback_result(
+                    f"search_sessions: SQL error — {e}\n→ Try search_events instead.",
+                    exc,
+                )
+        except Exception as exc:
+            print(f"[search_sessions] semantic search failed; using SQL fallback: {exc}")
             try:
                 rows, total = _run_sql(sql)
             except Exception as e:
@@ -644,12 +655,13 @@ def search_sessions(question: str) -> str:
             return f"search_sessions: SQL error — {e}\n→ Try search_events instead."
 
     if not _rows_are_useful(rows):
-        return (
+        text = (
             "search_sessions: no matching session summaries found.\n"
             "Sessions store broad topic summaries — if you need specific "
             "message text, OCR content, URLs, or app-level detail, "
             "call search_events."
         )
+        return keyword_fallback_result(text, embedding_error)
 
 
     # Fix 1: include total count so the agent knows if it's seeing a partial view
@@ -662,13 +674,22 @@ def search_sessions(question: str) -> str:
     else:
         header = f"search_sessions results ({shown} sessions matched):"
 
-    return _truncate_result(header + "\n\n" + "\n---\n".join(rows))
+    text = _truncate_result(header + "\n\n" + "\n---\n".join(rows))
+    return keyword_fallback_result(
+        text,
+        embedding_error,
+        notice=(
+            "search_sessions: MiniLM model is missing or incomplete; "
+            "results are keyword fallback only."
+        ) if embedding_error else None,
+    )
 
 
 def search_events(question: str) -> str:
     """Search individual events. Best for: specific messages, OCR text,
     exact URLs, clipboard content, app switches, fine-grained timestamps."""
 
+    embedding_error = None
     try:
         temporal = resolve_temporal_range(question)
         rag = search_event_rag(
@@ -688,6 +709,9 @@ def search_events(question: str) -> str:
                 else:
                     header = f"search_events RAG results ({shown} hybrid matches):"
                 return _truncate_result(header + "\n\n" + "\n---\n".join(rows))
+    except EmbeddingUnavailable as exc:
+        print(f"[rag] MiniLM unavailable; using keyword fallback: {exc}")
+        embedding_error = exc
     except Exception as exc:
         print(f"[rag] event search unavailable; using SQL fallback: {exc}")
 
@@ -706,7 +730,15 @@ def search_events(question: str) -> str:
                     )
                 else:
                     header = f"search_events FTS results ({shown} keyword matches):"
-                return _truncate_result(header + "\n\n" + "\n---\n".join(rows))
+                text = _truncate_result(header + "\n\n" + "\n---\n".join(rows))
+                return keyword_fallback_result(
+                    text,
+                    embedding_error,
+                    notice=(
+                        "search_events: MiniLM model is missing or incomplete; "
+                        "results are keyword fallback only."
+                    ) if embedding_error else None,
+                )
     except Exception as exc:
         print(f"[fts] event search unavailable; using SQL fallback: {exc}")
 
@@ -716,15 +748,16 @@ def search_events(question: str) -> str:
 
     outcome = _execute_event_sql(question, user_content)
     if isinstance(outcome, str):
-        return outcome
+        return keyword_fallback_result(outcome, embedding_error)
     rows, total = outcome
 
     if not _rows_are_useful(rows):
-        return (
+        text = (
             "search_events: no matching events found.\n"
             "Events store low-level activity — if you need a high-level "
             "topic or time-window summary, call search_sessions."
         )
+        return keyword_fallback_result(text, embedding_error)
 
     shown = len(rows)
     if total > shown:
@@ -735,4 +768,12 @@ def search_events(question: str) -> str:
     else:
         header = f"search_events results ({shown} events matched):"
 
-    return _truncate_result(header + "\n\n" + "\n---\n".join(rows))
+    text = _truncate_result(header + "\n\n" + "\n---\n".join(rows))
+    return keyword_fallback_result(
+        text,
+        embedding_error,
+        notice=(
+            "search_events: MiniLM model is missing or incomplete; "
+            "results are keyword fallback only."
+        ) if embedding_error else None,
+    )
