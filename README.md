@@ -63,9 +63,7 @@ The installers are unsigned: on Windows choose **More info → Run anyway**, and
 - Clippy Python: ~670 MB at rest, peak 1.6 GB
 - Ollama with `qwen3:8b`: median ~7.4 GB at rest during the session (combined peak ≈ 7.4 + 1.6 + 0.6)
 
-Ollama also grew about 0.5–0.7 GB per question until the model unloaded. **16 GB** is the amount we recommend for default Ollama settings.
-
-Setting `LLAMA_ARG_CACHE_RAM=0` before `ollama serve` stops Ollama's prompt-cache memory growth. `ollama ps` does not count that cache (it can under-report by up to ~8 GiB).
+Ollama also grew about 0.5–0.7 GB per question until the model unloaded. That growth is Ollama's prompt cache: setting `LLAMA_ARG_CACHE_RAM=0` before `ollama serve` stops it. The setting was checked on Ollama 0.40.6 (older versions may ignore it). `ollama ps` does not count that cache (it can under-report by up to ~8 GiB). **16 GB** is the amount we recommend for default Ollama settings.
 
 **Python is not bundled** in the Windows installer or Linux AppImage. `requirements.txt` does not pin a Python version. The packaged app runs `CLIPPY_PYTHON` if set, otherwise `python3` (Linux/macOS) or `python` (Windows) from PATH (`electron-ui/electron/lib/paths.js`). CI unit tests and the release dry-run install Python 3.12. The setup wizard parses `python --version` and requires **Python 3.11+**.
 
