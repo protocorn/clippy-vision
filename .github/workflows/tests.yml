@@ -34,7 +34,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # macos-latest is arm64 (darwin-arm64 archive). macos-13 is retired;
+        # macos-15-intel is the GitHub-hosted x64 runner (darwin-x64 archive).
+        # Both are standard public-repo runners, not larger/paid labels.
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-15-intel]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
