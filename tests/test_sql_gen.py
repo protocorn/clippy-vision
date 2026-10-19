@@ -188,7 +188,7 @@ def generate_sql(query: str) -> tuple[str | None, str | None]:
     try:
         from core.ollama_options import apply_inference_options
         payload = apply_inference_options(payload)
-    except Exception:
+    except ImportError:
         payload["options"]["num_ctx"] = 8192
     req = urllib.request.Request(
         OLLAMA_URL,

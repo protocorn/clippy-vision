@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Published v2.1.0 notes and changelog after the tag ([#35](https://github.com/protocorn/clippy-vision/pull/35)) — documentation. Dropped leftover draft/checklist text; Python 3.11+ as the stated requirement. Did not rebuild or retag.
 
 ### Fixed
-- Ollama chat/generate calls now send an explicit `num_ctx` (default 8192, override with `CLIPPY_OLLAMA_NUM_CTX`) so long summary and search prompts are not truncated at Ollama's 2048-token default — **CI-only** (`tests/test_ollama_num_ctx.py`). Does not start Ollama.
+- Ollama chat/generate calls now send an explicit `num_ctx` (default 8192, override with `CLIPPY_OLLAMA_NUM_CTX`) so long summary and search prompts are not truncated at Ollama's 2048-token default — **CI-only** (`tests/test_ollama_num_ctx.py`). Does not start Ollama. KV cache at 8192 is ~1.2 GB for `qwen3:8b` (vs ~0.3 GB at 2048); the 8 GB RAM minimum and 1.5 GB `can_load_text` cold-load floor are unchanged.
 - Chat prompt crash on SQL NULL `active_task` / `summary` / `ocr_text`; `/chat` and `/chat/stream` return a user-facing message when the model is missing instead of a 500 ([#34](https://github.com/protocorn/clippy-vision/pull/34)) — **CI-only**.
 - Electron preflight parses `python --version` and requires Python 3.11+ ([#38](https://github.com/protocorn/clippy-vision/pull/38)) — **CI-only** (`node --test` of `setup.test.js` and `mcp.test.js`). Not in the published v2.1.0 installer or AppImage.
 - Private-browsing docs aligned with a coverage table ([#41](https://github.com/protocorn/clippy-vision/pull/41), closes [#16](https://github.com/protocorn/clippy-vision/issues/16)) — documentation / **CI-only** wording honesty, not real-machine browser tests.

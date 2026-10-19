@@ -36,7 +36,11 @@ def get_num_ctx() -> int:
 
 
 def merge_options(options: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Caller options plus the configured ``num_ctx`` (central value wins)."""
+    """Caller options plus the configured ``num_ctx``.
+
+    ``num_ctx`` always comes from ``get_num_ctx()``. A value in ``options`` is
+    overwritten so callers cannot silently pick a smaller window.
+    """
     merged = dict(options or {})
     merged["num_ctx"] = get_num_ctx()
     return merged
