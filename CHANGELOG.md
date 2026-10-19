@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Published v2.1.0 notes and changelog after the tag ([#35](https://github.com/protocorn/clippy-vision/pull/35)) — documentation. Dropped leftover draft/checklist text; Python 3.11+ as the stated requirement. Did not rebuild or retag.
 
 ### Fixed
+- Periodic chat-model re-warm no longer loads the text model when free RAM is below the 1.5 GB cold-load floor or another Ollama model is already resident (a 4b-instruct run had been squeezed to ~0.5 GB free). Startup warm still tries below the floor. The warm `/api/generate` call now sends `think: false` so qwen3 does not spend ~50s generating thinking tokens on CPU. **CI-only**.
 - Chat prompt crash on SQL NULL `active_task` / `summary` / `ocr_text`; `/chat` and `/chat/stream` return a user-facing message when the model is missing instead of a 500 ([#34](https://github.com/protocorn/clippy-vision/pull/34)) — **CI-only**.
 - Electron preflight parses `python --version` and requires Python 3.11+ ([#38](https://github.com/protocorn/clippy-vision/pull/38)) — **CI-only** (`node --test` of `setup.test.js` and `mcp.test.js`). Not in the published v2.1.0 installer or AppImage.
 - Private-browsing docs aligned with a coverage table ([#41](https://github.com/protocorn/clippy-vision/pull/41), closes [#16](https://github.com/protocorn/clippy-vision/issues/16)) — documentation / **CI-only** wording honesty, not real-machine browser tests.
