@@ -11,15 +11,14 @@ from collections.abc import Iterable
 from pathlib import Path
 
 # The local MiniLM checkpoint is preferred (downloaded from Hugging Face on
-# first use). The deterministic hash encoder keeps keyword-like retrieval
-# available when PyTorch or the model cannot be loaded.
+# first use). Hash embeddings are only used when nothing MiniLM-backed is
+# stored yet. If stored vectors expect MiniLM, a load failure is an error.
 MODEL_ID = "local:sentence-transformers/all-MiniLM-L6-v2"
+HASH_MODEL_ID = "local:hash-384-v1"
 MODEL_DIMENSION = 384
 MAX_TOKENS = 256
 _MODEL_META_KEY = "embeddings.model"
 _TOKEN_RE = re.compile(r"[\w][\w./:-]*", re.UNICODE)
-_PROJECT_ROOT = Path(__file__).resolve().parents[1]
-_DEFAULT_MODEL_DIR = _PROJECT_ROOT / "models" / "embeddings" / "all-MiniLM-L6-v2"
 
 _bundle = None
 _load_error: Exception | None = None
@@ -29,8 +28,9 @@ _migrated_model_id: str | None = None
 
 
 def model_dir() -> Path:
-    override = os.environ.get("CLIPPY_EMBEDDING_MODEL_DIR", "").strip()
-    return Path(override).expanduser() if override else _DEFAULT_MODEL_DIR
+    from core.model_download import embedding_model_dir
+
+    return embedding_model_dir()
 
 
 def _load_bundle():
@@ -53,7 +53,10 @@ def _load_bundle():
                 ensure_embedding_model()
                 path = model_dir()
             if not embedding_ready(path):
-                raise FileNotFoundError(f"MiniLM model is missing from {path}")
+                raise FileNotFoundError(
+                    f"MiniLM model is missing from {path}. "
+                    "Set CLIPPY_EMBEDDING_MODEL_DIR or run python -m core.model_download."
+                )
             tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
             model = AutoModel.from_pretrained(path, local_files_only=True)
             if int(model.config.hidden_size) != MODEL_DIMENSION:
@@ -74,8 +77,59 @@ def _load_bundle():
             _bundle = (torch, tokenizer, model, device)
         except Exception as exc:
             _load_error = exc
-            print(f"[local-embeddings] MiniLM unavailable; using local hash fallback: {exc}")
+            print(f"[local-embeddings] MiniLM failed to load from {model_dir()}: {exc}")
     return _bundle
+
+
+def reset_runtime_state_for_tests() -> None:
+    global _bundle, _load_error, _migrated_model_id
+    _bundle = None
+    _load_error = None
+    _migrated_model_id = None
+
+
+def _stored_embedding_model_id() -> str | None:
+    try:
+        from core.storage import conn
+
+        row = conn.execute(
+            "SELECT value FROM memory_meta WHERE key = ?", (_MODEL_META_KEY,)
+        ).fetchone()
+        return str(row[0]) if row and row[0] else None
+    except Exception:
+        return None
+
+
+def _storage_has_vectors() -> bool:
+    try:
+        from core.storage import conn
+    except Exception:
+        return False
+    for table, column in (
+        ("memory_facts", "vector_embedding"),
+        ("events", "vector_embedding"),
+        ("sessions", "summary_embedding"),
+    ):
+        try:
+            row = conn.execute(
+                f"SELECT 1 FROM {table} WHERE {column} IS NOT NULL LIMIT 1"
+            ).fetchone()
+        except Exception:
+            continue
+        if row:
+            return True
+    return False
+
+
+def hash_fallback_allowed(stored_model_id: str | None = None) -> bool:
+    """Hash vectors must not be compared against stored MiniLM embeddings."""
+    if stored_model_id is None:
+        stored_model_id = _stored_embedding_model_id()
+    if stored_model_id == HASH_MODEL_ID:
+        return True
+    if stored_model_id:
+        return False
+    return not _storage_has_vectors()
 
 
 def _hash_embedding(text: str) -> list[float]:
@@ -225,10 +279,28 @@ def embed_texts(texts: Iterable[str]) -> list[list[float]]:
     if not values:
         return []
     bundle = _load_bundle()
-    active_model_id = MODEL_ID if bundle is not None else "local:hash-384-v1"
-    _ensure_storage_model(active_model_id, bundle)
     if bundle is None:
+        stored = _stored_embedding_model_id()
+        if not hash_fallback_allowed(stored):
+            reason = _load_error or "MiniLM failed to load"
+            expected = stored or MODEL_ID
+            print(
+                f"[local-embeddings] ERROR: MiniLM is required because stored "
+                f"embeddings use {expected}; refusing hash fallback "
+                f"(results would not match). Model dir: {model_dir()}. {reason}"
+            )
+            raise RuntimeError(
+                f"MiniLM embeddings are required ({expected}) but the model "
+                f"is unavailable at {model_dir()}: {reason}"
+            )
+        print(
+            f"[local-embeddings] WARNING: MiniLM unavailable at {model_dir()}; "
+            f"using local hash embeddings because no MiniLM vectors are stored. "
+            f"{_load_error}"
+        )
+        _ensure_storage_model(HASH_MODEL_ID, None)
         return [_hash_embedding(text) for text in values]
+    _ensure_storage_model(MODEL_ID, bundle)
     return _encode_with_bundle(bundle, values)
 
 
@@ -241,7 +313,12 @@ def embedding_status() -> dict:
     from core.model_download import embedding_ready
 
     ready = embedding_ready(model_dir())
-    active_model = MODEL_ID if ready and _load_error is None else "local:hash-384-v1"
+    if ready and _load_error is None:
+        active_model = MODEL_ID
+    elif hash_fallback_allowed():
+        active_model = HASH_MODEL_ID
+    else:
+        active_model = MODEL_ID
     return {
         "provider": "local",
         "model": active_model,

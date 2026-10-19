@@ -31,6 +31,21 @@ if not defined CLIPPY_DATA_DIR (
     )
 )
 
+if not defined CLIPPY_EMBEDDING_MODEL_DIR (
+    if /I "%CLIPPY_DATA_DIR%"=="%CLIPPY_ROOT%\core\data" set "CLIPPY_EMBEDDING_MODEL_DIR=%CLIPPY_ROOT%\models\embeddings\all-MiniLM-L6-v2"
+    if /I "%CLIPPY_DATA_DIR%"=="%CLIPPY_ROOT%\core\data\" set "CLIPPY_EMBEDDING_MODEL_DIR=%CLIPPY_ROOT%\models\embeddings\all-MiniLM-L6-v2"
+)
+if not defined CLIPPY_EMBEDDING_MODEL_DIR (
+    for %%I in ("%CLIPPY_DATA_DIR%") do (
+        if /I "%%~nxI"=="data" (
+            for %%J in ("%%~dpI.") do set "CLIPPY_EMBEDDING_MODEL_DIR=%%~fJ\models\embeddings\all-MiniLM-L6-v2"
+        )
+    )
+)
+if not defined CLIPPY_EMBEDDING_MODEL_DIR (
+    set "CLIPPY_EMBEDDING_MODEL_DIR=%CLIPPY_DATA_DIR%\models\embeddings\all-MiniLM-L6-v2"
+)
+
 if defined PYTHONPATH (
     set "PYTHONPATH=%CLIPPY_ROOT%;%PYTHONPATH%"
 ) else (

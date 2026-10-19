@@ -246,6 +246,10 @@ test('AppImage launch config copies python runtime into userData instead of /tmp
         assert.ok(path.basename(launch.env.PYTHONPATH).startsWith('mcp-runtime-'))
         assert.equal(launch.args[0], path.join(launch.env.PYTHONPATH, 'mcp_server.py'))
         assert.equal(launch.env.CLIPPY_DATA_DIR, path.join(userData, 'data'))
+        assert.equal(
+            launch.env.CLIPPY_EMBEDDING_MODEL_DIR,
+            path.join(userData, 'models', 'embeddings', 'all-MiniLM-L6-v2'),
+        )
         assert.ok(!String(launch.args[0]).includes('.mount_'))
         assert.ok(!String(launch.env.PYTHONPATH).includes('.mount_'))
         assert.ok(!String(launch.launcher).includes('.mount_'))
@@ -255,6 +259,8 @@ test('AppImage launch config copies python runtime into userData instead of /tmp
         assert.equal(fs.existsSync(path.join(launch.env.PYTHONPATH, 'api_server.py')), false)
         const launcherText = fs.readFileSync(launch.launcher, 'utf8')
         assert.match(launcherText, /mcp-runtime/)
+        assert.match(launcherText, /CLIPPY_EMBEDDING_MODEL_DIR=/)
+        assert.ok(launcherText.includes(launch.env.CLIPPY_EMBEDDING_MODEL_DIR))
         assert.match(launcherText, /^exec /m)
         const execLine = launcherText.split('\n').find((line) => line.startsWith('exec '))
         assert.ok(execLine)
@@ -297,6 +303,10 @@ test('Windows packaged ROOT is left unchanged (not copied into userData)', async
         const launch = await mcp.getMcpLaunchConfig()
         assert.equal(launch.args[0], path.join(root, 'mcp_server.py'))
         assert.equal(launch.env.PYTHONPATH, root)
+        assert.equal(
+            launch.env.CLIPPY_EMBEDDING_MODEL_DIR,
+            path.join(userData, 'models', 'embeddings', 'all-MiniLM-L6-v2'),
+        )
         assert.equal(launch.launcher, path.join(root, 'scripts', 'clippy-mcp.cmd'))
         assert.equal(fs.existsSync(path.join(userData, 'mcp-runtime')), false)
     } finally {
@@ -321,6 +331,10 @@ test('non-AppImage Linux ROOT is left unchanged', async () => {
         const launch = await mcp.getMcpLaunchConfig()
         assert.equal(launch.args[0], path.join(home, 'mcp_server.py'))
         assert.equal(launch.env.PYTHONPATH, home)
+        assert.equal(
+            launch.env.CLIPPY_EMBEDDING_MODEL_DIR,
+            path.join(home, 'models', 'embeddings', 'all-MiniLM-L6-v2'),
+        )
         assert.equal(fs.existsSync(path.join(home, 'mcp-runtime')), false)
     } finally {
         fs.rmSync(home, { recursive: true, force: true })
@@ -383,12 +397,58 @@ test('startup refresh rewrites stale /tmp/.mount_* MCP configs and leaves others
         const cursorDoc = JSON.parse(fs.readFileSync(cursorPath, 'utf8'))
         assert.equal(cursorDoc.mcpServers['clippy-vision'].args[0], launch.args[0])
         assert.equal(cursorDoc.mcpServers['clippy-vision'].env.PYTHONPATH, launch.env.PYTHONPATH)
+        assert.equal(cursorDoc.mcpServers['clippy-vision'].env.CLIPPY_EMBEDDING_MODEL_DIR, launch.env.CLIPPY_EMBEDDING_MODEL_DIR)
         assert.ok(path.basename(launch.env.PYTHONPATH).startsWith('mcp-runtime-'))
         assert.equal(cursorDoc.mcpServers['other-app'].command, 'npx')
 
         const vscodeDoc = JSON.parse(fs.readFileSync(vscodePath, 'utf8'))
         assert.deepEqual(vscodeDoc.servers, { unrelated: { command: 'node', args: ['server.js'] } })
         assert.equal(entryHasStaleAppImageMount(cursorDoc.mcpServers['clippy-vision']), false)
+    } finally {
+        fs.rmSync(home, { recursive: true, force: true })
+    }
+})
+
+test('startup refresh writes CLIPPY_EMBEDDING_MODEL_DIR onto current runtime configs', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'clippy-mcp-embed-refresh-'))
+    try {
+        const mountRoot = path.join(home, 'tmp', '.mount_ClippyCUR', 'usr', 'lib', 'clippy-vision', 'resources', 'clippy')
+        seedClippyRoot(mountRoot)
+        const userData = path.join(home, 'user-data')
+        const python = path.join(userData, 'python-venv', 'bin', 'python')
+        seedPython(python)
+        const appImage = path.join(home, 'ClippyVision.AppImage')
+        fs.writeFileSync(appImage, '')
+
+        const mcp = createAppImageMcp({
+            home,
+            mountRoot,
+            userData,
+            python,
+            appImage,
+            appDir: path.join(home, 'tmp', '.mount_ClippyCUR'),
+        })
+        const launch = await mcp.getMcpLaunchConfig()
+        const runtime = { platform: 'linux', home, env: { APPIMAGE: appImage, APPDIR: path.join(home, 'tmp', '.mount_ClippyCUR') } }
+        const cursorPath = mcpClientDefinitions(runtime).cursor.configPath
+        fs.mkdirSync(path.dirname(cursorPath), { recursive: true })
+        fs.writeFileSync(cursorPath, JSON.stringify({
+            mcpServers: {
+                'clippy-vision': {
+                    command: python,
+                    args: [launch.args[0]],
+                    env: { PYTHONPATH: launch.env.PYTHONPATH, CLIPPY_DATA_DIR: launch.env.CLIPPY_DATA_DIR },
+                },
+            },
+        }))
+
+        const result = await mcp.refreshStaleMcpClientConfigs()
+        assert.deepEqual(result.refreshed.map((row) => row.clientId), ['cursor'])
+        const cursorDoc = JSON.parse(fs.readFileSync(cursorPath, 'utf8'))
+        assert.equal(
+            cursorDoc.mcpServers['clippy-vision'].env.CLIPPY_EMBEDDING_MODEL_DIR,
+            path.join(userData, 'models', 'embeddings', 'all-MiniLM-L6-v2'),
+        )
     } finally {
         fs.rmSync(home, { recursive: true, force: true })
     }

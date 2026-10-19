@@ -35,6 +35,20 @@ if [[ -z "${CLIPPY_DATA_DIR:-}" ]]; then
 fi
 
 export CLIPPY_DATA_DIR
+
+if [[ -z "${CLIPPY_EMBEDDING_MODEL_DIR:-}" ]]; then
+  _data_trimmed="${CLIPPY_DATA_DIR%/}"
+  if [[ "${_data_trimmed}" == "${CLIPPY_ROOT}/core/data" ]]; then
+    CLIPPY_EMBEDDING_MODEL_DIR="${CLIPPY_ROOT}/models/embeddings/all-MiniLM-L6-v2"
+  elif [[ "${_data_trimmed}" == */data ]]; then
+    CLIPPY_EMBEDDING_MODEL_DIR="${_data_trimmed%/data}/models/embeddings/all-MiniLM-L6-v2"
+  else
+    CLIPPY_EMBEDDING_MODEL_DIR="${_data_trimmed}/models/embeddings/all-MiniLM-L6-v2"
+  fi
+  unset _data_trimmed
+fi
+export CLIPPY_EMBEDDING_MODEL_DIR
+
 export PYTHONPATH="${CLIPPY_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 export PYTHONIOENCODING=utf-8
 export PYTHONUTF8=1

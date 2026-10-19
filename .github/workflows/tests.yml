@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   electron-mcp-paths:
@@ -25,7 +24,7 @@ jobs:
 
       - name: Run MCP config path tests
         working-directory: electron-ui
-        run: node --test electron/lib/mcp.test.js electron/lib/setup.test.js
+        run: node --test electron/lib/mcp.test.js electron/lib/setup.test.js electron/lib/api-spawn.test.js
 
   electron-renderer-lint:
     name: Electron renderer lint
