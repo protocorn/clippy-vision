@@ -70,6 +70,7 @@ def artifact_paths(path: Path) -> list[Path]:
         folder / f"{stem}.a11y.txt",
         folder / f"{stem}.a11y.tmp",
         folder / f"{stem}.ocr-crop.json",
+        folder / f"{stem}.ocr-retry.json",
         folder / f"{stem}.window.json",
         folder / f"{stem}.tmp",
     ]
@@ -310,6 +311,13 @@ def sweep_screenshot_sidecars(directory: Path) -> None:
     for path in directory.glob("*.ocr-crop.json"):
         stem = path.name[: -len(".ocr-crop.json")]
         if stem not in live or stem in processed:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    for path in directory.glob("*.ocr-retry.json"):
+        stem = path.name[: -len(".ocr-retry.json")]
+        if stem not in live:
             try:
                 path.unlink(missing_ok=True)
             except OSError:
