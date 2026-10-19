@@ -22,7 +22,7 @@ function seedPython(pythonPath) {
     fs.writeFileSync(pythonPath, '')
 }
 
-function createAppImageMcp({ home, mountRoot, userData, python, appImage, appDir, version = '2.1.1' }) {
+function createAppImageMcp({ home, mountRoot, userData, python, appImage, appDir, version = '2.1.1', llmConfig } = {}) {
     return createMcp({
         paths: {
             ROOT: mountRoot,
@@ -33,6 +33,7 @@ function createAppImageMcp({ home, mountRoot, userData, python, appImage, appDir
         runCommand: async () => ({ code: 1, stdout: '' }),
         shell: { openExternal: async () => {} },
         version,
+        llmConfig,
         runtime: {
             platform: 'linux',
             home,
@@ -250,6 +251,7 @@ test('AppImage launch config copies python runtime into userData instead of /tmp
             launch.env.CLIPPY_EMBEDDING_MODEL_DIR,
             path.join(userData, 'models', 'embeddings', 'all-MiniLM-L6-v2'),
         )
+        assert.equal(launch.env.CLIPPY_OLLAMA_URL, 'http://127.0.0.1:11434')
         assert.ok(!String(launch.args[0]).includes('.mount_'))
         assert.ok(!String(launch.env.PYTHONPATH).includes('.mount_'))
         assert.ok(!String(launch.launcher).includes('.mount_'))
@@ -261,6 +263,8 @@ test('AppImage launch config copies python runtime into userData instead of /tmp
         assert.match(launcherText, /mcp-runtime/)
         assert.match(launcherText, /CLIPPY_EMBEDDING_MODEL_DIR=/)
         assert.ok(launcherText.includes(launch.env.CLIPPY_EMBEDDING_MODEL_DIR))
+        assert.match(launcherText, /CLIPPY_OLLAMA_URL=/)
+        assert.ok(launcherText.includes(launch.env.CLIPPY_OLLAMA_URL))
         assert.match(launcherText, /^exec /m)
         const execLine = launcherText.split('\n').find((line) => line.startsWith('exec '))
         assert.ok(execLine)
@@ -307,6 +311,7 @@ test('Windows packaged ROOT is left unchanged (not copied into userData)', async
             launch.env.CLIPPY_EMBEDDING_MODEL_DIR,
             path.join(userData, 'models', 'embeddings', 'all-MiniLM-L6-v2'),
         )
+        assert.equal(launch.env.CLIPPY_OLLAMA_URL, 'http://127.0.0.1:11434')
         assert.equal(launch.launcher, path.join(root, 'scripts', 'clippy-mcp.cmd'))
         assert.equal(fs.existsSync(path.join(userData, 'mcp-runtime')), false)
     } finally {
@@ -335,6 +340,7 @@ test('non-AppImage Linux ROOT is left unchanged', async () => {
             launch.env.CLIPPY_EMBEDDING_MODEL_DIR,
             path.join(home, 'models', 'embeddings', 'all-MiniLM-L6-v2'),
         )
+        assert.equal(launch.env.CLIPPY_OLLAMA_URL, 'http://127.0.0.1:11434')
         assert.equal(fs.existsSync(path.join(home, 'mcp-runtime')), false)
     } finally {
         fs.rmSync(home, { recursive: true, force: true })
@@ -449,6 +455,111 @@ test('startup refresh writes CLIPPY_EMBEDDING_MODEL_DIR onto current runtime con
             cursorDoc.mcpServers['clippy-vision'].env.CLIPPY_EMBEDDING_MODEL_DIR,
             path.join(userData, 'models', 'embeddings', 'all-MiniLM-L6-v2'),
         )
+    } finally {
+        fs.rmSync(home, { recursive: true, force: true })
+    }
+})
+
+test('MCP launch env includes CLIPPY_OLLAMA_URL from Settings', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'clippy-mcp-ollama-'))
+    try {
+        seedClippyRoot(home)
+        const python = path.join(home, 'venv', 'bin', 'python')
+        seedPython(python)
+        const ollamaUrl = 'http://192.168.1.5:11434'
+        const mcp = createMcp({
+            paths: { ROOT: home, DATA_DIR: path.join(home, 'data'), USER_DATA: home, PYTHON_COMMAND: python },
+            runCommand: async () => ({ code: 1, stdout: '' }),
+            shell: { openExternal: async () => {} },
+            llmConfig: { configuredOllamaBaseURL: () => ollamaUrl },
+            runtime: { platform: 'linux', home, env: {} },
+        })
+
+        const launch = await mcp.getMcpLaunchConfig()
+        assert.equal(launch.env.CLIPPY_OLLAMA_URL, ollamaUrl)
+
+        const cursorPath = mcpClientDefinitions({ platform: 'linux', home, env: {} }).cursor.configPath
+        await mcp.connectMcpClient('cursor')
+        const cursorDoc = JSON.parse(fs.readFileSync(cursorPath, 'utf8'))
+        assert.equal(cursorDoc.mcpServers['clippy-vision'].env.CLIPPY_OLLAMA_URL, ollamaUrl)
+    } finally {
+        fs.rmSync(home, { recursive: true, force: true })
+    }
+})
+
+test('startup refresh writes CLIPPY_OLLAMA_URL onto current runtime configs', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'clippy-mcp-ollama-refresh-'))
+    try {
+        const mountRoot = path.join(home, 'tmp', '.mount_ClippyCUR', 'usr', 'lib', 'clippy-vision', 'resources', 'clippy')
+        seedClippyRoot(mountRoot)
+        const userData = path.join(home, 'user-data')
+        const python = path.join(userData, 'python-venv', 'bin', 'python')
+        seedPython(python)
+        const appImage = path.join(home, 'ClippyVision.AppImage')
+        fs.writeFileSync(appImage, '')
+        const ollamaUrl = 'http://10.0.0.8:11434'
+
+        const mcp = createAppImageMcp({
+            home,
+            mountRoot,
+            userData,
+            python,
+            appImage,
+            appDir: path.join(home, 'tmp', '.mount_ClippyCUR'),
+            llmConfig: { configuredOllamaBaseURL: () => ollamaUrl },
+        })
+        const launch = await mcp.getMcpLaunchConfig()
+        const runtime = { platform: 'linux', home, env: { APPIMAGE: appImage, APPDIR: path.join(home, 'tmp', '.mount_ClippyCUR') } }
+        const cursorPath = mcpClientDefinitions(runtime).cursor.configPath
+        fs.mkdirSync(path.dirname(cursorPath), { recursive: true })
+        fs.writeFileSync(cursorPath, JSON.stringify({
+            mcpServers: {
+                'clippy-vision': {
+                    command: python,
+                    args: [launch.args[0]],
+                    env: {
+                        PYTHONPATH: launch.env.PYTHONPATH,
+                        CLIPPY_DATA_DIR: launch.env.CLIPPY_DATA_DIR,
+                        CLIPPY_EMBEDDING_MODEL_DIR: launch.env.CLIPPY_EMBEDDING_MODEL_DIR,
+                    },
+                },
+            },
+        }))
+
+        const result = await mcp.refreshStaleMcpClientConfigs()
+        assert.deepEqual(result.refreshed.map((row) => row.clientId), ['cursor'])
+        const cursorDoc = JSON.parse(fs.readFileSync(cursorPath, 'utf8'))
+        assert.equal(cursorDoc.mcpServers['clippy-vision'].env.CLIPPY_OLLAMA_URL, ollamaUrl)
+    } finally {
+        fs.rmSync(home, { recursive: true, force: true })
+    }
+})
+
+test('startup refresh updates CLIPPY_OLLAMA_URL when Settings address changes', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'clippy-mcp-ollama-change-'))
+    try {
+        seedClippyRoot(home)
+        const python = path.join(home, 'venv', 'bin', 'python')
+        seedPython(python)
+        let ollamaUrl = 'http://127.0.0.1:11434'
+        const mcp = createMcp({
+            paths: { ROOT: home, DATA_DIR: path.join(home, 'data'), USER_DATA: home, PYTHON_COMMAND: python },
+            runCommand: async () => ({ code: 1, stdout: '' }),
+            shell: { openExternal: async () => {} },
+            llmConfig: { configuredOllamaBaseURL: () => ollamaUrl },
+            runtime: { platform: 'linux', home, env: {} },
+        })
+
+        await mcp.connectMcpClient('cursor')
+        const cursorPath = mcpClientDefinitions({ platform: 'linux', home, env: {} }).cursor.configPath
+        const before = JSON.parse(fs.readFileSync(cursorPath, 'utf8'))
+        assert.equal(before.mcpServers['clippy-vision'].env.CLIPPY_OLLAMA_URL, 'http://127.0.0.1:11434')
+
+        ollamaUrl = 'http://192.168.1.9:11434'
+        const result = await mcp.refreshStaleMcpClientConfigs()
+        assert.deepEqual(result.refreshed.map((row) => row.clientId), ['cursor'])
+        const after = JSON.parse(fs.readFileSync(cursorPath, 'utf8'))
+        assert.equal(after.mcpServers['clippy-vision'].env.CLIPPY_OLLAMA_URL, ollamaUrl)
     } finally {
         fs.rmSync(home, { recursive: true, force: true })
     }

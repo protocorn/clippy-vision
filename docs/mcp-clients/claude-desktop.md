@@ -49,6 +49,7 @@ Paste the Clippy Vision entry under `mcpServers`. Keep any servers already liste
       "env": {
         "CLIPPY_DATA_DIR": "C:\\Users\\YOU\\AppData\\Roaming\\Clippy Vision\\data",
         "CLIPPY_EMBEDDING_MODEL_DIR": "C:\\Users\\YOU\\AppData\\Roaming\\Clippy Vision\\models\\embeddings\\all-MiniLM-L6-v2",
+        "CLIPPY_OLLAMA_URL": "http://127.0.0.1:11434",
         "PYTHONPATH": "C:\\Users\\YOU\\AppData\\Local\\Programs\\Clippy Vision\\resources\\clippy",
         "PYTHONIOENCODING": "utf-8",
         "PYTHONUTF8": "1"
@@ -71,6 +72,7 @@ In JSON, Windows backslashes are escaped as `\\`. On macOS the entry uses ordina
       "env": {
         "CLIPPY_DATA_DIR": "/Users/YOU/Library/Application Support/Clippy Vision/data",
         "CLIPPY_EMBEDDING_MODEL_DIR": "/Users/YOU/Library/Application Support/Clippy Vision/models/embeddings/all-MiniLM-L6-v2",
+        "CLIPPY_OLLAMA_URL": "http://127.0.0.1:11434",
         "PYTHONPATH": "/Applications/Clippy Vision.app/Contents/Resources/clippy",
         "PYTHONIOENCODING": "utf-8",
         "PYTHONUTF8": "1"

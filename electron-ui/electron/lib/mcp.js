@@ -145,7 +145,7 @@ function copyMcpRuntimeSources(srcRoot, destRoot) {
     }
 }
 
-function createMcp({ paths, runCommand, shell, runtime, version } = {}) {
+function createMcp({ paths, runCommand, shell, runtime, version, llmConfig } = {}) {
     const { ROOT, DATA_DIR } = paths
     const USER_DATA = paths.USER_DATA || DATA_DIR
     const EMBEDDING_MODEL_DIR = paths.EMBEDDING_MODEL_DIR
@@ -153,6 +153,17 @@ function createMcp({ paths, runCommand, shell, runtime, version } = {}) {
     const runtimePlatform = runtime?.platform || process.platform
     const runtimeEnv = runtime ? (runtime.env || {}) : process.env
     const appVersion = String(version || runtime?.version || paths.APP_VERSION || '').trim()
+    const DEFAULT_OLLAMA_URL = 'http://127.0.0.1:11434'
+
+    function resolvedOllamaUrl() {
+        const fromEnv = String(runtimeEnv.CLIPPY_OLLAMA_URL || '').trim()
+        if (fromEnv) return fromEnv.replace(/\/+$/, '')
+        if (typeof llmConfig?.configuredOllamaBaseURL === 'function') {
+            const configured = String(llmConfig.configuredOllamaBaseURL() || '').trim().replace(/\/+$/, '')
+            if (configured) return configured
+        }
+        return DEFAULT_OLLAMA_URL
+    }
 
     const MCP_SERVER_KEY = 'clippy-vision'
 
@@ -194,7 +205,7 @@ function createMcp({ paths, runCommand, shell, runtime, version } = {}) {
         return String(lines[2] || '')
     }
 
-    function writeStableLinuxLauncher({ launcherPath, python, serverEntry, dataDir, embeddingModelDir, pythonPath }) {
+    function writeStableLinuxLauncher({ launcherPath, python, serverEntry, dataDir, embeddingModelDir, ollamaUrl, pythonPath }) {
         const script = [
             '#!/usr/bin/env bash',
             '# Manual stdio helper. Connect apps spawn python + mcp_server.py directly;',
@@ -202,6 +213,7 @@ function createMcp({ paths, runCommand, shell, runtime, version } = {}) {
             'set -euo pipefail',
             `export CLIPPY_DATA_DIR=${shSingleQuote(dataDir)}`,
             `export CLIPPY_EMBEDDING_MODEL_DIR=${shSingleQuote(embeddingModelDir)}`,
+            `export CLIPPY_OLLAMA_URL=${shSingleQuote(ollamaUrl)}`,
             `export PYTHONPATH=${shSingleQuote(pythonPath)}`,
             'export PYTHONIOENCODING=utf-8',
             'export PYTHONUTF8=1',
@@ -297,6 +309,7 @@ function createMcp({ paths, runCommand, shell, runtime, version } = {}) {
                     serverEntry,
                     dataDir: DATA_DIR,
                     embeddingModelDir: EMBEDDING_MODEL_DIR,
+                    ollamaUrl: resolvedOllamaUrl(),
                     pythonPath: pythonRoot,
                 })
             } catch (error) {
@@ -308,6 +321,7 @@ function createMcp({ paths, runCommand, shell, runtime, version } = {}) {
         const env = {
             CLIPPY_DATA_DIR: DATA_DIR,
             CLIPPY_EMBEDDING_MODEL_DIR: EMBEDDING_MODEL_DIR,
+            CLIPPY_OLLAMA_URL: resolvedOllamaUrl(),
             PYTHONPATH: pythonRoot,
             PYTHONIOENCODING: 'utf-8',
             PYTHONUTF8: '1',
@@ -577,7 +591,10 @@ function createMcp({ paths, runCommand, shell, runtime, version } = {}) {
             const pointsAtCurrent = args.some((arg) => path.normalize(arg) === wantedServer)
             const env = found.entry.env && typeof found.entry.env === 'object' ? found.entry.env : {}
             const missingEmbeddingDir = !String(env.CLIPPY_EMBEDDING_MODEL_DIR || '').trim()
-            if (!staleMount && pointsAtCurrent && !missingEmbeddingDir) continue
+            const wantedOllamaUrl = String(launch.env.CLIPPY_OLLAMA_URL || '').trim()
+            const currentOllamaUrl = String(env.CLIPPY_OLLAMA_URL || '').trim()
+            const staleOllamaUrl = currentOllamaUrl !== wantedOllamaUrl
+            if (!staleMount && pointsAtCurrent && !missingEmbeddingDir && !staleOllamaUrl) continue
             mergeMcpServerIntoFile(def.configPath, launch, def.id)
             refreshed.push({ clientId: def.id, configPath: def.configPath })
         }

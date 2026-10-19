@@ -24,9 +24,37 @@ DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 _WILDCARD_HOSTS = ("0.0.0.0", "::", "[::]", "*")
 
 
+def _base_url_from_llm_config() -> str:
+    """Read ``base_url`` from llm_config.json, matching chat_model.py's fallback."""
+    try:
+        from core.paths import get_data_dir
+    except ImportError:
+        from paths import get_data_dir
+
+    try:
+        config_path = get_data_dir() / "llm_config.json"
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        return str(data.get("base_url") or "").strip()
+    except Exception:
+        return ""
+
+
 def base_url() -> str:
-    """Ollama endpoint, overridable for non-default installs."""
-    raw = (os.environ.get("CLIPPY_OLLAMA_URL") or os.environ.get("OLLAMA_HOST") or "").strip()
+    """Ollama endpoint, overridable for non-default installs.
+
+    Resolution order:
+    1. ``CLIPPY_OLLAMA_URL`` (set by Electron from Settings).
+    2. ``OLLAMA_HOST`` (Ollama's own client env var).
+    3. ``base_url`` in ``llm_config.json``, for Python entry points that
+       run outside Electron (tests, CLI scripts, MCP when the env is missing).
+    4. ``DEFAULT_BASE_URL``.
+    """
+    raw = (
+        os.environ.get("CLIPPY_OLLAMA_URL")
+        or os.environ.get("OLLAMA_HOST")
+        or _base_url_from_llm_config()
+        or ""
+    ).strip()
     if not raw:
         return DEFAULT_BASE_URL
     if not raw.startswith(("http://", "https://")):

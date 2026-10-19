@@ -46,6 +46,16 @@ if not defined CLIPPY_EMBEDDING_MODEL_DIR (
     set "CLIPPY_EMBEDDING_MODEL_DIR=%CLIPPY_DATA_DIR%\models\embeddings\all-MiniLM-L6-v2"
 )
 
+rem Match Python: CLIPPY_OLLAMA_URL, then OLLAMA_HOST, then llm_config, then default.
+if not defined CLIPPY_OLLAMA_URL if not defined OLLAMA_HOST (
+    if exist "%CLIPPY_DATA_DIR%\llm_config.json" (
+        for /f "usebackq delims=" %%U in (`"%CLIPPY_PYTHON%" -c "import json,sys; print((json.load(open(sys.argv[1], encoding='utf-8')).get('base_url') or '').strip())" "%CLIPPY_DATA_DIR%\llm_config.json" 2^>nul`) do set "CLIPPY_OLLAMA_URL=%%U"
+    )
+)
+if not defined CLIPPY_OLLAMA_URL if not defined OLLAMA_HOST (
+    set "CLIPPY_OLLAMA_URL=http://127.0.0.1:11434"
+)
+
 if defined PYTHONPATH (
     set "PYTHONPATH=%CLIPPY_ROOT%;%PYTHONPATH%"
 ) else (

@@ -31,7 +31,7 @@ function createApiSpawn({ paths, llmConfig, state }) {
         // tool-manager hints so packaged and development launches are consistent.
         const parts = [ROOT]
         if (process.env.PYTHONPATH) parts.push(process.env.PYTHONPATH)
-        return {
+        const env = {
             ...process.env,
             PYTHONIOENCODING: 'utf-8',
             PYTHONUTF8: '1',
@@ -43,6 +43,13 @@ function createApiSpawn({ paths, llmConfig, state }) {
             OLLAMA_NUM_PARALLEL,
             ...extra,
         }
+        // Settings stores the address in llm_config.json. Python only reads
+        // CLIPPY_OLLAMA_URL / OLLAMA_HOST, so pass the configured URL unless
+        // the caller already overrode it.
+        if (!String(env.CLIPPY_OLLAMA_URL || '').trim()) {
+            env.CLIPPY_OLLAMA_URL = configuredOllamaBaseURL()
+        }
+        return env
     }
 
     // Child processes inherit this environment so Python and Ollama resolve the

@@ -17,7 +17,9 @@ from core.ollama_client import (
     describe_http_error,
 )
 
-OLLAMA_URL = f"{base_url()}/api/chat"
+
+def _chat_url() -> str:
+    return f"{base_url()}/api/chat"
 
 # --- Throttle configuration (relative to per-device baseline) ---
 # Thresholds are NOT hardcoded — they are derived at startup from a short CPU
@@ -286,7 +288,7 @@ class LLMGateway:
         if think is not None:
             payload["think"] = think
 
-        job = Job(OLLAMA_URL, payload, timeout)
+        job = Job(_chat_url(), payload, timeout)
         self._enqueue(job, priority)
 
         job.event.wait()
@@ -311,7 +313,7 @@ class LLMGateway:
         if think is not None:
             payload["think"] = think
 
-        job = Job(OLLAMA_URL, payload, timeout, stream=True)
+        job = Job(_chat_url(), payload, timeout, stream=True)
         self._enqueue(job, priority)
 
         if job.waiting_for_background:
