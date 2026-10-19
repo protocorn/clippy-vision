@@ -82,7 +82,7 @@ def _instantiate_minilm(path: Path):
 
 
 def _load_minilm_from_disk():
-    from core.model_download import ensure_embedding_model, embedding_ready
+    from core.model_download import clear_refill_marker, embedding_ready, ensure_embedding_model
 
     path = model_dir()
     if not embedding_ready(path):
@@ -93,29 +93,43 @@ def _load_minilm_from_disk():
             f"MiniLM model is missing from {path}. "
             "Set CLIPPY_EMBEDDING_MODEL_DIR or run python -m core.model_download."
         )
-    return _instantiate_minilm(path)
+    bundle = _instantiate_minilm(path)
+    clear_refill_marker(path)
+    return bundle
 
 
 def _try_refill_after_weights_error(exc: BaseException) -> bool:
-    """Discard and refill the app-managed folder once. Never touches a user override."""
+    """Refill the app-managed folder once. Never touches a user override.
+
+    dest is not deleted until a validated replacement is in the temp folder.
+    The attempt is persisted with the failing files' fingerprint so a later
+    launch does not retry the same files. A new fingerprint or revision can
+    refill once more.
+    """
     global _refill_attempted
     from core.model_download import (
-        discard_managed_embedding_dir,
-        ensure_embedding_model,
         is_user_embedding_override,
+        model_files_fingerprint,
+        record_refill_attempt,
+        refill_managed_embedding_dir,
+        refill_recorded_for_current_model,
     )
 
     if is_user_embedding_override():
         return False
     if _refill_attempted or not _looks_like_weights_error(exc):
         return False
-    _refill_attempted = True
     path = model_dir()
-    print(f"[local-embeddings] MiniLM weights look corrupt at {path}; refilling once: {exc}")
-    if not discard_managed_embedding_dir(path):
+    if refill_recorded_for_current_model(path):
         return False
-    ensure_embedding_model()
-    return True
+    _refill_attempted = True
+    failed_fingerprint = model_files_fingerprint(path)
+    print(f"[local-embeddings] MiniLM weights look corrupt at {path}; refilling once: {exc}")
+    try:
+        refill_managed_embedding_dir(path)
+        return True
+    finally:
+        record_refill_attempt(path, failed_fingerprint=failed_fingerprint)
 
 
 def _load_bundle():
@@ -142,6 +156,7 @@ def _load_bundle():
 
 
 def reset_runtime_state_for_tests() -> None:
+    """Clear in-process caches. Does not delete the on-disk refill marker."""
     global _bundle, _load_error, _migrated_model_id, _refill_attempted
     _bundle = None
     _load_error = None

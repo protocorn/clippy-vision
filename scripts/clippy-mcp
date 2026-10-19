@@ -42,12 +42,14 @@ if [[ -z "${CLIPPY_EMBEDDING_MODEL_DIR:-}" ]]; then
     CLIPPY_EMBEDDING_MODEL_DIR="${CLIPPY_ROOT}/models/embeddings/all-MiniLM-L6-v2"
   elif [[ "${_data_trimmed}" == */data ]]; then
     CLIPPY_EMBEDDING_MODEL_DIR="${_data_trimmed%/data}/models/embeddings/all-MiniLM-L6-v2"
-  else
-    CLIPPY_EMBEDDING_MODEL_DIR="${_data_trimmed}/models/embeddings/all-MiniLM-L6-v2"
   fi
+  # A custom CLIPPY_DATA_DIR that is not a userData/data folder is left unset
+  # so Python uses the repo models/ path instead of treating this as an override.
   unset _data_trimmed
 fi
-export CLIPPY_EMBEDDING_MODEL_DIR
+if [[ -n "${CLIPPY_EMBEDDING_MODEL_DIR:-}" ]]; then
+  export CLIPPY_EMBEDDING_MODEL_DIR
+fi
 
 # Match Python: CLIPPY_OLLAMA_URL, then OLLAMA_HOST, then llm_config, then default.
 if [[ -z "${CLIPPY_OLLAMA_URL:-}" && -z "${OLLAMA_HOST:-}" ]]; then

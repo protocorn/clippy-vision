@@ -12,6 +12,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -171,6 +172,134 @@ def is_protected_override_dir(path: Path | None = None) -> bool:
     return _paths_equal(target, embedding_model_dir())
 
 
+def embedding_revision() -> str:
+    """Pinned HF revision for MiniLM, or ``main`` when unset."""
+    return (os.environ.get("CLIPPY_EMBEDDING_HF_REVISION") or "main").strip() or "main"
+
+
+def embedding_model_identity() -> dict[str, str]:
+    return {"model_id": EMBEDDING_REPO, "revision": embedding_revision()}
+
+
+def refill_marker_path(model_dir: Path) -> Path:
+    """Sibling JSON next to the managed folder, not inside it (rmtree-safe)."""
+    return model_dir.with_name(f"{model_dir.name}.refill.json")
+
+
+def model_files_fingerprint(model_dir: Path) -> str:
+    """Stable id for the files currently in *model_dir* (size + mtime)."""
+    parts: list[str] = []
+    for name in (
+        "model.safetensors",
+        "pytorch_model.bin",
+        "config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ):
+        path = model_dir / name
+        try:
+            if path.is_file():
+                stat = path.stat()
+                parts.append(f"{name}:{stat.st_size}:{stat.st_mtime_ns}")
+        except OSError:
+            continue
+    return ";".join(parts)
+
+
+def read_refill_marker(model_dir: Path) -> dict | None:
+    path = refill_marker_path(model_dir)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _marker_fingerprints(marker: dict) -> set[str]:
+    recorded: set[str] = set()
+    for key in ("fingerprint", "installed_fingerprint"):
+        value = str(marker.get(key) or "")
+        if value:
+            recorded.add(value)
+    extra = marker.get("fingerprints")
+    if isinstance(extra, list):
+        for item in extra:
+            text = str(item or "")
+            if text:
+                recorded.add(text)
+    return recorded
+
+
+def refill_recorded_for_current_model(model_dir: Path | None = None) -> bool:
+    """True when a refill was already tried for this identity and these files.
+
+    A later launch may refill again only when the model id/revision changes or
+    the files on disk have a different fingerprint.
+    """
+    dest = model_dir if model_dir is not None else embedding_model_dir()
+    if is_protected_override_dir(dest):
+        return False
+    marker = read_refill_marker(dest)
+    if not marker:
+        return False
+    identity = embedding_model_identity()
+    if (
+        str(marker.get("model_id") or "") != identity["model_id"]
+        or str(marker.get("revision") or "") != identity["revision"]
+    ):
+        return False
+    current = model_files_fingerprint(dest)
+    recorded = _marker_fingerprints(marker)
+    if not recorded:
+        return True
+    return current in recorded
+
+
+def record_refill_attempt(model_dir: Path, *, failed_fingerprint: str | None = None) -> None:
+    """Atomically write the refill marker. No-op for a user override."""
+    if is_protected_override_dir(model_dir):
+        return
+    dest = refill_marker_path(model_dir)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    prefix = f"{dest.name}.tmp-"
+    if dest.parent.is_dir():
+        for child in dest.parent.iterdir():
+            if child.name.startswith(prefix) and child.is_file():
+                child.unlink(missing_ok=True)
+    failed = failed_fingerprint if failed_fingerprint is not None else model_files_fingerprint(model_dir)
+    installed = model_files_fingerprint(model_dir)
+    fingerprints = [item for item in (failed, installed) if item]
+    payload = {
+        **embedding_model_identity(),
+        "fingerprint": failed,
+        "installed_fingerprint": installed,
+        "fingerprints": fingerprints,
+        "attempted": True,
+        "attempted_at": time.time(),
+    }
+    tmp = dest.with_name(f"{dest.name}.tmp-{os.getpid()}")
+    try:
+        tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        os.replace(str(tmp), str(dest))
+    except Exception:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+        raise
+
+
+def clear_refill_marker(model_dir: Path) -> None:
+    """Remove the refill marker after a successful load. No-op for overrides."""
+    if is_protected_override_dir(model_dir):
+        return
+    dest = refill_marker_path(model_dir)
+    try:
+        dest.unlink()
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
+
+
 def _nonempty_file(path: Path) -> bool:
     try:
         return path.is_file() and path.stat().st_size > 0
@@ -252,7 +381,8 @@ def _temp_sibling(dest: Path) -> Path:
 def cleanup_stale_embedding_temps(dest: Path) -> None:
     """Remove leftover ``<dest>.tmp-*`` folders from a crashed copy or download.
 
-    Never touch temps next to a user-picked override folder.
+    Restores ``<dest>.bak-*`` when dest is missing so a crash during swap never
+    leaves the user with no model. Never touch a user-picked override folder.
     """
     if is_protected_override_dir(dest):
         return
@@ -263,10 +393,34 @@ def cleanup_stale_embedding_temps(dest: Path) -> None:
     for child in parent.iterdir():
         if child.name.startswith(prefix) and child.is_dir():
             shutil.rmtree(child, ignore_errors=True)
+    _restore_or_drop_backups(dest)
+
+
+def _restore_or_drop_backups(dest: Path) -> None:
+    parent = dest.parent
+    if not parent.is_dir():
+        return
+    prefix = f"{dest.name}.bak-"
+    backups = [child for child in parent.iterdir() if child.name.startswith(prefix) and child.is_dir()]
+    if not backups:
+        return
+    if dest.exists():
+        for backup in backups:
+            shutil.rmtree(backup, ignore_errors=True)
+        return
+    backups.sort(key=lambda item: item.stat().st_mtime_ns if item.exists() else 0)
+    try:
+        os.replace(str(backups[-1]), str(dest))
+    except OSError:
+        return
+    for leftover in backups[:-1]:
+        shutil.rmtree(leftover, ignore_errors=True)
 
 
 def _remove_if_incomplete(path: Path) -> None:
     if is_protected_override_dir(path):
+        return
+    if refill_recorded_for_current_model(path):
         return
     if path.exists() and not embedding_ready(path):
         shutil.rmtree(path, ignore_errors=True)
@@ -276,6 +430,7 @@ def discard_managed_embedding_dir(path: Path) -> bool:
     """Delete an app-managed model folder so it can be refilled.
 
     Returns False (and does nothing) when *path* is a user override.
+    Refill no longer uses this: dest stays until a validated replacement exists.
     """
     if is_protected_override_dir(path):
         return False
@@ -284,11 +439,13 @@ def discard_managed_embedding_dir(path: Path) -> bool:
     return True
 
 
-def commit_model_dir(tmp: Path, dest: Path) -> Path:
+def commit_model_dir(tmp: Path, dest: Path, *, replace_existing: bool = False) -> Path:
     """Atomically install a complete tmp folder over dest.
 
-    Incomplete dest is treated as missing and replaced. If another process
-    already left a ready dest, that is a win and tmp is discarded.
+    *tmp* must already be complete. dest is never deleted until that check
+    passes: it is moved aside, then tmp is renamed into place, and dest is
+    restored if the swap fails. When dest is already ready and
+    *replace_existing* is false, that is a win and tmp is discarded.
     Never writes into a user-picked CLIPPY_EMBEDDING_MODEL_DIR.
     """
     if is_protected_override_dir(dest):
@@ -298,22 +455,44 @@ def commit_model_dir(tmp: Path, dest: Path) -> Path:
         shutil.rmtree(tmp, ignore_errors=True)
         raise FileNotFoundError(f"Model copy at {tmp} is incomplete")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if embedding_ready(dest):
+    if embedding_ready(dest) and not replace_existing:
         shutil.rmtree(tmp, ignore_errors=True)
         return dest
-    _remove_if_incomplete(dest)
+    return _swap_validated_model_dir(tmp, dest)
+
+
+def _swap_validated_model_dir(tmp: Path, dest: Path) -> Path:
+    """Move dest aside, put a ready tmp in its place, restore dest on failure."""
+    backup = dest.with_name(f"{dest.name}.bak-{os.getpid()}")
+    if backup.exists():
+        shutil.rmtree(backup, ignore_errors=True)
+    moved_aside = False
     try:
+        if dest.exists():
+            os.replace(str(dest), str(backup))
+            moved_aside = True
         os.replace(str(tmp), str(dest))
     except OSError:
-        if embedding_ready(dest):
-            shutil.rmtree(tmp, ignore_errors=True)
-            return dest
         shutil.rmtree(tmp, ignore_errors=True)
+        if moved_aside and backup.exists() and not dest.exists():
+            try:
+                os.replace(str(backup), str(dest))
+            except OSError:
+                pass
+        if embedding_ready(dest):
+            shutil.rmtree(backup, ignore_errors=True)
+            return dest
         raise
-    if not embedding_ready(dest):
-        _remove_if_incomplete(dest)
-        raise FileNotFoundError(f"Atomic install of MiniLM at {dest} did not produce a complete model")
-    return dest
+    if embedding_ready(dest):
+        shutil.rmtree(backup, ignore_errors=True)
+        return dest
+    shutil.rmtree(dest, ignore_errors=True)
+    if backup.exists():
+        try:
+            os.replace(str(backup), str(dest))
+        except OSError:
+            pass
+    raise FileNotFoundError(f"Atomic install of MiniLM at {dest} did not produce a complete model")
 
 
 def _legacy_embedding_sources(
@@ -363,7 +542,7 @@ def _should_move_legacy(src: Path) -> bool:
     return any(part.startswith("mcp-runtime") for part in src.parts)
 
 
-def _transfer_model(src: Path, dest: Path, *, prefer_move: bool) -> None:
+def _transfer_model(src: Path, dest: Path, *, prefer_move: bool, replace_existing: bool = False) -> None:
     """Copy into a temp sibling, verify it, then rename into place."""
     if is_protected_override_dir(dest):
         raise PermissionError(f"Refusing to refill user CLIPPY_EMBEDDING_MODEL_DIR: {dest}")
@@ -374,7 +553,7 @@ def _transfer_model(src: Path, dest: Path, *, prefer_move: bool) -> None:
         shutil.rmtree(tmp, ignore_errors=True)
     try:
         shutil.copytree(src, tmp)
-        commit_model_dir(tmp, dest)
+        commit_model_dir(tmp, dest, replace_existing=replace_existing)
     except Exception:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
@@ -390,8 +569,9 @@ def _migrate_legacy_embedding_model_unlocked(
 ) -> Path:
     if is_protected_override_dir(dest):
         return dest
+    if refill_recorded_for_current_model(dest):
+        return dest
     cleanup_stale_embedding_temps(dest)
-    _remove_if_incomplete(dest)
     if embedding_ready(dest):
         return dest
     for src in _legacy_embedding_sources(
@@ -430,6 +610,8 @@ def migrate_legacy_embedding_model(
     root = Path(project_root) if project_root is not None else _PROJECT_ROOT
     if is_protected_override_dir(dest):
         return dest
+    if refill_recorded_for_current_model(dest):
+        return dest
     scan_runtime = not is_user_embedding_override()
     if embedding_ready(dest):
         return dest
@@ -439,7 +621,7 @@ def migrate_legacy_embedding_model(
         )
 
 
-def _snapshot(repo_id: str, local_dir: Path) -> Path:
+def _snapshot(repo_id: str, local_dir: Path, *, replace_existing: bool = False) -> Path:
     from huggingface_hub import snapshot_download
 
     if is_protected_override_dir(local_dir):
@@ -454,11 +636,56 @@ def _snapshot(repo_id: str, local_dir: Path) -> Path:
             repo_id=repo_id,
             local_dir=str(tmp),
         )
-        return commit_model_dir(tmp, local_dir)
+        return commit_model_dir(tmp, local_dir, replace_existing=replace_existing)
     except Exception:
         shutil.rmtree(tmp, ignore_errors=True)
-        _remove_if_incomplete(local_dir)
         raise
+
+
+def refill_managed_embedding_dir(dest: Path | None = None, *, project_root: Path | None = None) -> Path:
+    """Copy or download a replacement without deleting dest first.
+
+    dest is replaced only after the temp folder is complete and validated.
+    A bad legacy copy or an offline download leaves dest untouched.
+    """
+    dest = dest or embedding_model_dir()
+    if is_protected_override_dir(dest):
+        raise PermissionError(f"Refusing to refill user CLIPPY_EMBEDDING_MODEL_DIR: {dest}")
+    root = Path(project_root) if project_root is not None else _PROJECT_ROOT
+    with _embedding_lock:
+        cleanup_stale_embedding_temps(dest)
+        for src in _legacy_embedding_sources(
+            root, dest, scan_runtime_copies=not is_user_embedding_override()
+        ):
+            try:
+                if src.resolve() == dest.resolve():
+                    continue
+            except OSError:
+                if src == dest:
+                    continue
+            if not embedding_ready(src):
+                continue
+            try:
+                _transfer_model(
+                    src,
+                    dest,
+                    prefer_move=_should_move_legacy(src),
+                    replace_existing=True,
+                )
+            except OSError as exc:
+                print(f"[models] Could not refill embeddings from {src} -> {dest}: {exc}")
+                continue
+            if embedding_ready(dest):
+                print(f"[models] Refilled embeddings from {src} -> {dest}")
+                return dest
+        print(f"[models] Downloading embeddings from {EMBEDDING_REPO} -> {dest}")
+        _snapshot(EMBEDDING_REPO, dest, replace_existing=True)
+        if not embedding_ready(dest):
+            raise FileNotFoundError(
+                f"Downloaded {EMBEDDING_REPO} but weights are missing under {dest}"
+            )
+        print(f"[models] Embeddings ready at {dest}")
+        return dest
 
 
 def ensure_embedding_model(*, force: bool = False) -> Path:
@@ -470,28 +697,32 @@ def ensure_embedding_model(*, force: bool = False) -> Path:
         raise FileNotFoundError(
             f"CLIPPY_EMBEDDING_MODEL_DIR is missing or incomplete: {path}"
         )
-    with _embedding_lock:
-        try:
-            if not force:
-                _remove_if_incomplete(path)
-                if embedding_ready(path):
-                    return path
-                migrated = _migrate_legacy_embedding_model_unlocked(path, project_root=_PROJECT_ROOT)
-                if embedding_ready(migrated):
-                    return migrated
-                path = embedding_model_dir()
-            print(f"[models] Downloading embeddings from {EMBEDDING_REPO} -> {path}")
-            _snapshot(EMBEDDING_REPO, path)
-            if not embedding_ready(path):
-                _remove_if_incomplete(path)
-                raise FileNotFoundError(
-                    f"Downloaded {EMBEDDING_REPO} but weights are missing under {path}"
-                )
-            print(f"[models] Embeddings ready at {path}")
+    if not force and refill_recorded_for_current_model(path):
+        if embedding_ready(path):
             return path
-        except Exception:
-            _remove_if_incomplete(path)
-            raise
+        identity = embedding_model_identity()
+        raise FileNotFoundError(
+            f"MiniLM model is missing or incomplete at {path} "
+            f"(a refill was already attempted for {identity['model_id']}@"
+            f"{identity['revision']})"
+        )
+    with _embedding_lock:
+        cleanup_stale_embedding_temps(path)
+        if not force:
+            if embedding_ready(path):
+                return path
+            migrated = _migrate_legacy_embedding_model_unlocked(path, project_root=_PROJECT_ROOT)
+            if embedding_ready(migrated):
+                return migrated
+            path = embedding_model_dir()
+        print(f"[models] Downloading embeddings from {EMBEDDING_REPO} -> {path}")
+        _snapshot(EMBEDDING_REPO, path)
+        if not embedding_ready(path):
+            raise FileNotFoundError(
+                f"Downloaded {EMBEDDING_REPO} but weights are missing under {path}"
+            )
+        print(f"[models] Embeddings ready at {path}")
+        return path
 
 
 def ensure_all(*, force: bool = False) -> dict[str, str]:
