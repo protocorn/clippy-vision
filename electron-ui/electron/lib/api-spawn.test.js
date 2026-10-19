@@ -4,12 +4,14 @@
  */
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 
 const { createApiSpawn } = require('./api-spawn')
 const { embeddingModelDir } = require('./paths')
 
-function spawnFor(userData, llmConfig = {}) {
+function spawnFor(userData, llmConfig = {}, extras = {}) {
     const dataDir = path.join(userData, 'data')
     const embeddingDir = embeddingModelDir(userData)
     return createApiSpawn({
@@ -35,8 +37,27 @@ function spawnFor(userData, llmConfig = {}) {
             readLLMConfig: () => ({}),
             ...llmConfig,
         },
-        state: {},
+        state: extras.state || {},
+        spawnFn: extras.spawnFn,
     })
+}
+
+function fakeProcess(pid) {
+    const exitHandlers = []
+    return {
+        pid,
+        stdout: { on() {} },
+        stderr: { on() {} },
+        on(event, cb) {
+            if (event === 'exit') exitHandlers.push(cb)
+        },
+        once(event, cb) {
+            if (event === 'exit') exitHandlers.push(cb)
+        },
+        kill() {
+            for (const cb of exitHandlers.splice(0)) cb(0)
+        },
+    }
 }
 
 test('buildPythonEnv sets CLIPPY_EMBEDDING_MODEL_DIR under userData', () => {
@@ -78,4 +99,49 @@ test('buildPythonEnv keeps an existing CLIPPY_OLLAMA_URL', () => {
         if (previous === undefined) delete process.env.CLIPPY_OLLAMA_URL
         else process.env.CLIPPY_OLLAMA_URL = previous
     }
+})
+
+test('restartServer respawns the API once with the new CLIPPY_OLLAMA_URL', async () => {
+    const previous = process.env.CLIPPY_OLLAMA_URL
+    delete process.env.CLIPPY_OLLAMA_URL
+    const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'clippy-api-restart-'))
+    try {
+        let url = 'http://127.0.0.1:11434'
+        const spawned = []
+        let nextPid = 1
+        const api = spawnFor(userData, {
+            configuredOllamaBaseURL: () => url,
+            readLLMConfig: () => ({ chat_model: 'qwen3:8b' }),
+        }, {
+            state: {},
+            spawnFn: (_cmd, args, opts) => {
+                spawned.push({ args, env: opts.env })
+                return fakeProcess(nextPid++)
+            },
+        })
+
+        await api.startServer()
+        url = 'http://192.168.1.5:11434'
+        await api.restartServer()
+        const apiSpawns = spawned.filter((row) => row.args && row.args.some((arg) => String(arg).endsWith('api_server.py')))
+        assert.equal(apiSpawns.length, 2)
+        assert.equal(apiSpawns[0].env.CLIPPY_OLLAMA_URL, 'http://127.0.0.1:11434')
+        assert.equal(apiSpawns[1].env.CLIPPY_OLLAMA_URL, 'http://192.168.1.5:11434')
+    } finally {
+        fs.rmSync(userData, { recursive: true, force: true })
+        if (previous === undefined) delete process.env.CLIPPY_OLLAMA_URL
+        else process.env.CLIPPY_OLLAMA_URL = previous
+    }
+})
+
+test('restartServer is a no-op when the API is not running', async () => {
+    const spawned = []
+    const api = spawnFor(path.join('/home/ada', '.config', 'Clippy Vision'), {}, {
+        spawnFn: () => {
+            spawned.push('spawned')
+            return fakeProcess(1)
+        },
+    })
+    await api.restartServer()
+    assert.deepEqual(spawned, [])
 })

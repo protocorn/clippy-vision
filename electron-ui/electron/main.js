@@ -9,6 +9,7 @@ const { execFileSync } = require('child_process')
 const { createPaths }     = require('./lib/paths')
 const { createLlmConfig } = require('./lib/llm-config')
 const { createApiSpawn }  = require('./lib/api-spawn')
+const { createLlmConfigApply } = require('./lib/llm-config-apply')
 const { createMcp }       = require('./lib/mcp')
 const { createHardware }  = require('./lib/hardware')
 const { createUpdates }   = require('./lib/updates')
@@ -65,6 +66,12 @@ async function refreshMcpClientConfigs() {
         console.warn('[mcp] could not refresh client configs:', error.message || error)
     }
 }
+
+const llmConfigApply = createLlmConfigApply({
+    llmConfig,
+    api,
+    refreshMcpClientConfigs,
+})
 
 const hardware = createHardware({ paths, llmConfig, runCommand: api.runCommand })
 const updates = createUpdates({ paths, app, getMainWindow: () => state.mainWindow })
@@ -218,14 +225,7 @@ mcp.registerMcpIpc(ipcMain, clipboard)
 
 ipcMain.handle('get-hardware-check', async () => hardware.getHardwareCheck())
 ipcMain.handle('get-llm-config', () => llmConfig.publicLLMConfig())
-ipcMain.handle('save-llm-config', async (_event, values = {}) => {
-    const previousUrl = llmConfig.configuredOllamaBaseURL()
-    const saved = llmConfig.saveLLMConfig(values)
-    if (previousUrl !== llmConfig.configuredOllamaBaseURL()) {
-        await refreshMcpClientConfigs()
-    }
-    return saved
-})
+ipcMain.handle('save-llm-config', (_event, values = {}) => llmConfigApply.saveAndApplyLLMConfig(values))
 ipcMain.handle('open-provider-auth', (_event, provider) => llmConfig.openProviderAuth(String(provider || '')))
 
 setup.registerSetupIpc(ipcMain, hardware.getHardwareCheck)

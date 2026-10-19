@@ -4,7 +4,7 @@ const fs        = require('fs')
 const http      = require('http')
 const net       = require('net')
 
-function createApiSpawn({ paths, llmConfig, state }) {
+function createApiSpawn({ paths, llmConfig, state, spawnFn } = {}) {
     const {
         ROOT,
         DATA_DIR,
@@ -25,6 +25,8 @@ function createApiSpawn({ paths, llmConfig, state }) {
         return paths.PYTHON_COMMAND
     }
     const { configuredOllamaBaseURL, usesManagedOllama, readLLMConfig } = llmConfig
+    const spawnProc = typeof spawnFn === 'function' ? spawnFn : spawn
+    let restartPromise = null
 
     function buildPythonEnv(extra = {}) {
         // Every child process receives the same data directory, import path, and
@@ -56,7 +58,7 @@ function createApiSpawn({ paths, llmConfig, state }) {
     // same paths whether Electron was launched from Finder, a shell, or a DMG.
     function spawnHidden(cmd, args, opts = {}) {
         const { env: envExtra, ...rest } = opts
-        return spawn(cmd, args, {
+        return spawnProc(cmd, args, {
             windowsHide: true,
             ...rest,
             env: buildPythonEnv(envExtra),
@@ -225,6 +227,52 @@ function createApiSpawn({ paths, llmConfig, state }) {
             state.apiProcess = null
             clearApiState()
         })
+    }
+
+    function stopServer({ timeoutMs = 5000 } = {}) {
+        // Same process-tree kill as before-quit. In-flight API work is dropped
+        // the same way a Clippy restart would drop it.
+        return new Promise((resolve) => {
+            const proc = state.apiProcess
+            if (!proc) return resolve()
+            let settled = false
+            let timer = null
+            const finish = () => {
+                if (settled) return
+                settled = true
+                if (timer) clearTimeout(timer)
+                if (state.apiProcess === proc) {
+                    state.apiProcess = null
+                    clearApiState()
+                }
+                resolve()
+            }
+            proc.once('exit', finish)
+            timer = setTimeout(finish, timeoutMs)
+            try {
+                proc.kill('SIGTERM')
+            } catch (_) { /* already gone */ }
+            if (process.platform === 'win32' && proc.pid) {
+                spawnHidden('taskkill', ['/pid', String(proc.pid), '/T', '/F'])
+            }
+        })
+    }
+
+    async function restartServer() {
+        // Coalesce overlapping restarts so a double Settings save does not
+        // bounce the API twice. A second call while one is in flight waits
+        // for that restart; startServer then reads the current Settings URL.
+        if (!state.apiProcess && !restartPromise) return
+        if (restartPromise) return restartPromise
+        restartPromise = (async () => {
+            await stopServer()
+            await startServer()
+        })()
+        try {
+            return await restartPromise
+        } finally {
+            restartPromise = null
+        }
     }
 
     async function ensureOllamaParallelConfig({ persist = true } = {}) {
@@ -434,6 +482,8 @@ function createApiSpawn({ paths, llmConfig, state }) {
         clearApiState,
         clearStaleApiProcess,
         startServer,
+        stopServer,
+        restartServer,
         ensureOllamaParallelConfig,
         ollamaReachable,
         ensureOllamaServing,
