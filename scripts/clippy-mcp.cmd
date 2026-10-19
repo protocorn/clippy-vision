@@ -47,16 +47,20 @@ if not defined CLIPPY_EMBEDDING_MODEL_DIR (
 )
 
 rem Match Python: CLIPPY_OLLAMA_URL, then OLLAMA_HOST, then llm_config, then default.
-rem Read the path from CLIPPY_DATA_DIR in the child env. Do not use sys.argv[1]
-rem here: cmd expands %1 as this script's first argument.
-if not defined CLIPPY_OLLAMA_URL if not defined OLLAMA_HOST (
-    if exist "%CLIPPY_DATA_DIR%\llm_config.json" (
-        for /f "usebackq delims=" %%U in (`"%CLIPPY_PYTHON%" -c "import json,os; p=os.path.join(os.environ.get('CLIPPY_DATA_DIR',''),'llm_config.json'); print((json.load(open(p, encoding='utf-8')).get('base_url') or '').strip())" 2^>nul`) do set "CLIPPY_OLLAMA_URL=%%U"
-    )
-)
-if not defined CLIPPY_OLLAMA_URL if not defined OLLAMA_HOST (
-    set "CLIPPY_OLLAMA_URL=http://127.0.0.1:11434"
-)
+rem Do not use for /f or sys.argv[1]: cmd treats parentheses as block closers and
+rem expands %1 as this script's first argument. Write the URL to a temp file instead.
+if defined CLIPPY_OLLAMA_URL goto :clippy_ollama_url_done
+if defined OLLAMA_HOST goto :clippy_ollama_url_done
+set "CLIPPY_OLLAMA_URL=http://127.0.0.1:11434"
+if not exist "%CLIPPY_DATA_DIR%\llm_config.json" goto :clippy_ollama_url_done
+set "CLIPPY_OLLAMA_URL_TMP=%TEMP%\clippy-ollama-url.%RANDOM%.txt"
+"%CLIPPY_PYTHON%" -c "import json,os,sys; p=os.path.join(os.environ.get('CLIPPY_DATA_DIR',''),'llm_config.json'); sys.stdout.write(str(json.load(open(p,encoding='utf-8')).get('base_url') or '').strip())" >"%CLIPPY_OLLAMA_URL_TMP%" 2>nul
+if exist "%CLIPPY_OLLAMA_URL_TMP%" <"%CLIPPY_OLLAMA_URL_TMP%" set /p CLIPPY_OLLAMA_URL_READ=
+if exist "%CLIPPY_OLLAMA_URL_TMP%" del "%CLIPPY_OLLAMA_URL_TMP%" >nul 2>&1
+if defined CLIPPY_OLLAMA_URL_READ if not "%CLIPPY_OLLAMA_URL_READ%"=="" set "CLIPPY_OLLAMA_URL=%CLIPPY_OLLAMA_URL_READ%"
+set "CLIPPY_OLLAMA_URL_READ="
+set "CLIPPY_OLLAMA_URL_TMP="
+:clippy_ollama_url_done
 
 if defined PYTHONPATH (
     set "PYTHONPATH=%CLIPPY_ROOT%;%PYTHONPATH%"
