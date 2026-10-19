@@ -25,8 +25,14 @@ def keyword_fallback_result(text: str, error: Exception | None, *, notice: str |
     """Keep keyword hits, but mark the reply as an error when MiniLM is missing."""
     if error is None:
         return text
-    body = f"{notice}\n\n{text}" if notice else text
-    return ToolResult(text=body, error=str(error))
+    detail = str(error).strip()
+    if notice and detail and detail not in notice:
+        body = f"{notice}\n{detail}\n\n{text}"
+    elif notice:
+        body = f"{notice}\n\n{text}"
+    else:
+        body = f"{detail}\n\n{text}" if detail else text
+    return ToolResult(text=body, error=detail or notice)
 
 
 def finalize_tool_text(result, *, redact=None, wrap=None) -> str:

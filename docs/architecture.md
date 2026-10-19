@@ -80,7 +80,7 @@ Conflicting facts are preserved in `memory_conflicts` and surfaced to the agent 
 
 ## Segment 4 — Database
 
-All data lives in a local SQLite database. A source checkout uses `core/data/events.db`. An installed app uses its own data folder: `%APPDATA%\Clippy Vision\data` on Windows, `~/Library/Application Support/Clippy Vision/data` on macOS, and `~/.config/Clippy Vision/data` on Linux. MiniLM weights live next to that folder under `models/embeddings/all-MiniLM-L6-v2/` (override with `CLIPPY_EMBEDDING_MODEL_DIR`).
+All data lives in a local SQLite database. A source checkout uses `core/data/events.db`. An installed app uses its own data folder: `%APPDATA%\Clippy Vision\data` on Windows, `~/Library/Application Support/Clippy Vision/data` on macOS, and `~/.config/Clippy Vision/data` on Linux. MiniLM weights live next to that folder under `models/embeddings/all-MiniLM-L6-v2/` (override with `CLIPPY_EMBEDDING_MODEL_DIR`). A user-picked override folder is never deleted, cleaned, or refilled; a broken folder there is reported as an error.
 
 | Table | Contents | Retention |
 |-------|----------|-----------|

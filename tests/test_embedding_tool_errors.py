@@ -37,6 +37,7 @@ class MissingModelResponseTests(unittest.TestCase):
         self.assertTrue(result.error)
         self.assertIn("keyword fallback", result.text)
         self.assertIn("favorite editor", result.text)
+        self.assertIn("MiniLM model is missing", result.text)
         with self.assertRaises(ToolErrorStatus) as ctx:
             finalize_tool_text(result)
         self.assertIn("favorite editor", str(ctx.exception))

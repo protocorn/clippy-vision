@@ -29,12 +29,93 @@ _load_error: Exception | None = None
 _load_lock = threading.Lock()
 _migration_lock = threading.Lock()
 _migrated_model_id: str | None = None
+_refill_attempted = False
+
+# transformers prefers model.safetensors. These substrings match the errors it
+# raises for a truncated or corrupt checkpoint so we can refill the app-managed
+# folder once. A user-picked CLIPPY_EMBEDDING_MODEL_DIR is never refilled.
+_WEIGHTS_ERROR_MARKERS = (
+    "incomplete metadata",
+    "header too small",
+    "safetensor",
+    "unable to load weights",
+    "deserializ",
+    "invalid header",
+    "truncated",
+    "corrupt",
+)
 
 
 def model_dir() -> Path:
     from core.model_download import embedding_model_dir
 
     return embedding_model_dir()
+
+
+def _looks_like_weights_error(exc: BaseException) -> bool:
+    haystack = f"{type(exc).__name__} {exc}".lower()
+    return any(marker in haystack for marker in _WEIGHTS_ERROR_MARKERS)
+
+
+def _instantiate_minilm(path: Path):
+    import torch
+    from transformers import AutoModel, AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
+    model = AutoModel.from_pretrained(path, local_files_only=True)
+    if int(model.config.hidden_size) != MODEL_DIMENSION:
+        raise ValueError(f"Expected {MODEL_DIMENSION}-dimensional MiniLM, got {model.config.hidden_size}")
+    # MiniLM is fast on CPU, and a CUDA context here would cost VRAM the
+    # chat model needs as one contiguous block. GPU stays opt-in.
+    requested_device = os.environ.get("CLIPPY_EMBED_DEVICE", "cpu").strip().lower()
+    if requested_device == "auto":
+        if torch.cuda.is_available():
+            requested_device = "cuda"
+        elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            requested_device = "mps"
+        else:
+            requested_device = "cpu"
+    device = torch.device(requested_device)
+    model.to(device)
+    model.eval()
+    return (torch, tokenizer, model, device)
+
+
+def _load_minilm_from_disk():
+    from core.model_download import ensure_embedding_model, embedding_ready
+
+    path = model_dir()
+    if not embedding_ready(path):
+        ensure_embedding_model()
+        path = model_dir()
+    if not embedding_ready(path):
+        raise FileNotFoundError(
+            f"MiniLM model is missing from {path}. "
+            "Set CLIPPY_EMBEDDING_MODEL_DIR or run python -m core.model_download."
+        )
+    return _instantiate_minilm(path)
+
+
+def _try_refill_after_weights_error(exc: BaseException) -> bool:
+    """Discard and refill the app-managed folder once. Never touches a user override."""
+    global _refill_attempted
+    from core.model_download import (
+        discard_managed_embedding_dir,
+        ensure_embedding_model,
+        is_user_embedding_override,
+    )
+
+    if is_user_embedding_override():
+        return False
+    if _refill_attempted or not _looks_like_weights_error(exc):
+        return False
+    _refill_attempted = True
+    path = model_dir()
+    print(f"[local-embeddings] MiniLM weights look corrupt at {path}; refilling once: {exc}")
+    if not discard_managed_embedding_dir(path):
+        return False
+    ensure_embedding_model()
+    return True
 
 
 def _load_bundle():
@@ -47,49 +128,25 @@ def _load_bundle():
         if _bundle is not None or _load_error is not None:
             return _bundle
         try:
-            import torch
-            from transformers import AutoModel, AutoTokenizer
-
-            from core.model_download import ensure_embedding_model, embedding_ready
-
-            path = model_dir()
-            if not embedding_ready(path):
-                ensure_embedding_model()
-                path = model_dir()
-            if not embedding_ready(path):
-                raise FileNotFoundError(
-                    f"MiniLM model is missing from {path}. "
-                    "Set CLIPPY_EMBEDDING_MODEL_DIR or run python -m core.model_download."
-                )
-            tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
-            model = AutoModel.from_pretrained(path, local_files_only=True)
-            if int(model.config.hidden_size) != MODEL_DIMENSION:
-                raise ValueError(f"Expected {MODEL_DIMENSION}-dimensional MiniLM, got {model.config.hidden_size}")
-            # MiniLM is fast on CPU, and a CUDA context here would cost VRAM the
-            # chat model needs as one contiguous block. GPU stays opt-in.
-            requested_device = os.environ.get("CLIPPY_EMBED_DEVICE", "cpu").strip().lower()
-            if requested_device == "auto":
-                if torch.cuda.is_available():
-                    requested_device = "cuda"
-                elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-                    requested_device = "mps"
-                else:
-                    requested_device = "cpu"
-            device = torch.device(requested_device)
-            model.to(device)
-            model.eval()
-            _bundle = (torch, tokenizer, model, device)
+            _bundle = _load_minilm_from_disk()
         except Exception as exc:
-            _load_error = exc
-            print(f"[local-embeddings] MiniLM failed to load from {model_dir()}: {exc}")
+            try:
+                if _try_refill_after_weights_error(exc):
+                    _bundle = _load_minilm_from_disk()
+                else:
+                    raise
+            except Exception as final:
+                _load_error = final
+                print(f"[local-embeddings] MiniLM failed to load from {model_dir()}: {final}")
     return _bundle
 
 
 def reset_runtime_state_for_tests() -> None:
-    global _bundle, _load_error, _migrated_model_id
+    global _bundle, _load_error, _migrated_model_id, _refill_attempted
     _bundle = None
     _load_error = None
     _migrated_model_id = None
+    _refill_attempted = False
 
 
 def _stored_embedding_model_id() -> str | None:
@@ -314,14 +371,25 @@ def embed_text(text: str) -> list[float]:
 
 def embedding_status() -> dict:
     bundle = _bundle
-    from core.model_download import embedding_ready
+    from core.model_download import embedding_ready, is_user_embedding_override
 
     path = model_dir()
     ready = embedding_ready(path)
+    override = is_user_embedding_override()
     folder_error = None
     if not ready:
-        folder_error = f"MiniLM model is missing or incomplete at {path}"
+        if override:
+            folder_error = (
+                f"CLIPPY_EMBEDDING_MODEL_DIR is missing or incomplete: {path}. "
+                "The app will not modify a user-provided model folder."
+            )
+        else:
+            folder_error = f"MiniLM model is missing or incomplete at {path}"
     load_error = str(_load_error) if _load_error else None
+    if ready and _load_error is not None and override:
+        load_error = (
+            f"CLIPPY_EMBEDDING_MODEL_DIR has unusable MiniLM weights at {path}: {_load_error}"
+        )
     if ready and _load_error is None:
         active_model = MODEL_ID
     elif hash_fallback_allowed():
