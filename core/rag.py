@@ -26,7 +26,7 @@ from collections.abc import Iterable
 from core.app_settings import get_capture_settings
 from core.image_embeddings import embed_text as embed_image_text
 from core.llm_gateway import Priority
-from core.local_embeddings import embed_text, embed_texts
+from core.local_embeddings import EmbeddingUnavailable, embed_text, embed_texts
 from core.screenshot_search import resolve_screenshot_filename
 from core.storage import conn
 
@@ -213,6 +213,8 @@ def search_event_rag(
     query_vector = None
     try:
         query_vector = embed_text(query)
+    except EmbeddingUnavailable:
+        raise
     except Exception as exc:
         print(f"[rag] query embedding unavailable: {exc}")
     if query_vector:

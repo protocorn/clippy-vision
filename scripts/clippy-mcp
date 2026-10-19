@@ -35,6 +35,22 @@ if [[ -z "${CLIPPY_DATA_DIR:-}" ]]; then
 fi
 
 export CLIPPY_DATA_DIR
+
+if [[ -z "${CLIPPY_EMBEDDING_MODEL_DIR:-}" ]]; then
+  _data_trimmed="${CLIPPY_DATA_DIR%/}"
+  if [[ "${_data_trimmed}" == "${CLIPPY_ROOT}/core/data" ]]; then
+    CLIPPY_EMBEDDING_MODEL_DIR="${CLIPPY_ROOT}/models/embeddings/all-MiniLM-L6-v2"
+  elif [[ "${_data_trimmed}" == */data ]]; then
+    CLIPPY_EMBEDDING_MODEL_DIR="${_data_trimmed%/data}/models/embeddings/all-MiniLM-L6-v2"
+  fi
+  # A custom CLIPPY_DATA_DIR that is not a userData/data folder is left unset
+  # so Python uses the repo models/ path instead of treating this as an override.
+  unset _data_trimmed
+fi
+if [[ -n "${CLIPPY_EMBEDDING_MODEL_DIR:-}" ]]; then
+  export CLIPPY_EMBEDDING_MODEL_DIR
+fi
+
 export PYTHONPATH="${CLIPPY_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 export PYTHONIOENCODING=utf-8
 export PYTHONUTF8=1

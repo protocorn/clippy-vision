@@ -48,6 +48,7 @@ Paste the Clippy Vision entry under `mcpServers`. Keep any servers already liste
       ],
       "env": {
         "CLIPPY_DATA_DIR": "C:\\Users\\YOU\\AppData\\Roaming\\Clippy Vision\\data",
+        "CLIPPY_EMBEDDING_MODEL_DIR": "C:\\Users\\YOU\\AppData\\Roaming\\Clippy Vision\\models\\embeddings\\all-MiniLM-L6-v2",
         "PYTHONPATH": "C:\\Users\\YOU\\AppData\\Local\\Programs\\Clippy Vision\\resources\\clippy",
         "PYTHONIOENCODING": "utf-8",
         "PYTHONUTF8": "1"
@@ -57,7 +58,7 @@ Paste the Clippy Vision entry under `mcpServers`. Keep any servers already liste
 }
 ```
 
-The paths above are placeholders. Do not guess them — the ones on your machine differ, and the config only works with absolute paths. **Copy JSON** in Clippy's Connect apps panel builds this exact block from your installation, so prefer that, or copy the three paths it prints.
+The paths above are placeholders. Do not guess them — the ones on your machine differ, and the config only works with absolute paths. **Copy JSON** in Clippy's Connect apps panel builds this exact block from your installation, so prefer that, or copy the paths it prints.
 
 In JSON, Windows backslashes are escaped as `\\`. On macOS the entry uses ordinary forward slashes:
 
@@ -69,6 +70,7 @@ In JSON, Windows backslashes are escaped as `\\`. On macOS the entry uses ordina
       "args": ["/Applications/Clippy Vision.app/Contents/Resources/clippy/mcp_server.py"],
       "env": {
         "CLIPPY_DATA_DIR": "/Users/YOU/Library/Application Support/Clippy Vision/data",
+        "CLIPPY_EMBEDDING_MODEL_DIR": "/Users/YOU/Library/Application Support/Clippy Vision/models/embeddings/all-MiniLM-L6-v2",
         "PYTHONPATH": "/Applications/Clippy Vision.app/Contents/Resources/clippy",
         "PYTHONIOENCODING": "utf-8",
         "PYTHONUTF8": "1"

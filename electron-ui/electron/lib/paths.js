@@ -5,6 +5,11 @@ const os   = require('os')
 const OLLAMA_BASE_URL = 'http://127.0.0.1:11434'
 const RELEASE_REPOSITORY = 'protocorn/clippy-vision'
 const LOCAL_EMBEDDING_MODEL = 'local:sentence-transformers/all-MiniLM-L6-v2'
+const EMBEDDING_MODEL_REL_PARTS = ['models', 'embeddings', 'all-MiniLM-L6-v2']
+
+function embeddingModelDir(userData) {
+    return path.join(userData, ...EMBEDDING_MODEL_REL_PARTS)
+}
 const OLLAMA_MAX_LOADED_MODELS = '1'
 const OLLAMA_NUM_PARALLEL = '1'
 const DEFAULT_API_PORT = 8000
@@ -118,6 +123,7 @@ function createPaths(app, electronDir) {
         API_STATE_FILE,
         DESKTOP_SETTINGS_FILE,
         RELEASE_CHECK_FILE,
+        EMBEDDING_MODEL_DIR: embeddingModelDir(USER_DATA),
         PYTHON_VENV_DIR,
         PATH_HINTS,
         commandFromKnownPaths,
@@ -144,5 +150,7 @@ module.exports = {
     pythonVenvDir,
     venvPythonPath,
     isHealthyVenv,
+    embeddingModelDir,
     PYTHON_VENV_DIRNAME,
+    EMBEDDING_MODEL_REL_PARTS,
 }

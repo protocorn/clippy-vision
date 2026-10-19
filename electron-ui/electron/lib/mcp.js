@@ -36,7 +36,7 @@ function entryHasStaleAppImageMount(entry, env = {}) {
     if (!entry || typeof entry !== 'object') return false
     const values = [entry.command, ...(Array.isArray(entry.args) ? entry.args : [])]
     if (entry.env && typeof entry.env === 'object') {
-        values.push(entry.env.PYTHONPATH, entry.env.CLIPPY_DATA_DIR)
+        values.push(entry.env.PYTHONPATH, entry.env.CLIPPY_DATA_DIR, entry.env.CLIPPY_EMBEDDING_MODEL_DIR)
     }
     const appdir = String(env.APPDIR || '').replace(/\\/g, '/').replace(/\/+$/, '')
     return values.some((value) => {
@@ -148,6 +148,8 @@ function copyMcpRuntimeSources(srcRoot, destRoot) {
 function createMcp({ paths, runCommand, shell, runtime, version } = {}) {
     const { ROOT, DATA_DIR } = paths
     const USER_DATA = paths.USER_DATA || DATA_DIR
+    const EMBEDDING_MODEL_DIR = paths.EMBEDDING_MODEL_DIR
+        || path.join(USER_DATA, 'models', 'embeddings', 'all-MiniLM-L6-v2')
     const runtimePlatform = runtime?.platform || process.platform
     const runtimeEnv = runtime ? (runtime.env || {}) : process.env
     const appVersion = String(version || runtime?.version || paths.APP_VERSION || '').trim()
@@ -192,13 +194,14 @@ function createMcp({ paths, runCommand, shell, runtime, version } = {}) {
         return String(lines[2] || '')
     }
 
-    function writeStableLinuxLauncher({ launcherPath, python, serverEntry, dataDir, pythonPath }) {
+    function writeStableLinuxLauncher({ launcherPath, python, serverEntry, dataDir, embeddingModelDir, pythonPath }) {
         const script = [
             '#!/usr/bin/env bash',
             '# Manual stdio helper. Connect apps spawn python + mcp_server.py directly;',
             '# this script is for running the same server from a terminal.',
             'set -euo pipefail',
             `export CLIPPY_DATA_DIR=${shSingleQuote(dataDir)}`,
+            `export CLIPPY_EMBEDDING_MODEL_DIR=${shSingleQuote(embeddingModelDir)}`,
             `export PYTHONPATH=${shSingleQuote(pythonPath)}`,
             'export PYTHONIOENCODING=utf-8',
             'export PYTHONUTF8=1',
@@ -293,6 +296,7 @@ function createMcp({ paths, runCommand, shell, runtime, version } = {}) {
                     python,
                     serverEntry,
                     dataDir: DATA_DIR,
+                    embeddingModelDir: EMBEDDING_MODEL_DIR,
                     pythonPath: pythonRoot,
                 })
             } catch (error) {
@@ -303,6 +307,7 @@ function createMcp({ paths, runCommand, shell, runtime, version } = {}) {
 
         const env = {
             CLIPPY_DATA_DIR: DATA_DIR,
+            CLIPPY_EMBEDDING_MODEL_DIR: EMBEDDING_MODEL_DIR,
             PYTHONPATH: pythonRoot,
             PYTHONIOENCODING: 'utf-8',
             PYTHONUTF8: '1',
@@ -570,7 +575,9 @@ function createMcp({ paths, runCommand, shell, runtime, version } = {}) {
             const wantedServer = path.normalize(String(serverEntry))
             const args = Array.isArray(found.entry.args) ? found.entry.args.map(String) : []
             const pointsAtCurrent = args.some((arg) => path.normalize(arg) === wantedServer)
-            if (!staleMount && pointsAtCurrent) continue
+            const env = found.entry.env && typeof found.entry.env === 'object' ? found.entry.env : {}
+            const missingEmbeddingDir = !String(env.CLIPPY_EMBEDDING_MODEL_DIR || '').trim()
+            if (!staleMount && pointsAtCurrent && !missingEmbeddingDir) continue
             mergeMcpServerIntoFile(def.configPath, launch, def.id)
             refreshed.push({ clientId: def.id, configPath: def.configPath })
         }

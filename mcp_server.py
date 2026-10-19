@@ -35,7 +35,8 @@ with redirect_stdout(sys.stderr):
     )
     from agent.retrieval import search_events, search_sessions
     from agent.tools import find_files, list_workspace_roots
-    from agent.untrusted_wrapper import wrap_untrusted_content
+    from agent.tool_result import finalize_tool_text
+from agent.untrusted_wrapper import wrap_untrusted_content
 
 mcp = FastMCP("Clippy-Vision MCP")
 
@@ -57,20 +58,22 @@ def _call_tool(function, *args, wrap_as_untrusted=False, **kwargs):
     """
     with redirect_stdout(sys.stderr):
         result = function(*args, **kwargs)
-    if not isinstance(result, str):
-        result = "" if result is None else str(result)
     try:
         from core.cloud_egress import redact_cloud_result
-
-        result = redact_cloud_result(result)
     except Exception:
         return _WITHHELD
-    
-    # Wrap screen-captured content as untrusted data after redaction
-    if wrap_as_untrusted:
-        result = wrap_untrusted_content(result)
-    
-    return result
+    try:
+        return finalize_tool_text(
+            result,
+            redact=redact_cloud_result,
+            wrap=wrap_untrusted_content if wrap_as_untrusted else None,
+        )
+    except Exception as exc:
+        from agent.tool_result import ToolErrorStatus
+
+        if isinstance(exc, ToolErrorStatus):
+            raise
+        return _WITHHELD
 
 
 @mcp.tool()
