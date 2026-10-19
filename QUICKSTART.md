@@ -9,7 +9,7 @@ The installer's built-in setup wizard will:
 - Check for Ollama the same way on Windows and macOS. On Linux it shows the official install command and can run it only with your consent.
 - Start the Ollama service
 - Install all Python packages from `requirements.txt` into the app-managed venv
-- Download `llama3.2:3b` automatically for session summaries (about 2 GB), with progress. Change the model later in Settings.
+- Download `qwen3:8b` automatically for session summaries (about 5 GB), with progress. `llama3.2:3b` is a labeled low-memory option that is less accurate. Change the model later in Settings.
 - Warm that text model into memory
 
 After setup completes, click **Launch**. Closing the window leaves the tray icon running. Launch at login is not turned on for you.
@@ -25,7 +25,7 @@ The home screen is the timeline. Open a session to see the events Clippy stored.
 
 Ask your questions in the connected app. Clippy does not answer them inside its own window.
 
-**Requirements:** Windows 10/11 (64-bit) or macOS 12+. Internet is needed on first run for Python packages and the default text model (`llama3.2:3b`, about 2 GB). You do not need to install Python yourself. Screen capture uses accessibility APIs and local OCR. It does not load a vision model.
+**Requirements:** Windows 10/11 (64-bit) or macOS 12+. Internet is needed on first run for Python packages and the default text model (`qwen3:8b`, about 5 GB). You do not need to install Python yourself. Screen capture uses accessibility APIs and local OCR. It does not load a vision model.
 
 On macOS, allow Screen Recording and Accessibility when Clippy asks. Both are required for screenshots, window titles, and password-field painting. If a prompt is dismissed, turn them on in System Settings → Privacy & Security.
 
@@ -50,7 +50,8 @@ The setup wizard runs automatically on first launch.
 
 | Model | Size | Purpose |
 |-------|------|---------|
-| Default Ollama model `llama3.2:3b` (changeable in Settings) | about 2 GB | Classification, session summaries, and long-term memory |
+| Default Ollama model `qwen3:8b` (changeable in Settings) | about 5 GB | Classification, session summaries, and long-term memory |
+| `llama3.2:3b` (low-memory option) | about 2 GB | Same jobs; less accurate than `qwen3:8b`. Pick it only on low-memory machines |
 | `all-MiniLM-L6-v2` | about 90 MB, downloaded from Hugging Face on first run | Optional local semantic retrieval. It is not bundled in the installer |
 
 Pipeline details: [docs/architecture.md](docs/architecture.md).

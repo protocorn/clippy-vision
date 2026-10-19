@@ -1,5 +1,5 @@
 /**
- * LLM config migration: existing installs without chat_model keep qwen3:8b.
+ * LLM config default is qwen3:8b; explicit chat_model is preserved.
  * Run with: node --test electron/lib/llm-config.test.js
  */
 const { test } = require('node:test')
@@ -8,10 +8,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { createLlmConfig } = require('./llm-config')
-const {
-    DEFAULT_CHAT_MODEL,
-    LEGACY_DEFAULT_CHAT_MODEL,
-} = require('./paths')
+const { DEFAULT_CHAT_MODEL } = require('./paths')
 
 const OLLAMA_BASE_URL = 'http://127.0.0.1:11434'
 const LOCAL_EMBEDDING_MODEL = 'local:sentence-transformers/all-MiniLM-L6-v2'
@@ -31,7 +28,6 @@ function makeConfig(dir) {
         OLLAMA_BASE_URL,
         LOCAL_EMBEDDING_MODEL,
         DEFAULT_LLM_CONFIG,
-        LEGACY_DEFAULT_CHAT_MODEL,
     })
 }
 
@@ -55,20 +51,20 @@ function withClearedChatEnv(fn) {
     }
 }
 
-test('new installs without llm_config.json use llama3.2:3b', () => {
+test('new installs without llm_config.json use qwen3:8b', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clippy-llm-'))
     try {
         withClearedChatEnv(() => {
             const cfg = makeConfig(dir)
             assert.equal(cfg.readLLMConfig().chat_model, DEFAULT_CHAT_MODEL)
-            assert.equal(DEFAULT_CHAT_MODEL, 'llama3.2:3b')
+            assert.equal(DEFAULT_CHAT_MODEL, 'qwen3:8b')
         })
     } finally {
         fs.rmSync(dir, { recursive: true, force: true })
     }
 })
 
-test('existing llm_config.json without chat_model keeps qwen3:8b', () => {
+test('existing llm_config.json without chat_model uses qwen3:8b', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clippy-llm-'))
     fs.writeFileSync(path.join(dir, 'llm_config.json'), JSON.stringify({
         provider: 'ollama',
@@ -77,8 +73,7 @@ test('existing llm_config.json without chat_model keeps qwen3:8b', () => {
     try {
         withClearedChatEnv(() => {
             const cfg = makeConfig(dir)
-            assert.equal(cfg.readLLMConfig().chat_model, LEGACY_DEFAULT_CHAT_MODEL)
-            assert.equal(LEGACY_DEFAULT_CHAT_MODEL, 'qwen3:8b')
+            assert.equal(cfg.readLLMConfig().chat_model, 'qwen3:8b')
         })
     } finally {
         fs.rmSync(dir, { recursive: true, force: true })
@@ -90,12 +85,12 @@ test('existing llm_config.json with an explicit chat_model is unchanged', () => 
     fs.writeFileSync(path.join(dir, 'llm_config.json'), JSON.stringify({
         provider: 'ollama',
         base_url: 'http://127.0.0.1:11434',
-        chat_model: 'mistral:7b',
+        chat_model: 'llama3.2:3b',
     }))
     try {
         withClearedChatEnv(() => {
             const cfg = makeConfig(dir)
-            assert.equal(cfg.readLLMConfig().chat_model, 'mistral:7b')
+            assert.equal(cfg.readLLMConfig().chat_model, 'llama3.2:3b')
         })
     } finally {
         fs.rmSync(dir, { recursive: true, force: true })

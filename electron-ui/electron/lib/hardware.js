@@ -7,7 +7,7 @@ function createHardware({ paths, llmConfig, runCommand }) {
     const { usesManagedOllama } = llmConfig
 
     // Capture is a11y + OCR (no VL), so the old 16 GB / 6 GB VRAM floor is gone.
-    // Chat still wants headroom for the default llama3.2:3b; integrated GPUs are allowed at minimum.
+    // Chat still wants headroom for qwen3:8b; integrated GPUs are allowed at minimum.
     const HW_MIN = { ramGb: 8, vramGb: 0, diskGb: 8 }
     const HW_REC = { ramGb: 16, vramGb: 4, diskGb: 10 }
     const HW_MIN_MAC = { ramGb: 8, vramGb: 8, diskGb: 8 }

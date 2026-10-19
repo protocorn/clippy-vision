@@ -73,7 +73,7 @@ Clippy Vision supports Windows and macOS. Linux support is experimental: X11 cap
    npm install
    npm start
    ```
-   The setup wizard runs on first launch (app Python runtime if needed, Ollama, `llama3.2:3b`, `requirements.txt`).
+   The setup wizard runs on first launch (app Python runtime if needed, Ollama, `qwen3:8b`, `requirements.txt`).
 4. Create a branch: `git checkout -b feature/your-feature-name`
 
 ### Building from source
@@ -119,7 +119,7 @@ When a change alters setup, connect, privacy, or the timeline, update the matchi
 
 ### Lower-spec machines
 
-Current `main` uses accessibility text + OCR for capture and does not download a vision model in setup. The default chat text model is `llama3.2:3b` (~2 GB), downloaded automatically. Change it in Settings if you want a larger model such as `qwen3:8b`.
+Current `main` uses accessibility text + OCR for capture and does not download a vision model in setup. The default chat text model is `qwen3:8b` (~5 GB), downloaded automatically. `llama3.2:3b` is a low-memory option (~2 GB) that is less accurate — pick it in the setup wizard only if this machine cannot hold `qwen3:8b`.
 
 ## Code Style
 
@@ -218,7 +218,7 @@ The six pytest markers used by CI are:
 
 ### Medium Priority
 - [ ] Docker/containerization support
-- [x] Default local chat model `llama3.2:3b` auto-downloaded in setup; any Ollama tag can be set in Settings
+- [x] Default local chat model `qwen3:8b` auto-downloaded in setup; `llama3.2:3b` is a less-accurate low-memory option; any Ollama tag can be set in Settings
 - [ ] Web UI for database exploration
 - [ ] Import of an exported archive (export and clear already exist under Settings)
 - [x] Configurable retention for events, screenshots, and session summaries

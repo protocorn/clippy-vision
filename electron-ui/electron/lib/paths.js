@@ -14,12 +14,9 @@ const OLLAMA_MAX_LOADED_MODELS = '1'
 const OLLAMA_NUM_PARALLEL = '1'
 const DEFAULT_API_PORT = 8000
 const PYTHON_VENV_DIRNAME = 'python-venv'
-// Small default for session summaries (~2 GB). Changeable in Settings.
-const DEFAULT_CHAT_MODEL = 'llama3.2:3b'
-const DEFAULT_CHAT_MODEL_SIZE_LABEL = '~2 GB'
-// Existing llm_config.json files that omit chat_model were written when
-// qwen3:8b was the default. Do not silently switch those installs.
-const LEGACY_DEFAULT_CHAT_MODEL = 'qwen3:8b'
+// Default for session summaries (~5 GB). llama3.2:3b is a low-memory option.
+const DEFAULT_CHAT_MODEL = 'qwen3:8b'
+const DEFAULT_CHAT_MODEL_SIZE_LABEL = '~5 GB'
 
 const DEFAULT_LLM_CONFIG = {
     provider: 'ollama',
@@ -162,7 +159,6 @@ function createPaths(app, electronDir) {
         DEFAULT_LLM_CONFIG,
         DEFAULT_CHAT_MODEL,
         DEFAULT_CHAT_MODEL_SIZE_LABEL,
-        LEGACY_DEFAULT_CHAT_MODEL,
     }
 }
 
@@ -174,5 +170,4 @@ module.exports = {
     PYTHON_VENV_DIRNAME,
     DEFAULT_CHAT_MODEL,
     DEFAULT_CHAT_MODEL_SIZE_LABEL,
-    LEGACY_DEFAULT_CHAT_MODEL,
 }

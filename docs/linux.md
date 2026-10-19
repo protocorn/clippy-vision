@@ -63,7 +63,7 @@ If `libfuse2` is missing, you can still run the AppImage without FUSE:
 ./ClippyVision-Linux-x86_64-2.1.0.AppImage --appimage-extract-and-run
 ```
 
-Python is **not** inside the AppImage. Install Ollama first (see Prerequisites), then run the AppImage. The first-run wizard downloads a Python 3.12 runtime if needed and pulls `llama3.2:3b` for summaries.
+Python is **not** inside the AppImage. Install Ollama first (see Prerequisites), then run the AppImage. The first-run wizard downloads a Python 3.12 runtime if needed and pulls `qwen3:8b` for summaries. `llama3.2:3b` is a low-memory option that is less accurate.
 
 Packaged Linux `userData` is `~/.config/Clippy Vision` (Electron `productName`; confirmed in the release workflow). First-run setup writes `setup_complete.json` there. Until that file exists, the backend does not start.
 
@@ -165,10 +165,10 @@ When Ollama is the managed local runtime (default base URL `http://127.0.0.1:114
 2. Ollama on PATH — `ollama --version`. If missing, Linux does **not** try Homebrew. The wizard shows the official command (`curl -fsSL https://ollama.com/install.sh | sh`) and https://ollama.com/download/linux. An **Install** button can run that script only after you confirm it needs sudo/admin rights (`pkexec`, or a visible terminal if `pkexec` is missing). After it runs, the wizard re-checks that Ollama is reachable and fails with a clear message if it is not. The wizard does **not** apt-install Ollama and never runs the installer silently.
 3. Start/configure Ollama (`ollama serve` / wait until reachable)
 4. `pip install -r requirements.txt` into the app-managed venv
-5. Download MiniLM embeddings (`python -m core.model_download`) and auto-pull the default chat model `llama3.2:3b` (or another tag you typed) (`python -m core.ollama_pull <model>`), with progress
+5. Download MiniLM embeddings (`python -m core.model_download`) and auto-pull the default chat model `qwen3:8b` (or another tag you typed) (`python -m core.ollama_pull <model>`), with progress
 6. Warmup and write `setup_complete.json`
 
-Consent copy in the wizard: a checksum-verified CPython 3.12 from python-build-standalone (~25–30 MB, skipped if Python 3.11+ is already present), Ollama (installed only when missing, via “winget on Windows, Homebrew on macOS, official Linux script with consent, or ollama.com”), and the default chat model `llama3.2:3b` (~2 GB). Change the model later in Settings. Capture uses accessibility + OCR; no vision model is downloaded.
+Consent copy in the wizard: a checksum-verified CPython 3.12 from python-build-standalone (~25–30 MB, skipped if Python 3.11+ is already present), Ollama (installed only when missing, via “winget on Windows, Homebrew on macOS, official Linux script with consent, or ollama.com”), and the default chat model `qwen3:8b` (~5 GB). `llama3.2:3b` is a labeled low-memory option that is less accurate. Change the model later in Settings. Capture uses accessibility + OCR; no vision model is downloaded.
 
 You can point at a specific `ollama` binary with `CLIPPY_OLLAMA` (`paths.js`). That override is **not verified yet** on a Linux desktop.
 

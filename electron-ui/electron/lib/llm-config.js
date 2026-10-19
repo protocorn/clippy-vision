@@ -7,7 +7,6 @@ function createLlmConfig(paths) {
         OLLAMA_BASE_URL,
         LOCAL_EMBEDDING_MODEL,
         DEFAULT_LLM_CONFIG,
-        LEGACY_DEFAULT_CHAT_MODEL = 'qwen3:8b',
     } = paths
 
     function normalizeLLMConfig(values = {}) {
@@ -50,16 +49,7 @@ function createLlmConfig(paths) {
 
     function readLLMConfig() {
         let saved = {}
-        let savedFileExists = false
-        try {
-            saved = JSON.parse(fs.readFileSync(LLM_CONFIG_FILE, 'utf8')) || {}
-            savedFileExists = true
-        } catch (_) { /* no config yet — new install */ }
-        // Existing installs that never wrote chat_model were on qwen3:8b.
-        // Filling from DEFAULT_LLM_CONFIG would silently switch them to llama3.2:3b.
-        if (savedFileExists && !String(saved.chat_model || '').trim()) {
-            saved = { ...saved, chat_model: LEGACY_DEFAULT_CHAT_MODEL }
-        }
+        try { saved = JSON.parse(fs.readFileSync(LLM_CONFIG_FILE, 'utf8')) || {} } catch (_) {                 }
         const env = {
             provider: process.env.CLIPPY_LLM_PROVIDER,
             base_url: process.env.CLIPPY_LLM_BASE_URL,

@@ -201,9 +201,9 @@ test('unsupported Python platform falls back to a python.org link', () => {
     assert.equal(installCommandToRun(plan), null)
 })
 
-test('default chat model is the small llama3.2:3b summary model', () => {
-    assert.equal(DEFAULT_CHAT_MODEL, 'llama3.2:3b')
-    assert.equal(DEFAULT_CHAT_MODEL_SIZE_LABEL, '~2 GB')
+test('default chat model is qwen3:8b', () => {
+    assert.equal(DEFAULT_CHAT_MODEL, 'qwen3:8b')
+    assert.equal(DEFAULT_CHAT_MODEL_SIZE_LABEL, '~5 GB')
 })
 
 test('setup consent screen names the python-build-standalone download', () => {
@@ -212,6 +212,13 @@ test('setup consent screen names the python-build-standalone download', () => {
     assert.match(html, /checksum-verified/)
     assert.match(html, /~25–30 MB/)
     assert.match(html, /skipped if Python 3\.11\+ is already on this machine/)
+})
+
+test('setup labels llama3.2:3b as a less-accurate low-memory option', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../../src/setup.html'), 'utf8')
+    assert.match(html, /DEFAULT_CHAT_MODEL = 'qwen3:8b'/)
+    assert.match(html, /low memory · less accurate · ~2 GB/)
+    assert.match(html, /less accurate than the default qwen3:8b/)
 })
 
 test('darwin Ollama known paths include Homebrew prefixes', () => {

@@ -428,7 +428,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
     }
 
     function requiredChatModels() {
-        // Pull the configured chat model (defaults to llama3.2:3b). Do not
+        // Pull the configured chat model (defaults to qwen3:8b). Do not
         // force a second model if the user picked a different tag.
         const chatModel = String(readLLMConfig().chat_model || DEFAULT_CHAT_MODEL).trim()
         return chatModel ? [chatModel] : []

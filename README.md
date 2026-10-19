@@ -43,7 +43,7 @@ Ask in a connected MCP client, for example:
   <a href="https://github.com/protocorn/clippy-vision/releases/latest"><img src="https://img.shields.io/github/release-date/protocorn/clippy-vision?style=flat-square&label=latest%20release" alt="Latest release date" /></a>
 </p>
 
-The installers are unsigned: on Windows choose **More info → Run anyway**, and on macOS right-click → **Open** the first time. First run needs internet for an app-managed Python runtime (if you do not already have Python 3.11+), Python packages, and the default summary model (`llama3.2:3b`, about 2 GB). You can pick a different model later in Settings.
+The installers are unsigned: on Windows choose **More info → Run anyway**, and on macOS right-click → **Open** the first time. First run needs internet for an app-managed Python runtime (if you do not already have Python 3.11+), Python packages, and the default summary model (`qwen3:8b`, about 5 GB). `llama3.2:3b` is a low-memory option that is less accurate. You can pick a different model later in Settings.
 
 **Trying Clippy?** [Share feedback (5 min)](https://docs.google.com/forms/d/e/1FAIpQLScqsgeWGLdUS_Ba0Me0LPQH8QRrwnIgGiGGHwLElVuqIpfcxQ/viewform).
 
@@ -84,7 +84,7 @@ The setup wizard checks these numbers before installing. Below minimum → setup
 ## Quick Start
 
 1. Download and install Clippy. You do not need to install Python first.
-2. Complete the setup wizard (Ollama if missing, then Python packages). Setup downloads `llama3.2:3b` automatically for summaries; change it later in Settings.
+2. Complete the setup wizard (Ollama if missing, then Python packages). Setup downloads `qwen3:8b` automatically for summaries. `llama3.2:3b` is a low-memory option that is less accurate; change the model later in Settings.
 3. Leave Clippy running to build your activity history.
 4. Open **Settings → Connect apps**, connect your agent, and ask about your activity.
 

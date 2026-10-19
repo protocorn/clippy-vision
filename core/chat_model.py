@@ -17,10 +17,7 @@ import os
 
 # Only used when nothing else is configured (fresh env, no env var, no config
 # file) — mirrors electron-ui/electron/lib/paths.js DEFAULT_LLM_CONFIG.chat_model.
-DEFAULT_CHAT_MODEL = "llama3.2:3b"
-# Existing llm_config.json files that omit chat_model were written when
-# qwen3:8b was the default. Do not silently switch those installs.
-LEGACY_DEFAULT_CHAT_MODEL = "qwen3:8b"
+DEFAULT_CHAT_MODEL = "qwen3:8b"
 
 
 def get_chat_model() -> str:
@@ -49,7 +46,6 @@ def get_chat_model() -> str:
         configured = str(data.get("chat_model") or "").strip()
         if configured:
             return configured
-        return LEGACY_DEFAULT_CHAT_MODEL
     except Exception:
         pass
 
