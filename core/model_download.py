@@ -8,6 +8,7 @@ and ``model.safetensors`` (~91 MB), not every exported format in the repo.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -127,6 +128,65 @@ def embedding_model_dir() -> Path:
     )
 
 
+def managed_embedding_model_dir(
+    *,
+    data_dir: str = "",
+    project_root: Path | None = None,
+    platform: str | None = None,
+    home: Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> Path:
+    """The folder the app manages, ignoring CLIPPY_EMBEDDING_MODEL_DIR."""
+    return resolve_embedding_model_dir(
+        override="",
+        data_dir=data_dir if data_dir else os.environ.get("CLIPPY_DATA_DIR", ""),
+        project_root=project_root,
+        platform=platform,
+        home=home,
+        env=env,
+    )
+
+
+def _paths_equal(left: Path, right: Path) -> bool:
+    try:
+        return os.path.normcase(str(left.resolve())) == os.path.normcase(str(right.resolve()))
+    except OSError:
+        return os.path.normcase(os.path.normpath(str(left))) == os.path.normcase(
+            os.path.normpath(str(right))
+        )
+
+
+def is_user_embedding_override(
+    *,
+    override: str | None = None,
+    data_dir: str | None = None,
+    project_root: Path | None = None,
+) -> bool:
+    """True when CLIPPY_EMBEDDING_MODEL_DIR is a user-picked folder.
+
+    Electron and clippy-mcp set the env var to the computed default. That is
+    still app-managed. A path that differs from the default is a user override
+    and must not be deleted, cleaned, or refilled.
+    """
+    text = override if override is not None else os.environ.get("CLIPPY_EMBEDDING_MODEL_DIR", "")
+    text = (text or "").strip()
+    if not text:
+        return False
+    default = managed_embedding_model_dir(
+        data_dir=data_dir if data_dir is not None else os.environ.get("CLIPPY_DATA_DIR", ""),
+        project_root=project_root,
+    )
+    return not _paths_equal(Path(text).expanduser(), default)
+
+
+def is_protected_override_dir(path: Path | None = None) -> bool:
+    """True when *path* is the user-picked override folder."""
+    if not is_user_embedding_override():
+        return False
+    target = Path(path) if path is not None else embedding_model_dir()
+    return _paths_equal(target, embedding_model_dir())
+
+
 def _nonempty_file(path: Path) -> bool:
     try:
         return path.is_file() and path.stat().st_size > 0
@@ -134,19 +194,71 @@ def _nonempty_file(path: Path) -> bool:
         return False
 
 
+def safetensors_file_valid(path: Path) -> bool:
+    """True when *path* is a complete safetensors file the loader can open.
+
+    The loader prefers ``model.safetensors`` over ``pytorch_model.bin``. A
+    truncated safetensors next to a good ``.bin`` still fails at load time, so
+    this checks the 8-byte header length, JSON metadata, and data offsets.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return False
+    if size < 8:
+        return False
+    try:
+        with path.open("rb") as handle:
+            raw_len = handle.read(8)
+            if len(raw_len) < 8:
+                return False
+            header_len = int.from_bytes(raw_len, "little")
+            max_header = min(size - 8, 100 * 1024 * 1024)
+            if header_len < 2 or header_len > max_header:
+                return False
+            header_bytes = handle.read(header_len)
+            if len(header_bytes) != header_len:
+                return False
+            header = json.loads(header_bytes)
+    except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(header, dict):
+        return False
+    data_size = size - 8 - header_len
+    for key, meta in header.items():
+        if key == "__metadata__":
+            continue
+        if not isinstance(meta, dict):
+            return False
+        offsets = meta.get("data_offsets")
+        if not isinstance(offsets, (list, tuple)) or len(offsets) != 2:
+            return False
+        start, end = offsets
+        if not isinstance(start, int) or not isinstance(end, int):
+            return False
+        if start < 0 or end < start or end > data_size:
+            return False
+    return True
+
+
+def _weights_ready(root: Path) -> bool:
+    safetensors = root / "model.safetensors"
+    if safetensors.is_file():
+        return safetensors_file_valid(safetensors)
+    return _nonempty_file(root / "pytorch_model.bin")
+
+
 def embedding_ready(path: Path | None = None) -> bool:
     """True only when the folder has a usable MiniLM checkpoint.
 
-    A cut-off copy can leave ``config.json`` plus a truncated weights file.
-    Require the tokenizer as well, and ignore empty placeholders.
-    New downloads keep ``model.safetensors`` only; ``pytorch_model.bin`` stays
-    a fallback so existing full installs still count as ready.
+    If ``model.safetensors`` exists it must be a valid safetensors file — a
+    sibling ``pytorch_model.bin`` does not count. The ``.bin`` is accepted only
+    when no safetensors file is present. New downloads keep safetensors only.
     """
     root = path or embedding_model_dir()
     has_config = _nonempty_file(root / "config.json")
-    has_weights = _nonempty_file(root / "model.safetensors") or _nonempty_file(root / "pytorch_model.bin")
     has_tokenizer = _nonempty_file(root / "tokenizer.json") or _nonempty_file(root / "tokenizer_config.json")
-    return has_config and has_weights and has_tokenizer
+    return has_config and has_tokenizer and _weights_ready(root)
 
 
 def _temp_sibling(dest: Path) -> Path:
@@ -154,7 +266,12 @@ def _temp_sibling(dest: Path) -> Path:
 
 
 def cleanup_stale_embedding_temps(dest: Path) -> None:
-    """Remove leftover ``<dest>.tmp-*`` folders from a crashed copy or download."""
+    """Remove leftover ``<dest>.tmp-*`` folders from a crashed copy or download.
+
+    Never touch temps next to a user-picked override folder.
+    """
+    if is_protected_override_dir(dest):
+        return
     parent = dest.parent
     if not parent.is_dir():
         return
@@ -165,8 +282,22 @@ def cleanup_stale_embedding_temps(dest: Path) -> None:
 
 
 def _remove_if_incomplete(path: Path) -> None:
+    if is_protected_override_dir(path):
+        return
     if path.exists() and not embedding_ready(path):
         shutil.rmtree(path, ignore_errors=True)
+
+
+def discard_managed_embedding_dir(path: Path) -> bool:
+    """Delete an app-managed model folder so it can be refilled.
+
+    Returns False (and does nothing) when *path* is a user override.
+    """
+    if is_protected_override_dir(path):
+        return False
+    if path.exists():
+        shutil.rmtree(path, ignore_errors=True)
+    return True
 
 
 def commit_model_dir(tmp: Path, dest: Path) -> Path:
@@ -174,7 +305,11 @@ def commit_model_dir(tmp: Path, dest: Path) -> Path:
 
     Incomplete dest is treated as missing and replaced. If another process
     already left a ready dest, that is a win and tmp is discarded.
+    Never writes into a user-picked CLIPPY_EMBEDDING_MODEL_DIR.
     """
+    if is_protected_override_dir(dest):
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise PermissionError(f"Refusing to refill user CLIPPY_EMBEDDING_MODEL_DIR: {dest}")
     if not embedding_ready(tmp):
         shutil.rmtree(tmp, ignore_errors=True)
         raise FileNotFoundError(f"Model copy at {tmp} is incomplete")
@@ -246,6 +381,8 @@ def _should_move_legacy(src: Path) -> bool:
 
 def _transfer_model(src: Path, dest: Path, *, prefer_move: bool) -> None:
     """Copy into a temp sibling, verify it, then rename into place."""
+    if is_protected_override_dir(dest):
+        raise PermissionError(f"Refusing to refill user CLIPPY_EMBEDDING_MODEL_DIR: {dest}")
     dest.parent.mkdir(parents=True, exist_ok=True)
     cleanup_stale_embedding_temps(dest)
     tmp = _temp_sibling(dest)
@@ -267,6 +404,8 @@ def _migrate_legacy_embedding_model_unlocked(
     project_root: Path,
     scan_runtime_copies: bool = True,
 ) -> Path:
+    if is_protected_override_dir(dest):
+        return dest
     cleanup_stale_embedding_temps(dest)
     _remove_if_incomplete(dest)
     if embedding_ready(dest):
@@ -305,7 +444,9 @@ def migrate_legacy_embedding_model(
     """
     dest = dest or embedding_model_dir()
     root = Path(project_root) if project_root is not None else _PROJECT_ROOT
-    scan_runtime = not bool(os.environ.get("CLIPPY_EMBEDDING_MODEL_DIR", "").strip())
+    if is_protected_override_dir(dest):
+        return dest
+    scan_runtime = not is_user_embedding_override()
     if embedding_ready(dest):
         return dest
     with _embedding_lock:
@@ -317,6 +458,8 @@ def migrate_legacy_embedding_model(
 def _snapshot(repo_id: str, local_dir: Path) -> Path:
     from huggingface_hub import snapshot_download
 
+    if is_protected_override_dir(local_dir):
+        raise PermissionError(f"Refusing to download into user CLIPPY_EMBEDDING_MODEL_DIR: {local_dir}")
     cleanup_stale_embedding_temps(local_dir)
     tmp = _temp_sibling(local_dir)
     if tmp.exists():
@@ -338,6 +481,12 @@ def _snapshot(repo_id: str, local_dir: Path) -> Path:
 def ensure_embedding_model(*, force: bool = False) -> Path:
     """Ensure official MiniLM weights exist in the resolved model folder."""
     path = embedding_model_dir()
+    if is_protected_override_dir(path):
+        if embedding_ready(path):
+            return path
+        raise FileNotFoundError(
+            f"CLIPPY_EMBEDDING_MODEL_DIR is missing or incomplete: {path}"
+        )
     with _embedding_lock:
         try:
             if not force:
