@@ -727,7 +727,7 @@ class EmbeddingRefillOnceTests(unittest.TestCase):
             self.assertEqual(refills, [dest])
             self.assertTrue(refill_recorded_for_current_model(dest))
 
-            (dest / "model.safetensors").write_bytes(_minimal_safetensors_bytes(data=b"\x11" * 16))
+            (dest / "model.safetensors").write_bytes(_minimal_safetensors_bytes(data=b"\x11" * 32))
             self.assertFalse(refill_recorded_for_current_model(dest))
 
             reset_runtime_state_for_tests()
