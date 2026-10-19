@@ -57,6 +57,15 @@ class OllamaBaseUrlResolutionTests(unittest.TestCase):
         ):
             self.assertEqual(ollama_client.base_url(), "http://10.0.0.8:11434")
 
+    def test_ollama_host_wins_when_llm_config_is_default(self):
+        self._write_llm_config(base_url="http://127.0.0.1:11434")
+        with patch.dict(
+            os.environ,
+            {"CLIPPY_OLLAMA_URL": "", "OLLAMA_HOST": "http://10.0.0.8:11434"},
+            clear=False,
+        ):
+            self.assertEqual(ollama_client.base_url(), "http://10.0.0.8:11434")
+
     def test_llm_config_base_url_used_when_env_unset(self):
         self._write_llm_config(base_url="http://192.168.1.5:11434")
         self.assertEqual(ollama_client.base_url(), "http://192.168.1.5:11434")

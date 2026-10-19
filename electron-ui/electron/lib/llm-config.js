@@ -1,5 +1,16 @@
 const fs = require('fs')
 
+const DEFAULT_OLLAMA_URLS = new Set([
+    'http://127.0.0.1:11434',
+    'http://localhost:11434',
+    'http://[::1]:11434',
+])
+
+function isDefaultOllamaBaseURL(url) {
+    const baseURL = String(url || '').trim().toLowerCase().replace(/\/+$/, '')
+    return !baseURL || DEFAULT_OLLAMA_URLS.has(baseURL)
+}
+
 function createLlmConfig(paths) {
     const {
         DATA_DIR,
@@ -112,12 +123,8 @@ function createLlmConfig(paths) {
     }
 
     function usesManagedOllama() {
-        const baseURL = configuredOllamaBaseURL().toLowerCase().replace(/\/+$/, '')
-        return new Set([
-            'http://127.0.0.1:11434',
-            'http://localhost:11434',
-            'http://[::1]:11434',
-        ]).has(baseURL)
+        const baseURL = String(configuredOllamaBaseURL() || '').trim().toLowerCase().replace(/\/+$/, '')
+        return DEFAULT_OLLAMA_URLS.has(baseURL)
     }
 
     return {
@@ -132,4 +139,4 @@ function createLlmConfig(paths) {
     }
 }
 
-module.exports = { createLlmConfig }
+module.exports = { createLlmConfig, isDefaultOllamaBaseURL }

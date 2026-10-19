@@ -162,6 +162,20 @@ class ClippyMcpLauncherEnvTests(unittest.TestCase):
         )
         self.assertIsNone(payload["CLIPPY_OLLAMA_URL"])
 
+    def test_default_llm_config_does_not_shadow_ollama_host(self):
+        with tempfile.TemporaryDirectory(prefix="clippy-ollama-default-") as raw:
+            data_dir = Path(raw) / "Clippy Vision" / "data"
+            data_dir.mkdir(parents=True)
+            (data_dir / "llm_config.json").write_text(
+                json.dumps({"provider": "ollama", "base_url": "http://127.0.0.1:11434"}),
+                encoding="utf-8",
+            )
+            payload = self._probe_env(
+                data_dir=str(data_dir),
+                extra_env={"OLLAMA_HOST": "192.168.1.9:11434"},
+            )
+            self.assertIsNone(payload["CLIPPY_OLLAMA_URL"])
+
 
 if __name__ == "__main__":
     unittest.main()

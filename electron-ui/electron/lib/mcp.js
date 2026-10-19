@@ -2,6 +2,7 @@ const path = require('path')
 const fs   = require('fs')
 const os   = require('os')
 const crypto = require('crypto')
+const { isDefaultOllamaBaseURL } = require('./llm-config')
 
 function resolveUserConfigDir({ platform = process.platform, env = process.env, home = os.homedir() } = {}) {
     if (platform === 'darwin') {
@@ -153,16 +154,17 @@ function createMcp({ paths, runCommand, shell, runtime, version, llmConfig } = {
     const runtimePlatform = runtime?.platform || process.platform
     const runtimeEnv = runtime ? (runtime.env || {}) : process.env
     const appVersion = String(version || runtime?.version || paths.APP_VERSION || '').trim()
-    const DEFAULT_OLLAMA_URL = 'http://127.0.0.1:11434'
 
     function resolvedOllamaUrl() {
+        // Only emit CLIPPY_OLLAMA_URL when the user actually saved an address.
+        // A default Settings URL must not shadow OLLAMA_HOST in MCP clients.
         const fromEnv = String(runtimeEnv.CLIPPY_OLLAMA_URL || '').trim()
         if (fromEnv) return fromEnv.replace(/\/+$/, '')
         if (typeof llmConfig?.configuredOllamaBaseURL === 'function') {
             const configured = String(llmConfig.configuredOllamaBaseURL() || '').trim().replace(/\/+$/, '')
-            if (configured) return configured
+            if (configured && !isDefaultOllamaBaseURL(configured)) return configured
         }
-        return DEFAULT_OLLAMA_URL
+        return ''
     }
 
     const MCP_SERVER_KEY = 'clippy-vision'
@@ -213,15 +215,20 @@ function createMcp({ paths, runCommand, shell, runtime, version, llmConfig } = {
             'set -euo pipefail',
             `export CLIPPY_DATA_DIR=${shSingleQuote(dataDir)}`,
             `export CLIPPY_EMBEDDING_MODEL_DIR=${shSingleQuote(embeddingModelDir)}`,
-            `export CLIPPY_OLLAMA_URL=${shSingleQuote(ollamaUrl)}`,
+        ]
+        if (String(ollamaUrl || '').trim()) {
+            script.push(`export CLIPPY_OLLAMA_URL=${shSingleQuote(ollamaUrl)}`)
+        }
+        script.push(
             `export PYTHONPATH=${shSingleQuote(pythonPath)}`,
             'export PYTHONIOENCODING=utf-8',
             'export PYTHONUTF8=1',
             `exec ${shSingleQuote(python)} ${shSingleQuote(serverEntry)} "$@"`,
             '',
-        ].join('\n')
+        )
+        const text = script.join('\n')
         fs.mkdirSync(path.dirname(launcherPath), { recursive: true })
-        fs.writeFileSync(launcherPath, script, { encoding: 'utf8', mode: 0o755 })
+        fs.writeFileSync(launcherPath, text, { encoding: 'utf8', mode: 0o755 })
     }
 
     function syncAppImageMcpRuntime() {
@@ -321,11 +328,12 @@ function createMcp({ paths, runCommand, shell, runtime, version, llmConfig } = {
         const env = {
             CLIPPY_DATA_DIR: DATA_DIR,
             CLIPPY_EMBEDDING_MODEL_DIR: EMBEDDING_MODEL_DIR,
-            CLIPPY_OLLAMA_URL: resolvedOllamaUrl(),
             PYTHONPATH: pythonRoot,
             PYTHONIOENCODING: 'utf-8',
             PYTHONUTF8: '1',
         }
+        const ollamaUrl = resolvedOllamaUrl()
+        if (ollamaUrl) env.CLIPPY_OLLAMA_URL = ollamaUrl
 
         return {
             name: 'clippy-vision',

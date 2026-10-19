@@ -3,6 +3,7 @@ const path      = require('path')
 const fs        = require('fs')
 const http      = require('http')
 const net       = require('net')
+const { isDefaultOllamaBaseURL } = require('./llm-config')
 
 function createApiSpawn({ paths, llmConfig, state, spawnFn } = {}) {
     const {
@@ -45,11 +46,15 @@ function createApiSpawn({ paths, llmConfig, state, spawnFn } = {}) {
             OLLAMA_NUM_PARALLEL,
             ...extra,
         }
-        // Settings stores the address in llm_config.json. Python only reads
-        // CLIPPY_OLLAMA_URL / OLLAMA_HOST, so pass the configured URL unless
-        // the caller already overrode it.
+        // Settings stores the address in llm_config.json. Python prefers
+        // CLIPPY_OLLAMA_URL over OLLAMA_HOST, so only pass a URL the user
+        // actually saved. A default/unset Settings address must not shadow
+        // the user's own OLLAMA_HOST.
         if (!String(env.CLIPPY_OLLAMA_URL || '').trim()) {
-            env.CLIPPY_OLLAMA_URL = configuredOllamaBaseURL()
+            const configured = String(configuredOllamaBaseURL() || '').trim().replace(/\/+$/, '')
+            if (configured && !isDefaultOllamaBaseURL(configured)) {
+                env.CLIPPY_OLLAMA_URL = configured
+            }
         }
         return env
     }
@@ -229,18 +234,38 @@ function createApiSpawn({ paths, llmConfig, state, spawnFn } = {}) {
         })
     }
 
+    function forceKillApiProcess(proc) {
+        // SIGTERM may be ignored while uvicorn waits on an open generate call.
+        // Escalate: Windows taskkill /T /F kills the tree; SIGKILL covers POSIX
+        // and still helps Node emit 'exit' on Windows.
+        try {
+            if (process.platform === 'win32' && proc.pid) {
+                spawnProc('taskkill', ['/pid', String(proc.pid), '/T', '/F'], {
+                    windowsHide: true,
+                    stdio: 'ignore',
+                })
+            }
+        } catch (_) { /* taskkill missing or pid already gone */ }
+        try {
+            proc.kill('SIGKILL')
+        } catch (_) { /* already gone */ }
+    }
+
     function stopServer({ timeoutMs = 5000 } = {}) {
-        // Same process-tree kill as before-quit. In-flight API work is dropped
-        // the same way a Clippy restart would drop it.
+        // SIGTERM, wait up to timeout, then SIGKILL / taskkill, and do not
+        // resolve until the child has actually exited so restart never leaves
+        // two API processes on the same SQLite database.
         return new Promise((resolve) => {
             const proc = state.apiProcess
             if (!proc) return resolve()
             let settled = false
-            let timer = null
+            let graceTimer = null
+            let killTimer = null
             const finish = () => {
                 if (settled) return
                 settled = true
-                if (timer) clearTimeout(timer)
+                if (graceTimer) clearTimeout(graceTimer)
+                if (killTimer) clearTimeout(killTimer)
                 if (state.apiProcess === proc) {
                     state.apiProcess = null
                     clearApiState()
@@ -248,24 +273,27 @@ function createApiSpawn({ paths, llmConfig, state, spawnFn } = {}) {
                 resolve()
             }
             proc.once('exit', finish)
-            timer = setTimeout(finish, timeoutMs)
             try {
                 proc.kill('SIGTERM')
-            } catch (_) { /* already gone */ }
-            if (process.platform === 'win32' && proc.pid) {
-                spawnHidden('taskkill', ['/pid', String(proc.pid), '/T', '/F'])
+            } catch (_) {
+                finish()
+                return
             }
+            graceTimer = setTimeout(() => {
+                forceKillApiProcess(proc)
+                killTimer = setTimeout(finish, Math.min(2000, Math.max(250, timeoutMs)))
+            }, timeoutMs)
         })
     }
 
-    async function restartServer() {
+    async function restartServer({ timeoutMs = 5000 } = {}) {
         // Coalesce overlapping restarts so a double Settings save does not
         // bounce the API twice. A second call while one is in flight waits
         // for that restart; startServer then reads the current Settings URL.
         if (!state.apiProcess && !restartPromise) return
         if (restartPromise) return restartPromise
         restartPromise = (async () => {
-            await stopServer()
+            await stopServer({ timeoutMs })
             await startServer()
         })()
         try {

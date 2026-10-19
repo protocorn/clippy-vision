@@ -517,4 +517,6 @@ if __name__ == "__main__":
     # for running this module directly.
     port = int(os.environ.get("CLIPPY_API_PORT") or 8000)
 
-    uvicorn.run(app, host="127.0.0.1", port=port)
+    # Cap graceful shutdown so an in-flight /api/generate cannot hold the
+    # process past Electron's SIGTERM wait; Electron then SIGKILLs if needed.
+    uvicorn.run(app, host="127.0.0.1", port=port, timeout_graceful_shutdown=4)

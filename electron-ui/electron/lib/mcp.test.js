@@ -251,7 +251,7 @@ test('AppImage launch config copies python runtime into userData instead of /tmp
             launch.env.CLIPPY_EMBEDDING_MODEL_DIR,
             path.join(userData, 'models', 'embeddings', 'all-MiniLM-L6-v2'),
         )
-        assert.equal(launch.env.CLIPPY_OLLAMA_URL, 'http://127.0.0.1:11434')
+        assert.equal(launch.env.CLIPPY_OLLAMA_URL, undefined)
         assert.ok(!String(launch.args[0]).includes('.mount_'))
         assert.ok(!String(launch.env.PYTHONPATH).includes('.mount_'))
         assert.ok(!String(launch.launcher).includes('.mount_'))
@@ -263,8 +263,7 @@ test('AppImage launch config copies python runtime into userData instead of /tmp
         assert.match(launcherText, /mcp-runtime/)
         assert.match(launcherText, /CLIPPY_EMBEDDING_MODEL_DIR=/)
         assert.ok(launcherText.includes(launch.env.CLIPPY_EMBEDDING_MODEL_DIR))
-        assert.match(launcherText, /CLIPPY_OLLAMA_URL=/)
-        assert.ok(launcherText.includes(launch.env.CLIPPY_OLLAMA_URL))
+        assert.doesNotMatch(launcherText, /CLIPPY_OLLAMA_URL=/)
         assert.match(launcherText, /^exec /m)
         const execLine = launcherText.split('\n').find((line) => line.startsWith('exec '))
         assert.ok(execLine)
@@ -311,7 +310,7 @@ test('Windows packaged ROOT is left unchanged (not copied into userData)', async
             launch.env.CLIPPY_EMBEDDING_MODEL_DIR,
             path.join(userData, 'models', 'embeddings', 'all-MiniLM-L6-v2'),
         )
-        assert.equal(launch.env.CLIPPY_OLLAMA_URL, 'http://127.0.0.1:11434')
+        assert.equal(launch.env.CLIPPY_OLLAMA_URL, undefined)
         assert.equal(launch.launcher, path.join(root, 'scripts', 'clippy-mcp.cmd'))
         assert.equal(fs.existsSync(path.join(userData, 'mcp-runtime')), false)
     } finally {
@@ -340,7 +339,7 @@ test('non-AppImage Linux ROOT is left unchanged', async () => {
             launch.env.CLIPPY_EMBEDDING_MODEL_DIR,
             path.join(home, 'models', 'embeddings', 'all-MiniLM-L6-v2'),
         )
-        assert.equal(launch.env.CLIPPY_OLLAMA_URL, 'http://127.0.0.1:11434')
+        assert.equal(launch.env.CLIPPY_OLLAMA_URL, undefined)
         assert.equal(fs.existsSync(path.join(home, 'mcp-runtime')), false)
     } finally {
         fs.rmSync(home, { recursive: true, force: true })
@@ -460,6 +459,27 @@ test('startup refresh writes CLIPPY_EMBEDDING_MODEL_DIR onto current runtime con
     }
 })
 
+test('MCP launch env omits CLIPPY_OLLAMA_URL when Settings URL is default', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'clippy-mcp-ollama-default-'))
+    try {
+        seedClippyRoot(home)
+        const python = path.join(home, 'venv', 'bin', 'python')
+        seedPython(python)
+        const mcp = createMcp({
+            paths: { ROOT: home, DATA_DIR: path.join(home, 'data'), USER_DATA: home, PYTHON_COMMAND: python },
+            runCommand: async () => ({ code: 1, stdout: '' }),
+            shell: { openExternal: async () => {} },
+            llmConfig: { configuredOllamaBaseURL: () => 'http://127.0.0.1:11434' },
+            runtime: { platform: 'linux', home, env: {} },
+        })
+
+        const launch = await mcp.getMcpLaunchConfig()
+        assert.equal(launch.env.CLIPPY_OLLAMA_URL, undefined)
+    } finally {
+        fs.rmSync(home, { recursive: true, force: true })
+    }
+})
+
 test('MCP launch env includes CLIPPY_OLLAMA_URL from Settings', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'clippy-mcp-ollama-'))
     try {
@@ -553,7 +573,7 @@ test('startup refresh updates CLIPPY_OLLAMA_URL when Settings address changes', 
         await mcp.connectMcpClient('cursor')
         const cursorPath = mcpClientDefinitions({ platform: 'linux', home, env: {} }).cursor.configPath
         const before = JSON.parse(fs.readFileSync(cursorPath, 'utf8'))
-        assert.equal(before.mcpServers['clippy-vision'].env.CLIPPY_OLLAMA_URL, 'http://127.0.0.1:11434')
+        assert.equal(before.mcpServers['clippy-vision'].env.CLIPPY_OLLAMA_URL, undefined)
 
         ollamaUrl = 'http://192.168.1.9:11434'
         const result = await mcp.refreshStaleMcpClientConfigs()
