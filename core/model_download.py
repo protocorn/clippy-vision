@@ -3,7 +3,8 @@
 Embeddings use the public sentence-transformers MiniLM. The checkpoint lives
 in one stable per-user folder (Electron userData/models/embeddings/…, or the
 source-tree models/ folder during development). CLIPPY_EMBEDDING_MODEL_DIR
-overrides that location.
+overrides that location. The first download is limited to tokenizer, config,
+and ``model.safetensors`` (~91 MB), not every exported format in the repo.
 """
 from __future__ import annotations
 
@@ -24,6 +25,21 @@ EMBEDDING_REPO = os.environ.get(
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 EMBEDDING_MODEL_RELATIVE = Path("models") / "embeddings" / EMBEDDING_MODEL_NAME
 APP_USER_DATA_NAME = "Clippy Vision"
+
+# Transformers AutoTokenizer/AutoModel load config + tokenizer + safetensors.
+# Keep the tiny sentence-transformers sidecars (modules.json, pooling) so the
+# folder still looks like a MiniLM checkout. Skip onnx/openvino/tf/rust and
+# pytorch_model.bin so the first download is ~91 MB instead of ~932 MB.
+EMBEDDING_SNAPSHOT_ALLOW_PATTERNS = (
+    "config*.json",
+    "tokenizer*",
+    "vocab.txt",
+    "special_tokens_map.json",
+    "modules.json",
+    "sentence_bert_config.json",
+    "1_Pooling/*",
+    "model.safetensors",
+)
 
 _embedding_lock = threading.Lock()
 
@@ -123,6 +139,8 @@ def embedding_ready(path: Path | None = None) -> bool:
 
     A cut-off copy can leave ``config.json`` plus a truncated weights file.
     Require the tokenizer as well, and ignore empty placeholders.
+    New downloads keep ``model.safetensors`` only; ``pytorch_model.bin`` stays
+    a fallback so existing full installs still count as ready.
     """
     root = path or embedding_model_dir()
     has_config = _nonempty_file(root / "config.json")
@@ -308,6 +326,7 @@ def _snapshot(repo_id: str, local_dir: Path) -> Path:
         snapshot_download(
             repo_id=repo_id,
             local_dir=str(tmp),
+            allow_patterns=list(EMBEDDING_SNAPSHOT_ALLOW_PATTERNS),
         )
         return commit_model_dir(tmp, local_dir)
     except Exception:

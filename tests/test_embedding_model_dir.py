@@ -18,6 +18,8 @@ from core.local_embeddings import (
 )
 from core.model_download import (
     EMBEDDING_MODEL_RELATIVE,
+    EMBEDDING_SNAPSHOT_ALLOW_PATTERNS,
+    _snapshot,
     _transfer_model,
     embedding_ready,
     ensure_embedding_model,
@@ -31,6 +33,23 @@ def _write_dummy_minilm(path: Path) -> Path:
     (path / "config.json").write_text('{"hidden_size": 384}\n', encoding="utf-8")
     (path / "model.safetensors").write_bytes(b"fake-weights")
     (path / "tokenizer.json").write_text('{"version": "1.0"}\n', encoding="utf-8")
+    return path
+
+
+def _write_allowed_minilm(path: Path) -> Path:
+    """Write only the files MiniLM snapshot_download is allowed to fetch."""
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "config.json").write_text('{"hidden_size": 384}\n', encoding="utf-8")
+    (path / "config_sentence_transformers.json").write_text("{}\n", encoding="utf-8")
+    (path / "tokenizer.json").write_text('{"version": "1.0"}\n', encoding="utf-8")
+    (path / "tokenizer_config.json").write_text("{}\n", encoding="utf-8")
+    (path / "vocab.txt").write_text("[CLS]\n", encoding="utf-8")
+    (path / "special_tokens_map.json").write_text("{}\n", encoding="utf-8")
+    (path / "modules.json").write_text("[]\n", encoding="utf-8")
+    (path / "sentence_bert_config.json").write_text("{}\n", encoding="utf-8")
+    (path / "1_Pooling").mkdir(exist_ok=True)
+    (path / "1_Pooling" / "config.json").write_text("{}\n", encoding="utf-8")
+    (path / "model.safetensors").write_bytes(b"fake-weights")
     return path
 
 
@@ -208,6 +227,62 @@ class EmbeddingModelMigrationTests(unittest.TestCase):
 
             self.assertFalse(dest.exists())
             self.assertEqual(list(Path(raw).glob(f"{dest.name}.tmp-*")), [])
+
+
+class EmbeddingSnapshotAllowPatternsTests(unittest.TestCase):
+    EXPECTED_ALLOW_PATTERNS = [
+        "config*.json",
+        "tokenizer*",
+        "vocab.txt",
+        "special_tokens_map.json",
+        "modules.json",
+        "sentence_bert_config.json",
+        "1_Pooling/*",
+        "model.safetensors",
+    ]
+
+    def test_allow_patterns_keep_safetensors_and_skip_other_weight_formats(self):
+        self.assertEqual(list(EMBEDDING_SNAPSHOT_ALLOW_PATTERNS), self.EXPECTED_ALLOW_PATTERNS)
+        self.assertIn("model.safetensors", EMBEDDING_SNAPSHOT_ALLOW_PATTERNS)
+        self.assertNotIn("pytorch_model.bin", EMBEDDING_SNAPSHOT_ALLOW_PATTERNS)
+        self.assertNotIn("*.bin", EMBEDDING_SNAPSHOT_ALLOW_PATTERNS)
+        self.assertFalse(any("onnx" in pattern for pattern in EMBEDDING_SNAPSHOT_ALLOW_PATTERNS))
+        self.assertFalse(any("openvino" in pattern for pattern in EMBEDDING_SNAPSHOT_ALLOW_PATTERNS))
+        self.assertFalse(any("tf_model" in pattern or "*.h5" in pattern for pattern in EMBEDDING_SNAPSHOT_ALLOW_PATTERNS))
+        self.assertFalse(any("rust_model" in pattern or "*.ot" in pattern for pattern in EMBEDDING_SNAPSHOT_ALLOW_PATTERNS))
+
+    def test_folder_with_only_allowed_files_passes_completeness_check(self):
+        with tempfile.TemporaryDirectory(prefix="clippy-embed-allowed-") as raw:
+            path = _write_allowed_minilm(Path(raw) / "all-MiniLM-L6-v2")
+            self.assertTrue(embedding_ready(path))
+            self.assertFalse((path / "pytorch_model.bin").exists())
+            self.assertFalse((path / "onnx").exists())
+            self.assertFalse((path / "openvino").exists())
+            self.assertFalse((path / "tf_model.h5").exists())
+            self.assertFalse((path / "rust_model.ot").exists())
+
+    def test_snapshot_download_is_called_with_allow_patterns(self):
+        with tempfile.TemporaryDirectory(prefix="clippy-embed-snapshot-") as raw:
+            dest = Path(raw) / "all-MiniLM-L6-v2"
+
+            def fake_snapshot_download(*, repo_id, local_dir, allow_patterns=None, **_kwargs):
+                _write_allowed_minilm(Path(local_dir))
+                return str(local_dir)
+
+            with patch("huggingface_hub.snapshot_download", side_effect=fake_snapshot_download) as mock_download:
+                result = _snapshot("sentence-transformers/all-MiniLM-L6-v2", dest)
+
+            mock_download.assert_called_once()
+            kwargs = mock_download.call_args.kwargs
+            self.assertEqual(kwargs["allow_patterns"], self.EXPECTED_ALLOW_PATTERNS)
+            self.assertNotIn("pytorch_model.bin", kwargs["allow_patterns"])
+            self.assertEqual(result, dest)
+            self.assertTrue(embedding_ready(dest))
+            self.assertTrue((dest / "model.safetensors").is_file())
+            self.assertTrue((dest / "tokenizer.json").is_file())
+            self.assertTrue((dest / "1_Pooling" / "config.json").is_file())
+            self.assertFalse((dest / "pytorch_model.bin").exists())
+            self.assertEqual(list(dest.parent.glob(f"{dest.name}.tmp-*")), [])
 
 
 class HashFallbackGuardTests(unittest.TestCase):
