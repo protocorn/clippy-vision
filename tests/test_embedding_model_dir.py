@@ -22,6 +22,7 @@ from core.local_embeddings import (
 )
 from core.model_download import (
     EMBEDDING_MODEL_RELATIVE,
+    EMBEDDING_REPO,
     EMBEDDING_SNAPSHOT_ALLOW_PATTERNS,
     _snapshot,
     _transfer_model,
@@ -32,6 +33,10 @@ from core.model_download import (
     is_user_embedding_override,
     managed_embedding_model_dir,
     migrate_legacy_embedding_model,
+    read_refill_marker,
+    model_files_fingerprint,
+    refill_marker_path,
+    refill_recorded_for_current_model,
     resolve_embedding_model_dir,
     safetensors_file_valid,
 )
@@ -246,7 +251,7 @@ class EmbeddingModelMigrationTests(unittest.TestCase):
             dest.mkdir()
             (dest / "orphan").write_text("stale\n", encoding="utf-8")
 
-            def fail_snapshot(_repo, local_dir):
+            def fail_snapshot(_repo, local_dir, **_kwargs):
                 raise OSError("offline")
 
             with patch("core.model_download.embedding_model_dir", return_value=dest), \
@@ -258,8 +263,11 @@ class EmbeddingModelMigrationTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     ensure_embedding_model()
 
-            self.assertFalse(dest.exists())
+            self.assertTrue(dest.is_dir())
+            self.assertEqual((dest / "orphan").read_text(encoding="utf-8"), "stale\n")
+            self.assertFalse(embedding_ready(dest))
             self.assertEqual(list(Path(raw).glob(f"{dest.name}.tmp-*")), [])
+            self.assertEqual(list(Path(raw).glob(f"{dest.name}.bak-*")), [])
 
 
 class EmbeddingSnapshotAllowPatternsTests(unittest.TestCase):
@@ -318,6 +326,33 @@ class EmbeddingSnapshotAllowPatternsTests(unittest.TestCase):
             self.assertFalse((dest / "pytorch_model.bin").exists())
             self.assertEqual(list(dest.parent.glob(f"{dest.name}.tmp-*")), [])
             self.assertTrue(safetensors_file_valid(dest / "model.safetensors"))
+
+    def test_replace_existing_snapshot_still_passes_allow_patterns(self):
+        with tempfile.TemporaryDirectory(prefix="clippy-embed-snapshot-replace-") as raw:
+            dest = _write_allowed_minilm(Path(raw) / "all-MiniLM-L6-v2")
+            original = (dest / "config.json").read_text(encoding="utf-8")
+
+            def fake_snapshot_download(*, repo_id, local_dir, allow_patterns=None, **_kwargs):
+                _write_allowed_minilm(Path(local_dir))
+                (Path(local_dir) / "config.json").write_text(
+                    '{"hidden_size": 384, "replaced": true}\n', encoding="utf-8"
+                )
+                return str(local_dir)
+
+            with patch("huggingface_hub.snapshot_download", side_effect=fake_snapshot_download) as mock_download:
+                result = _snapshot("sentence-transformers/all-MiniLM-L6-v2", dest, replace_existing=True)
+
+            kwargs = mock_download.call_args.kwargs
+            self.assertEqual(kwargs["allow_patterns"], self.EXPECTED_ALLOW_PATTERNS)
+            self.assertNotIn("pytorch_model.bin", kwargs["allow_patterns"])
+            self.assertEqual(result, dest)
+            self.assertTrue(embedding_ready(dest))
+            self.assertTrue(safetensors_file_valid(dest / "model.safetensors"))
+            self.assertFalse((dest / "pytorch_model.bin").exists())
+            self.assertIn("replaced", (dest / "config.json").read_text(encoding="utf-8"))
+            self.assertNotEqual((dest / "config.json").read_text(encoding="utf-8"), original)
+            self.assertEqual(list(dest.parent.glob(f"{dest.name}.tmp-*")), [])
+            self.assertEqual(list(dest.parent.glob(f"{dest.name}.bak-*")), [])
 
 
 class SafetensorsWeightsValidationTests(unittest.TestCase):
@@ -483,27 +518,20 @@ class EmbeddingRefillOnceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="clippy-embed-refill-") as raw:
             dest = _write_dummy_minilm(Path(raw) / "managed")
             loads: list[Path] = []
+            refills: list[Path] = []
 
             def fail_instantiate(path):
                 loads.append(path)
                 raise RuntimeError("OSError: incomplete metadata, header too small")
 
-            ensures: list[int] = []
-            discards: list[Path] = []
-
-            def fake_ensure(*, force: bool = False):
-                ensures.append(1)
-                return dest
-
-            def fake_discard(path):
-                discards.append(path)
-                return True
+            def fake_refill(path, **_kwargs):
+                refills.append(path)
+                return path
 
             reset_runtime_state_for_tests()
             with patch("core.local_embeddings.model_dir", return_value=dest), \
                  patch("core.local_embeddings._instantiate_minilm", side_effect=fail_instantiate), \
-                 patch("core.model_download.ensure_embedding_model", side_effect=fake_ensure), \
-                 patch("core.model_download.discard_managed_embedding_dir", side_effect=fake_discard), \
+                 patch("core.model_download.refill_managed_embedding_dir", side_effect=fake_refill), \
                  patch("core.model_download.is_user_embedding_override", return_value=False), \
                  patch("core.model_download.embedding_ready", return_value=True), \
                  patch("sys.stdout", new_callable=io.StringIO):
@@ -513,8 +541,204 @@ class EmbeddingRefillOnceTests(unittest.TestCase):
             self.assertIsNone(first)
             self.assertIsNone(second)
             self.assertEqual(len(loads), 2)
-            self.assertEqual(ensures, [1])
-            self.assertEqual(discards, [dest])
+            self.assertEqual(refills, [dest])
+            self.assertTrue(refill_marker_path(dest).is_file())
+            self.assertEqual(list(dest.parent.glob("*.refill.json.tmp-*")), [])
+
+    def test_persistent_load_failure_refills_once_across_three_launches(self):
+        with tempfile.TemporaryDirectory(prefix="clippy-embed-refill-persist-") as raw:
+            dest = _write_dummy_minilm(Path(raw) / "managed")
+            loads: list[Path] = []
+            refills: list[Path] = []
+
+            def fail_instantiate(path):
+                loads.append(path)
+                raise RuntimeError("OSError: incomplete metadata, header too small")
+
+            def fake_refill(path, **_kwargs):
+                refills.append(path)
+                return path
+
+            env = os.environ.copy()
+            env.pop("CLIPPY_EMBEDDING_HF_REVISION", None)
+            for _launch in range(3):
+                reset_runtime_state_for_tests()
+                with patch.dict(os.environ, env, clear=True), \
+                     patch("core.local_embeddings.model_dir", return_value=dest), \
+                     patch("core.local_embeddings._instantiate_minilm", side_effect=fail_instantiate), \
+                     patch("core.model_download.refill_managed_embedding_dir", side_effect=fake_refill), \
+                     patch("core.model_download.is_user_embedding_override", return_value=False), \
+                     patch("core.model_download.embedding_ready", return_value=True), \
+                     patch("sys.stdout", new_callable=io.StringIO):
+                    bundle = _load_bundle()
+                    status = embedding_status()
+                self.assertIsNone(bundle)
+                self.assertFalse(status["ready"])
+                self.assertIsNotNone(status["error"])
+                self.assertIn("incomplete metadata", status["error"].lower())
+
+            self.assertEqual(refills, [dest])
+            self.assertEqual(len(loads), 4)
+            with patch.dict(os.environ, env, clear=True):
+                self.assertTrue(refill_recorded_for_current_model(dest))
+            marker = read_refill_marker(dest)
+            self.assertIsNotNone(marker)
+            self.assertTrue(marker["attempted"])
+            self.assertEqual(marker["model_id"], EMBEDDING_REPO)
+            self.assertEqual(marker["revision"], "main")
+            self.assertEqual(marker["fingerprint"], model_files_fingerprint(dest))
+            self.assertEqual(list(dest.parent.glob("*.refill.json.tmp-*")), [])
+
+    def test_successful_load_clears_refill_marker(self):
+        with tempfile.TemporaryDirectory(prefix="clippy-embed-refill-clear-") as raw:
+            dest = _write_dummy_minilm(Path(raw) / "managed")
+            calls = {"n": 0}
+
+            def instantiate(path):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise RuntimeError("OSError: incomplete metadata, header too small")
+                return ("torch", "tok", "model", "cpu")
+
+            def fake_refill(path, **_kwargs):
+                return path
+
+            reset_runtime_state_for_tests()
+            with patch("core.local_embeddings.model_dir", return_value=dest), \
+                 patch("core.local_embeddings._instantiate_minilm", side_effect=instantiate), \
+                 patch("core.model_download.refill_managed_embedding_dir", side_effect=fake_refill), \
+                 patch("core.model_download.is_user_embedding_override", return_value=False), \
+                 patch("core.model_download.embedding_ready", return_value=True), \
+                 patch("sys.stdout", new_callable=io.StringIO):
+                bundle = _load_bundle()
+
+            self.assertEqual(bundle, ("torch", "tok", "model", "cpu"))
+            self.assertEqual(calls["n"], 2)
+            self.assertFalse(refill_marker_path(dest).exists())
+            self.assertFalse(refill_recorded_for_current_model(dest))
+
+    def test_new_revision_allows_another_refill(self):
+        with tempfile.TemporaryDirectory(prefix="clippy-embed-refill-rev-") as raw:
+            dest = _write_dummy_minilm(Path(raw) / "managed")
+            refills: list[Path] = []
+
+            def fail_instantiate(path):
+                raise RuntimeError("OSError: incomplete metadata, header too small")
+
+            def fake_refill(path, **_kwargs):
+                refills.append(path)
+                return path
+
+            patches = (
+                patch("core.local_embeddings.model_dir", return_value=dest),
+                patch("core.local_embeddings._instantiate_minilm", side_effect=fail_instantiate),
+                patch("core.model_download.refill_managed_embedding_dir", side_effect=fake_refill),
+                patch("core.model_download.is_user_embedding_override", return_value=False),
+                patch("core.model_download.embedding_ready", return_value=True),
+                patch("sys.stdout", new_callable=io.StringIO),
+            )
+
+            reset_runtime_state_for_tests()
+            first_env = os.environ.copy()
+            first_env.pop("CLIPPY_EMBEDDING_HF_REVISION", None)
+            with patch.dict(os.environ, first_env, clear=True), \
+                 patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+                _load_bundle()
+            self.assertEqual(refills, [dest])
+            self.assertEqual(read_refill_marker(dest)["revision"], "main")
+            with patch.dict(os.environ, first_env, clear=True):
+                self.assertTrue(refill_recorded_for_current_model(dest))
+
+            reset_runtime_state_for_tests()
+            with patch.dict(os.environ, {"CLIPPY_EMBEDDING_HF_REVISION": "abc123"}):
+                self.assertFalse(refill_recorded_for_current_model(dest))
+                with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+                    _load_bundle()
+                self.assertEqual(len(refills), 2)
+                self.assertTrue(refill_recorded_for_current_model(dest))
+                self.assertEqual(read_refill_marker(dest)["revision"], "abc123")
+
+    def test_always_bad_refill_source_never_empties_folder(self):
+        with tempfile.TemporaryDirectory(prefix="clippy-embed-bad-src-") as raw:
+            dest = _write_dummy_minilm(Path(raw) / "managed")
+            keep = dest / "keep.marker"
+            keep.write_text("stay\n", encoding="utf-8")
+            original = (dest / "config.json").read_text(encoding="utf-8")
+            repo = Path(raw) / "repo"
+            _write_broken_minilm(repo / EMBEDDING_MODEL_RELATIVE, safetensors=b"")
+            snapshots: list[int] = []
+
+            def fail_instantiate(path):
+                raise RuntimeError("OSError: incomplete metadata, header too small")
+
+            def bad_snapshot(_repo, local_dir, **_kwargs):
+                snapshots.append(1)
+                raise OSError("offline")
+
+            env = os.environ.copy()
+            env.pop("CLIPPY_EMBEDDING_HF_REVISION", None)
+            for _launch in range(3):
+                reset_runtime_state_for_tests()
+                with patch.dict(os.environ, env, clear=True), \
+                     patch("core.local_embeddings.model_dir", return_value=dest), \
+                     patch("core.local_embeddings._instantiate_minilm", side_effect=fail_instantiate), \
+                     patch("core.model_download._PROJECT_ROOT", repo), \
+                     patch("core.model_download._snapshot", side_effect=bad_snapshot), \
+                     patch("core.model_download.is_user_embedding_override", return_value=False), \
+                     patch("sys.stdout", new_callable=io.StringIO):
+                    bundle = _load_bundle()
+                    status = embedding_status()
+                self.assertIsNone(bundle)
+                self.assertTrue(dest.is_dir())
+                self.assertTrue(any(dest.iterdir()))
+                self.assertEqual(keep.read_text(encoding="utf-8"), "stay\n")
+                self.assertEqual((dest / "config.json").read_text(encoding="utf-8"), original)
+                self.assertFalse(status["ready"])
+                self.assertIsNotNone(status["error"])
+
+            self.assertEqual(snapshots, [1])
+            self.assertTrue(dest.is_dir())
+            self.assertTrue(any(dest.iterdir()))
+            self.assertEqual(list(dest.parent.glob(f"{dest.name}.tmp-*")), [])
+            self.assertEqual(list(dest.parent.glob(f"{dest.name}.bak-*")), [])
+            with patch.dict(os.environ, env, clear=True):
+                self.assertTrue(refill_recorded_for_current_model(dest))
+
+    def test_changed_fingerprint_allows_another_refill(self):
+        with tempfile.TemporaryDirectory(prefix="clippy-embed-refill-fp-") as raw:
+            dest = _write_dummy_minilm(Path(raw) / "managed")
+            refills: list[Path] = []
+
+            def fail_instantiate(path):
+                raise RuntimeError("OSError: incomplete metadata, header too small")
+
+            def fake_refill(path, **_kwargs):
+                refills.append(path)
+                return path
+
+            reset_runtime_state_for_tests()
+            with patch("core.local_embeddings.model_dir", return_value=dest), \
+                 patch("core.local_embeddings._instantiate_minilm", side_effect=fail_instantiate), \
+                 patch("core.model_download.refill_managed_embedding_dir", side_effect=fake_refill), \
+                 patch("core.model_download.is_user_embedding_override", return_value=False), \
+                 patch("core.model_download.embedding_ready", return_value=True), \
+                 patch("sys.stdout", new_callable=io.StringIO):
+                _load_bundle()
+            self.assertEqual(refills, [dest])
+            self.assertTrue(refill_recorded_for_current_model(dest))
+
+            (dest / "model.safetensors").write_bytes(_minimal_safetensors_bytes(data=b"\x11" * 16))
+            self.assertFalse(refill_recorded_for_current_model(dest))
+
+            reset_runtime_state_for_tests()
+            with patch("core.local_embeddings.model_dir", return_value=dest), \
+                 patch("core.local_embeddings._instantiate_minilm", side_effect=fail_instantiate), \
+                 patch("core.model_download.refill_managed_embedding_dir", side_effect=fake_refill), \
+                 patch("core.model_download.is_user_embedding_override", return_value=False), \
+                 patch("core.model_download.embedding_ready", return_value=True), \
+                 patch("sys.stdout", new_callable=io.StringIO):
+                _load_bundle()
+            self.assertEqual(len(refills), 2)
 
     def test_load_failure_on_override_does_not_refill(self):
         with tempfile.TemporaryDirectory(prefix="clippy-embed-override-load-") as raw:
@@ -529,8 +753,7 @@ class EmbeddingRefillOnceTests(unittest.TestCase):
             reset_runtime_state_for_tests()
             with patch("core.local_embeddings.model_dir", return_value=dest), \
                  patch("core.local_embeddings._instantiate_minilm", side_effect=fail_instantiate), \
-                 patch("core.model_download.ensure_embedding_model") as ensure, \
-                 patch("core.model_download.discard_managed_embedding_dir") as discard, \
+                 patch("core.model_download.refill_managed_embedding_dir") as refill, \
                  patch("core.model_download.is_user_embedding_override", return_value=True), \
                  patch("core.model_download.embedding_ready", return_value=True), \
                  patch("sys.stdout", new_callable=io.StringIO):
@@ -540,10 +763,10 @@ class EmbeddingRefillOnceTests(unittest.TestCase):
             self.assertIsNone(bundle)
             self.assertIsNone(again)
             self.assertEqual(len(loads), 1)
-            ensure.assert_not_called()
-            discard.assert_not_called()
+            refill.assert_not_called()
             self.assertEqual((dest / "user-marker").read_text(encoding="utf-8"), "leave-me\n")
             self.assertTrue(embedding_ready(dest))
+            self.assertFalse(refill_marker_path(dest).exists())
 
 
 class HashFallbackGuardTests(unittest.TestCase):

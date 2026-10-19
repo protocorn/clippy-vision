@@ -111,6 +111,14 @@ class ClippyMcpLauncherEnvTests(unittest.TestCase):
             )
             self.assertEqual(Path(payload["CLIPPY_DATA_DIR"]), data_dir)
 
+    def test_custom_data_dir_leaves_model_dir_unset(self):
+        with tempfile.TemporaryDirectory(prefix="clippy-custom-data-") as raw:
+            custom = Path(raw) / "my-store"
+            custom.mkdir()
+            payload = self._probe_env(data_dir=str(custom))
+            self.assertIsNone(payload["CLIPPY_EMBEDDING_MODEL_DIR"])
+            self.assertEqual(Path(payload["CLIPPY_DATA_DIR"]), custom)
+
     def test_override_is_preserved(self):
         override = Path(tempfile.mkdtemp(prefix="clippy-embed-override-")) / "custom-minilm"
         try:
