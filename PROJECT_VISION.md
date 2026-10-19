@@ -12,7 +12,7 @@ This doc exists so contributors know what we're optimizing for, where we stand t
 # Current Limitations
 - A privacy layer now tries to redact passwords and other sensitive data before they are stored: password fields are painted out of screenshots, and secret-shaped text (keys, tokens, and similar) is stripped. It is an effort, not a guarantee. Pause capture when you need to be sure nothing is saved.
 - Per-app redaction is best-effort for the messaging apps in Settings. Private browsing is separate and on by default. On Windows, Chrome, Edge, Brave, Firefox, Opera, and Vivaldi private windows are blacked out. On macOS, Chrome, Edge, and Brave are covered (Firefox and Opera are attempted but untested). Vivaldi, Safari, and Linux are not covered. See the [coverage table](docs/usage.md#private-browsing). Pause capture when a window must not be stored.
-- Capture no longer needs a vision model or a dedicated GPU. The remaining hardware cost is the chat model (`qwen3:8b` by default): minimum is 8 GB RAM, recommended 16 GB. A smaller chat model can be picked in setup. Do not put a vision-language model back on the default capture path.
+- Capture no longer needs a vision model or a dedicated GPU. The remaining hardware cost is the chat model (`qwen3:8b` by default): **16 GB system RAM is recommended, and 8 GB is not enough** for that default over a long session. A smaller chat model can be picked in setup; there is not yet a verified 8 GB option. Do not put a vision-language model back on the default capture path.
 
 # Roadmap
 No fixed timeline, ordered by priority rather than by date.
