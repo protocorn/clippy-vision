@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -991,6 +992,209 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertEqual(body["prompt"], "ping")
         self.assertFalse(body["stream"])
         self.assertEqual(body["keep_alive"], residency.KEEP_ALIVE_PINNED)
+
+    def _background_text_patches(self, residency, *, names=(), ram_gb=8.0, gpu=False):
+        """Mock Ollama /api/ps and memory for background-call residency tests."""
+        residency._ps_cache = None
+        residency._gpu_resident = False
+        payload = {"models": [{"name": n, "size_vram": 0} for n in names]}
+        return (
+            patch.object(residency, "get_json", return_value=payload),
+            patch.object(residency, "_available", return_value=int(ram_gb * residency._GB)),
+            patch.object(residency, "gpu_can_host_text", return_value=gpu),
+            patch.object(residency, "server_reachable", return_value=True),
+            patch.object(residency, "_commit_pressured", return_value=False),
+            patch.object(residency, "_cpu_pressured", return_value=False),
+        )
+
+    def test_background_text_skips_when_another_model_loaded(self):
+        """Tier-2/summarizer must not request 8b while 4b-instruct is resident."""
+        from core import model_residency as residency
+
+        residency._last_bg_skip_log_mono = 0.0
+        with contextlib.ExitStack() as stack:
+            for ctx in self._background_text_patches(
+                residency, names=("qwen3:4b-instruct",), ram_gb=8.0
+            ):
+                stack.enter_context(ctx)
+            decision = residency.background_text_decision("qwen3:8b", caller="catch-up")
+        self.assertFalse(decision.allow)
+        self.assertTrue(decision.intended_skip)
+        self.assertIn("another model is loaded", decision.skip_reason)
+        self.assertIn("qwen3:4b-instruct", decision.skip_reason)
+        self.assertTrue(residency.other_model_loaded("qwen3:8b"))
+        self.assertTrue(residency.is_intended_background_skip(decision.skip_reason))
+
+    def test_background_text_proceeds_when_same_model_loaded(self):
+        """Already-resident chat model (even a tagged variant) is reused, including below the RAM floor."""
+        from core import model_residency as residency
+
+        with contextlib.ExitStack() as stack:
+            for ctx in self._background_text_patches(
+                residency, names=("qwen3:8b",), ram_gb=0.4
+            ):
+                stack.enter_context(ctx)
+            decision = residency.background_text_decision("qwen3:8b", caller="summarizer")
+        self.assertTrue(decision.allow)
+        self.assertEqual(decision.model, "qwen3:8b")
+        self.assertFalse(decision.intended_skip)
+
+        with contextlib.ExitStack() as stack:
+            for ctx in self._background_text_patches(
+                residency, names=("qwen3:8b-q4_K_M",), ram_gb=8.0
+            ):
+                stack.enter_context(ctx)
+            reused = residency.background_text_decision("qwen3:8b", caller="summarizer")
+        self.assertTrue(reused.allow)
+        self.assertEqual(reused.model, "qwen3:8b-q4_K_M")
+
+    def test_background_text_skips_when_low_ram(self):
+        from core import model_residency as residency
+
+        residency._last_bg_skip_log_mono = 0.0
+        with contextlib.ExitStack() as stack:
+            for ctx in self._background_text_patches(residency, names=(), ram_gb=0.9):
+                stack.enter_context(ctx)
+            decision = residency.background_text_decision("qwen3:8b", caller="summarizer")
+        self.assertFalse(decision.allow)
+        self.assertTrue(decision.intended_skip)
+        self.assertIn("free RAM below floor", decision.skip_reason)
+        self.assertTrue(residency.is_intended_background_skip(decision.skip_reason))
+
+    def test_background_text_proceeds_when_idle_and_above_floor(self):
+        from core import model_residency as residency
+
+        with contextlib.ExitStack() as stack:
+            for ctx in self._background_text_patches(residency, names=(), ram_gb=8.0):
+                stack.enter_context(ctx)
+            decision = residency.background_text_decision("qwen3:8b", caller="catch-up")
+        self.assertTrue(decision.allow)
+        self.assertEqual(decision.model, "qwen3:8b")
+        self.assertIsNone(decision.skip_reason)
+
+    def test_background_text_skips_other_model_even_on_gpu(self):
+        from core import model_residency as residency
+
+        with contextlib.ExitStack() as stack:
+            for ctx in self._background_text_patches(
+                residency, names=("qwen3:4b-instruct",), ram_gb=8.0, gpu=True
+            ):
+                stack.enter_context(ctx)
+            decision = residency.background_text_decision("qwen3:8b", caller="gateway")
+        self.assertFalse(decision.allow)
+        self.assertTrue(decision.intended_skip)
+
+    def test_background_skip_logs_once_per_window(self):
+        from core import model_residency as residency
+
+        residency._last_bg_skip_log_mono = 0.0
+        with contextlib.ExitStack() as stack:
+            for ctx in self._background_text_patches(
+                residency, names=("qwen3:4b-instruct",), ram_gb=8.0
+            ):
+                stack.enter_context(ctx)
+            with patch("builtins.print") as printed:
+                residency.background_text_decision("qwen3:8b", caller="catch-up")
+                residency.background_text_decision("qwen3:8b", caller="summarizer")
+        skip_lines = [
+            str(call) for call in printed.call_args_list
+            if "skip background inference" in str(call)
+        ]
+        self.assertEqual(len(skip_lines), 1)
+
+    def test_catch_up_other_model_skip_does_not_set_last_error(self):
+        from classifier.worker import _catch_up_text_ready
+        from core import backlog as backlog_mod
+        from core import model_residency as residency
+
+        backlog_mod._last_error = None
+        backlog_mod._cooldown_until = 0.0
+        with contextlib.ExitStack() as stack:
+            for ctx in self._background_text_patches(
+                residency, names=("qwen3:4b-instruct",), ram_gb=8.0
+            ):
+                stack.enter_context(ctx)
+            self.assertFalse(_catch_up_text_ready())
+        self.assertIsNone(backlog_mod._last_error)
+        self.assertLessEqual(backlog_mod._cooldown_until, time.time())
+
+    def test_catch_up_intended_skip_leaves_deferred_without_last_error(self):
+        from classifier.worker import classify_event
+        from core import backlog as backlog_mod
+
+        backlog_mod._last_error = None
+        event = make_event("catch-up-other-model", event_type="context_change")
+        event["window_context"]["process_name"] = "OtherApp.exe"
+        store_event(event)
+        conn.execute(
+            "UPDATE events SET classification_status='deferred' WHERE event_id=?",
+            (event["event_id"],),
+        )
+        conn.commit()
+        payload = {
+            "event_id": event["event_id"],
+            "timestamp": event["timestamp"],
+            "event_type": event["event_type"],
+            "process_name": "OtherApp.exe",
+            "summary": event["summary"],
+            "payload": "{}",
+            "window_context": event["window_context"],
+            "previous_window_context": None,
+        }
+        with patch("classifier.worker.tier_zero_classifier", return_value=None), patch(
+            "classifier.worker.tier1_score", return_value=None
+        ), patch("classifier.worker.lookup_duplicate_verdict", return_value=None), patch(
+            "classifier.worker.classify_with_llm",
+            side_effect=OSError("deferred: another model is loaded (qwen3:4b-instruct)"),
+        ):
+            classify_event(payload, allow_tier2=True)
+        status = conn.execute(
+            "SELECT classification_status FROM events WHERE event_id=?",
+            (event["event_id"],),
+        ).fetchone()[0]
+        self.assertEqual(status, "deferred")
+        self.assertIsNone(backlog_mod._last_error)
+
+    def test_gateway_background_chat_skipped_when_another_model_loaded(self):
+        from core import model_residency as residency
+        from core.llm_gateway import Priority
+
+        with contextlib.ExitStack() as stack:
+            for ctx in self._background_text_patches(
+                residency, names=("qwen3:4b-instruct",), ram_gb=8.0
+            ):
+                stack.enter_context(ctx)
+            with patch.object(gateway, "_open") as open_fn:
+                with self.assertRaises(OSError) as raised:
+                    gateway.chat(
+                        [{"role": "user", "content": "x"}],
+                        "qwen3:8b",
+                        priority=Priority.BACKGROUND,
+                    )
+                self.assertIn("another model is loaded", str(raised.exception))
+                open_fn.assert_not_called()
+
+    def test_gateway_interactive_chat_not_blocked_by_other_model(self):
+        from core.llm_gateway import Priority
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps({"message": {"content": "ok"}}).encode()
+
+        with patch.object(gateway, "_open", return_value=FakeResp()) as open_fn:
+            result = gateway.chat(
+                [{"role": "user", "content": "x"}],
+                "qwen3:8b",
+                priority=Priority.INTERACTIVE,
+            )
+        open_fn.assert_called_once()
+        self.assertEqual(result["message"]["content"], "ok")
 
     def test_other_model_loaded_ignores_chat_model_variants(self):
         from core import model_residency as residency

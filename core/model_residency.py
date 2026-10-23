@@ -13,7 +13,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 import psutil
 
@@ -77,6 +77,8 @@ _lock = threading.Lock()
 _ps_cache: tuple[float, set[str]] | None = None
 _last_warm_attempt_mono = 0.0
 _WARM_RETRY_SECS = 120.0
+_last_bg_skip_log_mono = 0.0
+_BG_SKIP_LOG_SECS = 120.0
 # Whether a GPU can host the text model. When it can, free *system* RAM says
 # nothing about whether a load will succeed, so the RAM floors must not gate it.
 _gpu_resident = False
@@ -174,6 +176,25 @@ def _ollama_loaded_models() -> set[str]:
     return names
 
 
+class BackgroundTextDecision(NamedTuple):
+    """Whether a non-chat background generate/chat may run.
+
+    ``model`` is the name the caller should send to Ollama when the call may
+    proceed (configured chat model, or the already-loaded tagged variant).
+    ``skip_reason`` is set when the call must wait for the next cycle.
+    ``intended_skip`` is True for "another model loaded" / RAM-floor skips so
+    callers do not record them as backlog ``last_error``.
+    """
+
+    model: str | None
+    skip_reason: str | None
+    intended_skip: bool = False
+
+    @property
+    def allow(self) -> bool:
+        return self.model is not None
+
+
 def _is_chat_model_name(name: str, model: str) -> bool:
     """True when an /api/ps name is Clippy's chat model (or a tagged variant)."""
     key = (name or "").casefold()
@@ -196,6 +217,76 @@ def other_model_loaded(model: str = TEXT_MODEL) -> bool:
     return any(
         not _is_chat_model_name(name, model) for name in _ollama_loaded_models()
     )
+
+
+def resident_chat_model(model: str = TEXT_MODEL) -> str | None:
+    """Exact /api/ps name of Clippy's chat model if it is already loaded."""
+    for name in _ollama_loaded_models():
+        if _is_chat_model_name(name, model):
+            return name
+    return None
+
+
+def is_intended_background_skip(exc: BaseException | str) -> bool:
+    """True when a gateway/worker error is an intentional residency defer."""
+    text = str(exc).casefold()
+    return "another model is loaded" in text or "free ram below floor" in text
+
+
+def _log_background_skip(caller: str, reason: str) -> None:
+    """At most one skip line per 120s — catch-up/summarizer ticks must not spam."""
+    global _last_bg_skip_log_mono
+    now = time.monotonic()
+    if now - _last_bg_skip_log_mono < _BG_SKIP_LOG_SECS:
+        return
+    _last_bg_skip_log_mono = now
+    print(f"[residency] skip background inference ({caller}) — {reason}")
+
+
+def background_text_decision(
+    model: str | None = None, *, caller: str = "background"
+) -> BackgroundTextDecision:
+    """Decide whether a non-chat background generate/chat may run right now.
+
+    Must not request a different model while another is resident, and must not
+    cold-load below the CPU RAM floor. If a tagged variant of the configured
+    chat model is already loaded, reuse that exact name so Ollama does not swap.
+    """
+    target = (model or TEXT_MODEL).strip() or TEXT_MODEL
+    resident = resident_chat_model(target)
+    if resident:
+        return BackgroundTextDecision(model=resident, skip_reason=None)
+
+    if other_model_loaded(target):
+        names = ", ".join(
+            sorted(
+                name
+                for name in _ollama_loaded_models()
+                if not _is_chat_model_name(name, target)
+            )
+        )
+        reason = f"another model is loaded ({names})" if names else "another model is loaded"
+        _log_background_skip(caller, reason)
+        return BackgroundTextDecision(
+            model=None, skip_reason=reason, intended_skip=True
+        )
+
+    if not gpu_can_host_text() and _available() < _TEXT_FLOOR:
+        reason = (
+            f"free RAM below floor "
+            f"(free~{_available() / _GB:.1f}GB < {_TEXT_FLOOR / _GB:.1f}GB)"
+        )
+        _log_background_skip(caller, reason)
+        return BackgroundTextDecision(
+            model=None, skip_reason=reason, intended_skip=True
+        )
+
+    if not can_cold_load_text():
+        return BackgroundTextDecision(
+            model=None, skip_reason=text_unavailable_reason()
+        )
+
+    return BackgroundTextDecision(model=target, skip_reason=None)
 
 
 def gpu_can_host_text() -> bool:
