@@ -180,7 +180,8 @@ class BackgroundTextDecision(NamedTuple):
     """Whether a non-chat background generate/chat may run.
 
     ``model`` is the name the caller should send to Ollama when the call may
-    proceed (configured chat model, or the already-loaded tagged variant).
+    proceed (the configured chat model, or the same name already resident,
+    treating a missing tag as ``:latest``).
     ``skip_reason`` is set when the call must wait for the next cycle.
     ``intended_skip`` is True for "another model loaded" / RAM-floor skips so
     callers do not record them as backlog ``last_error``.
@@ -195,11 +196,34 @@ class BackgroundTextDecision(NamedTuple):
         return self.model is not None
 
 
+def _canonical_model_name(name: str) -> str:
+    """Normalize an Ollama model name for equality.
+
+    A missing tag is treated as ``:latest`` (``qwen3`` == ``qwen3:latest``).
+    Other tags compare exactly: ``qwen3:4b`` is not ``qwen3:4b-instruct``,
+    and ``qwen3`` is not ``qwen3-vl``.
+    """
+    key = (name or "").strip().casefold()
+    if not key:
+        return ""
+    model, sep, tag = key.partition(":")
+    if not model:
+        return ""
+    if not sep or not tag:
+        return f"{model}:latest"
+    return key
+
+
 def _is_chat_model_name(name: str, model: str) -> bool:
-    """True when an /api/ps name is Clippy's chat model (or a tagged variant)."""
-    key = (name or "").casefold()
-    target = (model or "").casefold()
-    return bool(key and target) and (key == target or key.startswith(target))
+    """True when an /api/ps name is Clippy's configured chat model.
+
+    Exact match after treating a missing tag as ``:latest``. Prefix matches
+    such as ``qwen3:4b`` vs ``qwen3:4b-instruct`` or ``qwen3`` vs ``qwen3-vl``
+    are different models.
+    """
+    left = _canonical_model_name(name)
+    right = _canonical_model_name(model)
+    return bool(left and right) and left == right
 
 
 def text_model_loaded(model: str = TEXT_MODEL) -> bool:
@@ -249,8 +273,9 @@ def background_text_decision(
     """Decide whether a non-chat background generate/chat may run right now.
 
     Must not request a different model while another is resident, and must not
-    cold-load below the CPU RAM floor. If a tagged variant of the configured
-    chat model is already loaded, reuse that exact name so Ollama does not swap.
+    cold-load below the CPU RAM floor. If the configured chat model is already
+    loaded (exact name, or a bare name vs ``:latest``), reuse that /api/ps name
+    so Ollama does not swap.
     """
     target = (model or TEXT_MODEL).strip() or TEXT_MODEL
     resident = resident_chat_model(target)
