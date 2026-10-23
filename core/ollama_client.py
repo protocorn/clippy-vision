@@ -16,6 +16,8 @@ import time
 import urllib.error
 import urllib.request
 
+from core.ollama_options import apply_inference_options, is_inference_path
+
 DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 
 
@@ -79,6 +81,8 @@ def describe_http_error(err: urllib.error.HTTPError) -> str:
 
 def request(path: str, body: dict | None = None, *, timeout: float = 90, method: str | None = None):
     """Open an Ollama request, raising OllamaError/OllamaUnavailable with context."""
+    if body is not None and is_inference_path(path):
+        body = apply_inference_options(body)
     url = f"{base_url()}{path}"
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(

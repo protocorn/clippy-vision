@@ -52,7 +52,7 @@ The installers are unsigned: on Windows choose **More info → Run anyway**, and
 | | Minimum | Recommended |
 |--|---------|-------------|
 | OS | Windows 10 / 11 (64-bit), macOS 12+, or Linux (Ubuntu 22.04+, experimental, X11 only) | Windows 11 or a current macOS |
-| System RAM | 8 GB | 16 GB |
+| System RAM | 8 GB (tighter for `qwen3:8b` at 8192 context; see note) | 16 GB |
 | Graphics memory | Not required. Integrated graphics or Apple unified memory is enough | 4 GB+ dedicated on Windows, or 16 GB unified memory on Apple silicon |
 | Free disk | 8 GB | 10 GB+ |
 | **Python runtime** | System Python 3.11+ on PATH (not bundled). Windows auto-install uses 3.11; CI uses 3.12 | **Python 3.12** |
@@ -78,6 +78,8 @@ export CLIPPY_PYTHON=/path/to/venv/bin/python3
 Linux support is **experimental and X11 only. Wayland is not supported.** On X11, screenshots use `mss` (optional crop via `xdotool`). Window titles use `xdotool`, clipboard uses `wl-paste`/`xclip`/`xsel`. AT-SPI accessibility text is implemented; it is covered by CI unit tests, not a real desktop. An unsigned Linux AppImage is built in CI. Install and run steps: [docs/linux.md](docs/linux.md).
 
 The setup wizard checks these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that summaries may feel slower. Homebrew, dependency, and permission troubleshooting: [docs/usage.md](docs/usage.md#installation-troubleshooting). Lower-spec machines: [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
+
+Ollama calls request an 8192-token context (`num_ctx`). That KV cache is about **1.2 GB for `qwen3:8b`** versus about 0.3 GB at Ollama’s 2048 default. The 8 GB RAM minimum and the 1.5 GB `can_load_text` cold-load floor are unchanged. 8 GB CPU-only boxes running the default 8b model are tighter; pick `llama3.2:3b` in setup or use 16 GB.
 
 ---
 
