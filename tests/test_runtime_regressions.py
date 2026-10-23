@@ -1050,8 +1050,8 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertIsNone(backlog_mod._last_error)
 
     def test_gateway_background_chat_skipped_when_another_model_loaded(self):
-        from core.llm_gateway import Priority
         from core import model_residency as residency
+        from core.llm_gateway import Priority
 
         with contextlib.ExitStack() as stack:
             for ctx in self._background_text_patches(
