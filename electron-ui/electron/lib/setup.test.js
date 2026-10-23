@@ -2,6 +2,7 @@
  * Setup preflight must require Python 3.11+.
  * Run with: node --test electron/lib/setup.test.js
  */
+const fs = require('node:fs')
 const path = require('path')
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
@@ -35,7 +36,10 @@ const {
     venvPythonPath,
     isHealthyVenv,
     PYTHON_VENV_DIRNAME,
+    DEFAULT_CHAT_MODEL,
+    DEFAULT_CHAT_MODEL_SIZE_LABEL,
 } = require('./paths')
+const { archiveSpec } = require('./managed-python')
 
 function collectInstallRuns(plan) {
     const invocation = installCommandToRun(plan)
@@ -159,25 +163,37 @@ test('win32 without winget shows a manual Ollama download link', () => {
     assert.equal(installCommandToRun(plan), null)
 })
 
-test('linux Python stays a manual install with a python.org link', () => {
-    const plan = decidePythonInstall({ platform: 'linux', brewAvailable: true })
-    assert.equal(plan.action, 'linux-manual')
-    assert.equal(plan.runInstall, false)
-    assert.equal(plan.downloadUrl, PYTHON_DOWNLOAD_URL)
-    assert.match(plan.instructions, /https:\/\/www\.python\.org\/downloads\//)
+test('linux x64 downloads standalone CPython instead of requiring system Python', () => {
+    const plan = decidePythonInstall({ platform: 'linux', arch: 'x64' })
+    const spec = archiveSpec('linux', 'x64')
+    assert.equal(plan.action, 'standalone')
+    assert.equal(plan.runInstall, true)
+    assert.equal(plan.command, null)
+    assert.equal(plan.downloadUrl, spec.url)
+    assert.equal(plan.sha256, spec.sha256)
+    assert.match(plan.instructions, /relocatable CPython/)
     assert.equal(installCommandToRun(plan), null)
 })
 
-test('darwin uses Homebrew for a missing Python when brew is present', () => {
-    const plan = decidePythonInstall({ platform: 'darwin', brewAvailable: true })
-    assert.equal(plan.action, 'homebrew')
+test('win32 x64 downloads standalone CPython instead of winget-installing system Python', () => {
+    const plan = decidePythonInstall({ platform: 'win32', arch: 'x64' })
+    const spec = archiveSpec('win32', 'x64')
+    assert.equal(plan.action, 'standalone')
     assert.equal(plan.runInstall, true)
-    assert.equal(plan.command, 'brew')
-    assert.deepEqual(plan.args, ['install', 'python'])
+    assert.equal(plan.downloadUrl, spec.url)
+    assert.equal(plan.filename, spec.filename)
+    assert.equal(installCommandToRun(plan), null)
 })
 
-test('darwin without Homebrew shows a python.org link', () => {
-    const plan = decidePythonInstall({ platform: 'darwin', brewAvailable: false })
+test('darwin arm64 downloads standalone CPython instead of requiring Homebrew', () => {
+    const plan = decidePythonInstall({ platform: 'darwin', arch: 'arm64' })
+    assert.equal(plan.action, 'standalone')
+    assert.equal(plan.runInstall, true)
+    assert.match(plan.downloadUrl, /aarch64-apple-darwin-install_only_stripped/)
+})
+
+test('unsupported Python platform falls back to a python.org link', () => {
+    const plan = decidePythonInstall({ platform: 'freebsd', arch: 'x64' })
     assert.equal(plan.action, 'manual')
     assert.equal(plan.runInstall, false)
     assert.equal(plan.downloadUrl, PYTHON_DOWNLOAD_URL)
@@ -185,21 +201,24 @@ test('darwin without Homebrew shows a python.org link', () => {
     assert.equal(installCommandToRun(plan), null)
 })
 
-test('win32 uses winget for a missing Python when winget is present', () => {
-    const plan = decidePythonInstall({ platform: 'win32', wingetAvailable: true })
-    assert.equal(plan.action, 'winget')
-    assert.equal(plan.runInstall, true)
-    assert.equal(plan.command, 'winget')
-    assert.ok(plan.args.includes('Python.Python.3.11'))
+test('default chat model is qwen3:8b', () => {
+    assert.equal(DEFAULT_CHAT_MODEL, 'qwen3:8b')
+    assert.equal(DEFAULT_CHAT_MODEL_SIZE_LABEL, '~5 GB')
 })
 
-test('win32 without winget shows a python.org link', () => {
-    const plan = decidePythonInstall({ platform: 'win32', wingetAvailable: false })
-    assert.equal(plan.action, 'manual')
-    assert.equal(plan.runInstall, false)
-    assert.equal(plan.downloadUrl, PYTHON_DOWNLOAD_URL)
-    assert.match(plan.instructions, /https:\/\/www\.python\.org\/downloads\//)
-    assert.equal(installCommandToRun(plan), null)
+test('setup consent screen names the python-build-standalone download', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../../src/setup.html'), 'utf8')
+    assert.match(html, /python-build-standalone/)
+    assert.match(html, /checksum-verified/)
+    assert.match(html, /~25–30 MB/)
+    assert.match(html, /skipped if Python 3\.11\+ is already on this machine/)
+})
+
+test('setup labels llama3.2:3b as a less-accurate low-memory option', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../../src/setup.html'), 'utf8')
+    assert.match(html, /DEFAULT_CHAT_MODEL = 'qwen3:8b'/)
+    assert.match(html, /low memory · less accurate · ~2 GB/)
+    assert.match(html, /less accurate than the default qwen3:8b/)
 })
 
 test('darwin Ollama known paths include Homebrew prefixes', () => {

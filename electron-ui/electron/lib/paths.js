@@ -1,6 +1,11 @@
 const path = require('path')
 const fs   = require('fs')
 const os   = require('os')
+const {
+    pythonRuntimeDir,
+    managedPythonExecutable,
+    isHealthyManagedPython,
+} = require('./managed-python')
 
 const OLLAMA_BASE_URL = 'http://127.0.0.1:11434'
 const RELEASE_REPOSITORY = 'protocorn/clippy-vision'
@@ -9,13 +14,16 @@ const OLLAMA_MAX_LOADED_MODELS = '1'
 const OLLAMA_NUM_PARALLEL = '1'
 const DEFAULT_API_PORT = 8000
 const PYTHON_VENV_DIRNAME = 'python-venv'
+// Default for session summaries (~5 GB). llama3.2:3b is a low-memory option.
+const DEFAULT_CHAT_MODEL = 'qwen3:8b'
+const DEFAULT_CHAT_MODEL_SIZE_LABEL = '~5 GB'
 
 const DEFAULT_LLM_CONFIG = {
     provider: 'ollama',
     base_url: OLLAMA_BASE_URL,
     api_key: '',
     cli_command: '',
-    chat_model: 'qwen3:8b',
+    chat_model: DEFAULT_CHAT_MODEL,
     // Capture uses accessibility + OCR; no vision model is downloaded or required.
     embedding_model: LOCAL_EMBEDDING_MODEL,
 }
@@ -66,6 +74,7 @@ function createPaths(app, electronDir) {
     const DESKTOP_SETTINGS_FILE = path.join(USER_DATA, 'desktop_settings.json')
     const RELEASE_CHECK_FILE = path.join(USER_DATA, 'release_check.json')
     const PYTHON_VENV_DIR = pythonVenvDir(USER_DATA)
+    const PYTHON_RUNTIME_DIR = pythonRuntimeDir(USER_DATA)
     // Electron does not always inherit the interactive shell PATH. These common
     // macOS locations cover Homebrew, npm/pnpm, Volta, and nvm installations.
     const PATH_HINTS = process.platform === 'darwin'
@@ -87,10 +96,16 @@ function createPaths(app, electronDir) {
         return candidate || fallback
     }
 
-    const SYSTEM_PYTHON_COMMAND = process.env.CLIPPY_PYTHON || commandFromKnownPaths(
-        'python3',
-        process.platform === 'win32' ? 'python' : 'python3',
-    )
+    let SYSTEM_PYTHON_COMMAND = (process.env.CLIPPY_PYTHON || '').trim()
+    if (!SYSTEM_PYTHON_COMMAND && isHealthyManagedPython(PYTHON_RUNTIME_DIR)) {
+        SYSTEM_PYTHON_COMMAND = managedPythonExecutable(PYTHON_RUNTIME_DIR)
+    }
+    if (!SYSTEM_PYTHON_COMMAND) {
+        SYSTEM_PYTHON_COMMAND = commandFromKnownPaths(
+            'python3',
+            process.platform === 'win32' ? 'python' : 'python3',
+        )
+    }
     // Prefer an existing healthy app venv so packaged launches and post-setup
     // runs never install into (or depend on) the system site-packages.
     let PYTHON_COMMAND = SYSTEM_PYTHON_COMMAND
@@ -119,9 +134,15 @@ function createPaths(app, electronDir) {
         DESKTOP_SETTINGS_FILE,
         RELEASE_CHECK_FILE,
         PYTHON_VENV_DIR,
+        PYTHON_RUNTIME_DIR,
         PATH_HINTS,
         commandFromKnownPaths,
-        SYSTEM_PYTHON_COMMAND,
+        get SYSTEM_PYTHON_COMMAND() {
+            return SYSTEM_PYTHON_COMMAND
+        },
+        set SYSTEM_PYTHON_COMMAND(value) {
+            SYSTEM_PYTHON_COMMAND = value
+        },
         get PYTHON_COMMAND() {
             return PYTHON_COMMAND
         },
@@ -136,6 +157,8 @@ function createPaths(app, electronDir) {
         OLLAMA_MAX_LOADED_MODELS,
         OLLAMA_NUM_PARALLEL,
         DEFAULT_LLM_CONFIG,
+        DEFAULT_CHAT_MODEL,
+        DEFAULT_CHAT_MODEL_SIZE_LABEL,
     }
 }
 
@@ -145,4 +168,6 @@ module.exports = {
     venvPythonPath,
     isHealthyVenv,
     PYTHON_VENV_DIRNAME,
+    DEFAULT_CHAT_MODEL,
+    DEFAULT_CHAT_MODEL_SIZE_LABEL,
 }

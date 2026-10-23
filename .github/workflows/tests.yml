@@ -25,7 +25,31 @@ jobs:
 
       - name: Run MCP config path tests
         working-directory: electron-ui
-        run: node --test electron/lib/mcp.test.js electron/lib/setup.test.js
+        run: node --test electron/lib/mcp.test.js electron/lib/setup.test.js electron/lib/managed-python.test.js electron/lib/llm-config.test.js
+
+  managed-python-venv:
+    name: Managed Python download-to-venv on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is arm64 (darwin-arm64 archive). macos-13 is retired;
+        # macos-15-intel is the GitHub-hosted x64 runner (darwin-x64 archive).
+        # Both are standard public-repo runners, not larger/paid labels.
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-15-intel]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download pinned CPython, verify SHA-256, create venv
+        working-directory: electron-ui
+        run: node scripts/ci-managed-python.js
 
   electron-renderer-lint:
     name: Electron renderer lint
