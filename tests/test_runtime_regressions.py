@@ -920,7 +920,7 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertTrue(residency.is_intended_background_skip(decision.skip_reason))
 
     def test_background_text_proceeds_when_same_model_loaded(self):
-        """Already-resident chat model (even a tagged variant) is reused, including below the RAM floor."""
+        """Already-resident chat model is reused, including below the RAM floor."""
         from core import model_residency as residency
 
         with contextlib.ExitStack() as stack:
@@ -935,12 +935,22 @@ class RuntimeRegressionTests(unittest.TestCase):
 
         with contextlib.ExitStack() as stack:
             for ctx in self._background_text_patches(
+                residency, names=("qwen3:latest",), ram_gb=8.0
+            ):
+                stack.enter_context(ctx)
+            reused = residency.background_text_decision("qwen3", caller="summarizer")
+        self.assertTrue(reused.allow)
+        self.assertEqual(reused.model, "qwen3:latest")
+
+        with contextlib.ExitStack() as stack:
+            for ctx in self._background_text_patches(
                 residency, names=("qwen3:8b-q4_K_M",), ram_gb=8.0
             ):
                 stack.enter_context(ctx)
-            reused = residency.background_text_decision("qwen3:8b", caller="summarizer")
-        self.assertTrue(reused.allow)
-        self.assertEqual(reused.model, "qwen3:8b-q4_K_M")
+            quant = residency.background_text_decision("qwen3:8b", caller="summarizer")
+        self.assertFalse(quant.allow)
+        self.assertTrue(quant.intended_skip)
+        self.assertIn("qwen3:8b-q4_K_M", quant.skip_reason)
 
     def test_background_text_skips_when_low_ram(self):
         from core import model_residency as residency
@@ -1090,15 +1100,44 @@ class RuntimeRegressionTests(unittest.TestCase):
         open_fn.assert_called_once()
         self.assertEqual(result["message"]["content"], "ok")
 
-    def test_other_model_loaded_ignores_chat_model_variants(self):
+    def test_chat_model_name_match_is_exact_with_latest_alias(self):
+        """Prefix tags must not match; a missing tag is only ``:latest``."""
+        from core import model_residency as residency
+
+        self.assertFalse(residency._is_chat_model_name("qwen3:4b-instruct", "qwen3:4b"))
+        self.assertFalse(residency._is_chat_model_name("qwen3-vl", "qwen3"))
+        self.assertFalse(residency._is_chat_model_name("qwen3-vl:8b", "qwen3"))
+        self.assertTrue(residency._is_chat_model_name("qwen3:latest", "qwen3"))
+        self.assertTrue(residency._is_chat_model_name("qwen3", "qwen3:latest"))
+        self.assertTrue(residency._is_chat_model_name("qwen3:8b", "qwen3:8b"))
+        self.assertFalse(residency._is_chat_model_name("qwen3:8b-q4_K_M", "qwen3:8b"))
+
+    def test_background_text_skips_instruct_suffix_of_configured_4b(self):
+        """The #111 pairing: configured 4b must not reuse loaded 4b-instruct."""
+        from core import model_residency as residency
+
+        with contextlib.ExitStack() as stack:
+            for ctx in self._background_text_patches(
+                residency, names=("qwen3:4b-instruct",), ram_gb=8.0
+            ):
+                stack.enter_context(ctx)
+            decision = residency.background_text_decision("qwen3:4b", caller="catch-up")
+        self.assertFalse(decision.allow)
+        self.assertTrue(decision.intended_skip)
+        self.assertIn("qwen3:4b-instruct", decision.skip_reason)
+
+    def test_other_model_loaded_requires_exact_chat_name(self):
         from core import model_residency as residency
 
         with patch.object(residency, "_ollama_loaded_models", return_value={"qwen3:8b"}):
             self.assertFalse(residency.other_model_loaded("qwen3:8b"))
             self.assertTrue(residency.text_model_loaded("qwen3:8b"))
         with patch.object(residency, "_ollama_loaded_models", return_value={"qwen3:8b-q4_K_M"}):
-            self.assertFalse(residency.other_model_loaded("qwen3:8b"))
-            self.assertTrue(residency.text_model_loaded("qwen3:8b"))
+            self.assertTrue(residency.other_model_loaded("qwen3:8b"))
+            self.assertFalse(residency.text_model_loaded("qwen3:8b"))
+        with patch.object(residency, "_ollama_loaded_models", return_value={"qwen3:latest"}):
+            self.assertFalse(residency.other_model_loaded("qwen3"))
+            self.assertTrue(residency.text_model_loaded("qwen3"))
         with patch.object(
             residency, "_ollama_loaded_models", return_value={"qwen3:8b", "qwen2.5:4b-instruct"}
         ):
