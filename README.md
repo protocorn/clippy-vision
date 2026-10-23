@@ -52,10 +52,18 @@ The installers are unsigned: on Windows choose **More info → Run anyway**, and
 | | Minimum | Recommended |
 |--|---------|-------------|
 | OS | Windows 10 / 11 (64-bit), macOS 12+, or Linux (Ubuntu 22.04+, experimental, X11 only) | Windows 11 or a current macOS |
-| System RAM | 8 GB | 16 GB |
+| System RAM | **16 GB** for the default `qwen3:8b` | **16 GB** |
 | Graphics memory | Not required. Integrated graphics or Apple unified memory is enough | 4 GB+ dedicated on Windows, or 16 GB unified memory on Apple silicon |
 | Free disk | 8 GB | 10 GB+ |
 | **Python runtime** | System Python 3.11+ on PATH (not bundled). Windows auto-install uses 3.11; CI uses 3.12 | **Python 3.12** |
+
+**8 GB is not enough** for the default `qwen3:8b` over a long session. A 2026-10-19 Linux CPU-only retest (45 minutes) peaked around **9.6 GB** for Ollama + Clippy Python + Electron before counting the OS:
+
+- Electron: ~200–250 MB idle, peak 589 MB (~0.6 GB)
+- Clippy Python: ~670 MB at rest, peak 1.6 GB
+- Ollama with `qwen3:8b`: median ~7.4 GB at rest during the session (combined peak ≈ 7.4 + 1.6 + 0.6)
+
+Ollama also grew about 0.5–0.7 GB per question until the model unloaded. That growth is Ollama's prompt cache: setting `LLAMA_ARG_CACHE_RAM=0` before `ollama serve` stops it. The setting was checked on Ollama 0.40.6 (older versions may ignore it). `ollama ps` does not count that cache (it can under-report by up to ~8 GiB). **16 GB** is the amount we recommend for default Ollama settings.
 
 **Python is not bundled** in the Windows installer or Linux AppImage. `requirements.txt` does not pin a Python version. The packaged app runs `CLIPPY_PYTHON` if set, otherwise `python3` (Linux/macOS) or `python` (Windows) from PATH (`electron-ui/electron/lib/paths.js`). CI unit tests and the release dry-run install Python 3.12. The setup wizard parses `python --version` and requires **Python 3.11+**.
 
@@ -77,7 +85,7 @@ export CLIPPY_PYTHON=/path/to/venv/bin/python3
 
 Linux support is **experimental and X11 only. Wayland is not supported.** On X11, screenshots use `mss` (optional crop via `xdotool`). Window titles use `xdotool`, clipboard uses `wl-paste`/`xclip`/`xsel`. AT-SPI accessibility text is implemented; it is covered by CI unit tests, not a real desktop. An unsigned Linux AppImage is built in CI. Install and run steps: [docs/linux.md](docs/linux.md).
 
-The setup wizard checks these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that summaries may feel slower. Homebrew, dependency, and permission troubleshooting: [docs/usage.md](docs/usage.md#installation-troubleshooting). Lower-spec machines: [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
+The setup wizard still uses 8 GB RAM / 8 GB free disk as the continue-or-block floor, and 16 GB RAM / 10 GB disk as recommended (`electron-ui/electron/lib/hardware.js`). Below that floor → setup is blocked. Between the floor and recommended → you can continue with a warning. That 8 GB floor is **not** a comfortable working minimum for `qwen3:8b`. Homebrew, dependency, and permission troubleshooting: [docs/usage.md](docs/usage.md#installation-troubleshooting). Lower-spec machines: [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
 
 ---
 
