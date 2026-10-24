@@ -214,6 +214,7 @@ function knownOllamaInstallPaths({ platform, env = {}, home = '' } = {}) {
         return [
             '/opt/homebrew/bin/ollama',
             '/usr/local/bin/ollama',
+            '/Applications/Ollama.app/Contents/Resources/ollama',
             p.join(home, '.local', 'bin', 'ollama'),
         ]
     }
@@ -239,10 +240,14 @@ function knownPythonInstallPaths({ platform, env = {}, home = '' } = {}) {
         return out
     }
     if (platform === 'darwin') {
+        const framework = ['3.13', '3.12', '3.11'].map((ver) => (
+            p.join('/Library/Frameworks/Python.framework/Versions', ver, 'bin', 'python3')
+        ))
         return [
             '/opt/homebrew/bin/python3',
             '/usr/local/bin/python3',
             '/usr/bin/python3',
+            ...framework,
         ]
     }
     return [

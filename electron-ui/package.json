@@ -15,7 +15,7 @@
   },
   "main": "electron/main.js",
   "scripts": {
-    "test": "node --test electron/lib/mcp.test.js electron/lib/setup.test.js",
+    "test": "node --test electron/lib/mcp.test.js electron/lib/setup.test.js electron/lib/macos-permissions.test.js electron/lib/macos-build.test.js",
     "lint:renderer": "eslint src/js",
     "start": "electron .",
     "dist": "electron-builder --publish never",
@@ -106,6 +106,9 @@
       ],
       "category": "public.app-category.productivity",
       "artifactName": "ClippyVision-macOS-${arch}-${version}.${ext}",
+      "forceCodeSigning": false,
+      "gatekeeperAssess": false,
+      "notarize": false,
       "extendInfo": {
         "NSScreenCaptureUsageDescription": "Clippy Vision captures the screen to keep a local memory of your work.",
         "NSAccessibilityUsageDescription": "Clippy Vision reads the front window so it can remember your work and cover passwords before a screenshot is saved."
