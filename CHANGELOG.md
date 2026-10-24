@@ -19,6 +19,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Published v2.1.0 notes and changelog after the tag ([#35](https://github.com/protocorn/clippy-vision/pull/35)) — documentation. Dropped leftover draft/checklist text; Python 3.11+ as the stated requirement. Did not rebuild or retag.
 
 ### Fixed
+- Linux idle detection no longer calls nonexistent `xdotool get_idle_time`; it uses `xprintidle` then the XScreenSaver extension, and logs one warning when neither works ([#74](https://github.com/protocorn/clippy-vision/issues/74)) — **CI-only**.
+- Linux AppImage Connect apps config no longer points MCP clients at `/tmp/.mount_*`; the python runtime is copied into user data and stale client configs are refreshed on startup ([#75](https://github.com/protocorn/clippy-vision/issues/75)) — **CI-only**.
 - Chat prompt crash on SQL NULL `active_task` / `summary` / `ocr_text`; `/chat` and `/chat/stream` return a user-facing message when the model is missing instead of a 500 ([#34](https://github.com/protocorn/clippy-vision/pull/34)) — **CI-only**.
 - Electron preflight parses `python --version` and requires Python 3.11+ ([#38](https://github.com/protocorn/clippy-vision/pull/38)) — **CI-only** (`node --test` of `setup.test.js` and `mcp.test.js`). Not in the published v2.1.0 installer or AppImage.
 - Private-browsing docs aligned with a coverage table ([#41](https://github.com/protocorn/clippy-vision/pull/41), closes [#16](https://github.com/protocorn/clippy-vision/issues/16)) — documentation / **CI-only** wording honesty, not real-machine browser tests.

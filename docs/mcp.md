@@ -30,7 +30,9 @@ Open **Settings → Connect apps**.
 
 ### One-click clients
 
-**Cursor**, **Claude Desktop**, and **VS Code** have a Connect button. It writes the config on this machine.
+**Cursor**, **Claude Desktop**, and **VS Code** have a Connect button. It writes the config on this machine. Linux AppImage builds copy the MCP Python runtime into a versioned folder under `userData` (`mcp-runtime-<content-hash>/`) and refresh those configs on startup so they do not keep a `/tmp/.mount_*` path that dies after Clippy restarts. The copy stamp is the app version plus a hash of the Python sources — not the FUSE mount path — so a remount does not recopy, and an upgrade leaves the previous folder in place until clients restart. Windows and source-tree launches keep their existing resource paths.
+
+Connect apps spawn `python` with `mcp_server.py` directly (the same shape on every OS; more reliable on Windows than stdio-spawning a `.cmd` file). The `clippy-mcp` script written next to that runtime is a manual helper for a terminal, not the command clients use.
 
 Step-by-step client guides:
 
