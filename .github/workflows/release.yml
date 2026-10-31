@@ -102,9 +102,10 @@ jobs:
           fi
           echo "✓ Windows installer OK"
 
-      # Python is not bundled in the installer. The packaged app spawns
-      # CLIPPY_PYTHON or PATH python (electron-ui/electron/lib/paths.js).
-      # Use the same 3.12 as .github/workflows/tests.yml.
+      # Python is not bundled in the installer (downloaded on first-run
+      # setup into userData/python-runtime). This launch test skips the
+      # wizard, so point CLIPPY_PYTHON at the runner interpreter that
+      # already has requirements.txt. Use the same 3.12 as tests.yml.
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -137,8 +138,10 @@ jobs:
           # false, so preflight talks to scripts/ci_llm_stub.py on :11555
           # instead of requiring Ollama or a real model.
           #
-          # Python is not bundled; CLIPPY_PYTHON points at the runner interpreter
-          # that already has requirements.txt installed.
+          # Python is not bundled in the installer. CLIPPY_PYTHON points at
+          # the runner interpreter that already has requirements.txt, so this
+          # test does not exercise the first-run CPython download. That path
+          # is covered by the managed-python-venv job in tests.yml.
           #
           # Proves: packaged app spawns the backend and GET /health returns 200
           # once setup is already complete.
@@ -605,8 +608,10 @@ jobs:
           # scripts/ci_llm_stub.py (:11555) so usesManagedOllama() is false
           # and preflight does not require Ollama or a real model.
           #
-          # Python is not bundled. CLIPPY_PYTHON is the runner interpreter
-          # that already has requirements.txt installed (same 3.12 as tests.yml).
+          # Python is not bundled in the AppImage. CLIPPY_PYTHON is the
+          # runner interpreter that already has requirements.txt (same 3.12
+          # as tests.yml), so this test does not download CPython. That
+          # path is covered by the managed-python-venv job in tests.yml.
           #
           # Proves: packaged AppImage spawns the backend and GET /health
           # returns 200 once setup is already complete.
