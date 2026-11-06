@@ -84,3 +84,5 @@ Ask in the connected app, in your own words:
 - "What was I working on before lunch?"
 - "Which hotels did I look at yesterday?"
 - "What was the error I encountered in my terminal?"
+
+The session timeline can also offer one copyable question after the first summary (or about 30 minutes of capture). That card stays on this computer and can be dismissed.

@@ -182,7 +182,7 @@ The Electron MCP path test is also part of CI. From the repository root, install
 ```bash
 cd electron-ui
 npm install
-node --test electron/lib/mcp.test.js
+npm test
 ```
 
 The six pytest markers used by CI are:

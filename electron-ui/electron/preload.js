@@ -142,6 +142,12 @@ contextBridge.exposeInMainWorld('clippy', {
         return response.json()
     },
 
+    getFirstAnswerPrompt: async () => {
+        const response = await fetch(await apiUrl('/timeline/first-answer'))
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
     listTimelineSessions: async ({ since, until, q = '', limit = 40, offset = 0 } = {}) => {
         const params = new URLSearchParams({
             limit: String(limit),

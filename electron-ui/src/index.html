@@ -428,6 +428,15 @@
                 <p>Capture stays off until you press Start Capture. A session appears after Clippy has watched a stretch of work. To ask what you were doing, use Connect and ask from Cursor, Claude, or VS Code.</p>
                 <button type="button" id="timeline-hint-dismiss" class="settings-text-link">Dismiss</button>
               </div>
+              <aside id="first-answer-prompt" class="first-answer-prompt" hidden>
+                <p class="first-answer-kicker">A question you can try</p>
+                <p id="first-answer-question" class="first-answer-question"></p>
+                <div class="first-answer-actions">
+                  <button type="button" id="first-answer-copy" class="header-btn">Copy</button>
+                  <button type="button" id="first-answer-connect" class="settings-text-link">Connect apps</button>
+                  <button type="button" id="first-answer-dismiss" class="settings-text-link">Dismiss</button>
+                </div>
+              </aside>
               <div id="timeline-list"></div>
             </div>
             <div class="timeline-load-more-wrap">

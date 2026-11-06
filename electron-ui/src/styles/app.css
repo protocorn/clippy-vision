@@ -3130,6 +3130,37 @@
  line-height: 1.5;
  }
 
+ .first-answer-prompt {
+ margin: 0 0 16px 18px;
+ padding: 10px 12px;
+ border: 1px solid var(--border);
+ border-radius: 10px;
+ background: var(--inset);
+ max-width: 520px;
+ }
+
+ .first-answer-kicker {
+ margin: 0 0 4px;
+ color: var(--muted);
+ font-size: 11px;
+ letter-spacing: 0.02em;
+ text-transform: uppercase;
+ }
+
+ .first-answer-question {
+ margin: 0 0 8px;
+ color: var(--text);
+ font-size: 14px;
+ line-height: 1.45;
+ }
+
+ .first-answer-actions {
+ display: flex;
+ flex-wrap: wrap;
+ align-items: center;
+ gap: 10px 14px;
+ }
+
  .timeline-day-delete,
  .timeline-event-delete {
  border: none;
