@@ -11,7 +11,7 @@ from core.backlog import (
     set_catch_up_running,
 )
 from core.capture_state import get_capture_status
-from core.model_residency import can_load_text, ensure_text_model
+from core.model_residency import background_text_decision, is_intended_background_skip
 from core.performance_metrics import observe_timing
 from core.storage import conn
 
@@ -282,6 +282,9 @@ def classify_event(event: dict, *, allow_tier2: bool = False):
             priority=Priority.BACKGROUND,
         )
     except Exception as e:
+        if is_intended_background_skip(e):
+            mark_deferred(event["event_id"], reason=f"Catch-up deferred: {e}")
+            return
         note_catch_up_failure(str(e))
         note_deferred_event_skip(event["event_id"])
         print(f"  [TIER-2] Failed: {e} - leaving deferred (cooldown + skip)")
@@ -319,6 +322,20 @@ def worker_loop():
             classify_event(_row_to_event(row), allow_tier2=False)
 
 
+def _catch_up_text_ready() -> bool:
+    """True when Tier-2 may call Ollama.
+
+    Intended residency skips (another model loaded / RAM floor) retry on the
+    next cycle and must not set backlog ``last_error``.
+    """
+    decision = background_text_decision(caller="catch-up")
+    if decision.allow:
+        return True
+    if not decision.intended_skip:
+        note_catch_up_failure("text model unavailable")
+    return False
+
+
 def catch_up_loop():
     """API-process drain for stranded pending + deferred Tier-2.
 
@@ -349,14 +366,10 @@ def catch_up_loop():
                 time.sleep(0.2)
                 continue
 
-        if not can_load_text():
-            if ensure_text_model():
-                print("[worker] text model warmed — catch-up continuing")
-            else:
-                note_catch_up_failure("text model unavailable")
-                set_catch_up_running(False)
-                time.sleep(CATCH_UP_POLL_SECS)
-                continue
+        if not _catch_up_text_ready():
+            set_catch_up_running(False)
+            time.sleep(CATCH_UP_POLL_SECS)
+            continue
 
         # Fetch extra so per-event skip after timeouts can rotate the queue.
         rows = _fetch_status_rows("deferred", limit=CATCH_UP_BATCH * 4)
@@ -370,10 +383,8 @@ def catch_up_loop():
         for row in rows:
             if not catch_up_allowed():
                 break
-            if not can_load_text():
-                if not ensure_text_model():
-                    note_catch_up_failure("text model unavailable")
-                    break
+            if not _catch_up_text_ready():
+                break
             classify_event(_row_to_event(row), allow_tier2=True)
         set_catch_up_running(False)
         time.sleep(1.0)

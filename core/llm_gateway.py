@@ -9,7 +9,7 @@ from itertools import count
 import psutil
 
 from core.local_embeddings import embed_text, embed_texts
-from core.model_residency import can_load_text, keep_alive_for, text_unavailable_reason
+from core.model_residency import background_text_decision, keep_alive_for
 from core.ollama_client import (
     OllamaError,
     OllamaUnavailable,
@@ -230,17 +230,28 @@ class LLMGateway:
                 self._current_job = job
                 self._current_priority = priority
 
-            # Health gate for all non-interactive jobs
+            # Non-chat jobs must not load a second model (issue #111). User chat
+            # (INTERACTIVE) is allowed to pin Clippy's model even if another tag
+            # is leftover.
             if priority > Priority.INTERACTIVE:
-                if not can_load_text():
-                    job.error = OSError(f"deferred: {text_unavailable_reason()}")
+                requested = str((job.payload or {}).get("model") or "").strip()
+                decision = background_text_decision(requested or None, caller="gateway")
+                if not decision.allow:
+                    job.error = OSError(
+                        f"deferred: {decision.skip_reason or 'text model unavailable'}"
+                    )
                 else:
+                    if decision.model:
+                        job.payload["model"] = decision.model
                     self._health_gate(job, priority=priority)
             if job.error:
                 job.event.set()
                 if job.chunks is not None:
                     job.chunks.put(None)
                 self.queue.task_done()
+                with self._state_lock:
+                    self._current_job = None
+                    self._current_priority = None
                 continue
 
             if job.stream:
