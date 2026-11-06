@@ -29,7 +29,7 @@ Ask your questions in the connected app. Clippy does not answer them inside its 
 
 On macOS, allow Screen Recording and Accessibility when Clippy asks. Both are required for screenshots, window titles, and password-field painting. If a prompt is dismissed, turn them on in System Settings → Privacy & Security.
 
-The installers are unsigned. On Windows, SmartScreen shows "Windows protected your PC" — choose More info → Run anyway. On macOS, Gatekeeper may block the first open — right-click the app and choose Open.
+The installers are unsigned. On Windows, SmartScreen shows "Windows protected your PC" — choose More info → Run anyway. On macOS, Gatekeeper blocks a normal double-click; right-click **Clippy Vision** → **Open**, then confirm. If it still refuses: `xattr -cr "/Applications/Clippy Vision.app"` and right-click → Open again. Unsigned 2.x Mac dmg/zip also come from the Actions **macos-installer** artifact. Full notes: [docs/macos.md](docs/macos.md).
 
 ---
 

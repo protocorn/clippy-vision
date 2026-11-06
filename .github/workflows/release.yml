@@ -1,13 +1,16 @@
 name: Build & Publish Release
 
 # Triggers:
-# - pull_request: dry-run Windows + Linux packaging (no GitHub Release)
+# - pull_request: dry-run Windows + macOS + Linux packaging (no GitHub Release)
 # - push of tags matching v*: same packaging dry-run; does NOT create or update a GitHub Release
 # - workflow_dispatch: dry-run if tag is empty; create/update a *draft* GitHub Release only when
 #   tag is set. That is the only path that attaches installers to a GitHub Release.
 #
 # Tag pushes never publish or clobber a GitHub Release. Publishing requires a manual
 # Actions run (workflow_dispatch) with a tag input.
+#
+# macOS builds are unsigned (CSC_IDENTITY_AUTO_DISCOVERY=false, npm run dist:mac
+# already passes --publish never). No Apple signing/notarize secrets are used.
 
 on:
   push:
@@ -25,9 +28,9 @@ on:
         description: 'Release tag to attach artifacts to (e.g. v2.0.1). Leave empty for dry-run without creating a release.'
         required: false
       include_macos:
-        description: 'Also build unsigned macOS installers (opt-in, manual validation required)'
+        description: 'Build unsigned macOS dmg+zip (arm64 and x64). On by default; PRs and tag pushes always build macOS.'
         type: boolean
-        default: false
+        default: true
       include_linux:
         description: 'Build Linux AppImage (enabled by default for tag pushes and PRs)'
         type: boolean
@@ -419,9 +422,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Opt-in only. Tag pushes never build or publish macOS installers.
+  # Unsigned Apple Silicon + Intel dmg/zip on GitHub-hosted macos-latest.
+  # PRs and tag pushes always build. workflow_dispatch can skip with include_macos=false.
+  # Does not notarize or use Apple signing secrets. Tag pushes still do not publish
+  # a GitHub Release; only workflow_dispatch with a tag attaches artifacts.
   build-macos:
-    if: github.event_name == 'workflow_dispatch' && inputs.include_macos
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.include_macos)
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -444,6 +450,8 @@ jobs:
         run: |
           if [[ -n "${{ github.event.inputs.tag }}" ]]; then
             TAG="${{ github.event.inputs.tag }}"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${{ github.ref_name }}"
           else
             # Dry-run: use package.json version with -dev suffix
             TAG="v$(node -p "require('./package.json').version")-dev+${{ github.sha }}"
@@ -459,21 +467,287 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAG=$TAG" >> $GITHUB_ENV
 
-      - name: Build macOS installer (unsigned, code signing disabled)
+      - name: Build macOS installers (unsigned, code signing disabled)
         working-directory: electron-ui
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npm run dist:mac
 
+      - name: Smoke check macOS dmg and zip
+        shell: bash
+        working-directory: electron-ui/dist
+        run: |
+          echo "Checking unsigned macOS artifacts..."
+          ls -lh ClippyVision-macOS-* 2>/dev/null || true
+          missing=0
+          for arch in arm64 x64; do
+            found=""
+            for ext in dmg zip; do
+              match=$(ls ClippyVision-macOS-${arch}-*.${ext} 2>/dev/null | head -1 || true)
+              if [[ -n "$match" ]]; then
+                size=$(stat -f%z "$match" 2>/dev/null || stat -c%s "$match")
+                echo "Found: $match (${size} bytes)"
+                if [[ $size -lt 40000000 ]]; then
+                  echo "ERROR: $match too small (${size} bytes, expected >40MB)"
+                  exit 1
+                fi
+                found=1
+              fi
+            done
+            if [[ -z "$found" ]]; then
+              echo "ERROR: no dmg or zip for arch ${arch}"
+              missing=1
+            fi
+          done
+          if [[ $missing -ne 0 ]]; then
+            echo "ERROR: expected arm64 and x64 artifacts"
+            ls -la || true
+            exit 1
+          fi
+          echo "✓ Unsigned macOS arm64 + x64 artifacts OK"
+
+      # Python is not bundled. Same 3.12 as tests.yml / Windows / Linux jobs.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Launch test unsigned macOS zip
+        working-directory: electron-ui/dist
+        env:
+          ELECTRON_ENABLE_LOGGING: "1"
+          CLIPPY_SKIP_MAC_PERMISSIONS: "1"
+        run: |
+          # CI-only first-run bypass. Not a user-facing skip flag.
+          #
+          # Packaged macOS userData is ~/Library/Application Support/Clippy Vision.
+          # Seeding setup_complete.json skips the wizard so main.js takes
+          # runPreflightChecks() -> api.startServer().
+          #
+          # llm_config.json in <userData>/data/ points at scripts/ci_llm_stub.py
+          # (:11555) so usesManagedOllama() is false.
+          #
+          # CLIPPY_SKIP_MAC_PERMISSIONS skips Accessibility / Screen Recording
+          # sheets so the runner cannot hang waiting for a click.
+          #
+          # Proves: packaged .app spawns the backend and GET /health returns 200
+          # once setup is already complete.
+          # Does not prove: wizard, Ollama, a real model, Screen Recording,
+          # Accessibility, or a real Mac desktop.
+
+          set -euo pipefail
+          PYTHON_EXE="$(python -c 'import sys; print(sys.executable)')"
+          export CLIPPY_PYTHON="$PYTHON_EXE"
+          export ELECTRON_ENABLE_LOGGING=1
+          export CLIPPY_SKIP_MAC_PERMISSIONS=1
+          echo "CLIPPY_PYTHON=$CLIPPY_PYTHON"
+          python --version
+          echo "runner arch: $(uname -m)"
+
+          NATIVE_ARCH="$(uname -m)"
+          if [[ "$NATIVE_ARCH" == "x86_64" ]]; then
+            ARTIFACT_ARCH=x64
+          else
+            ARTIFACT_ARCH=arm64
+          fi
+
+          seed_clippy_setup() {
+            local user_data="$1"
+            mkdir -p "$user_data/data"
+            printf '%s\n' '{"version":"2.1.1","completedAt":"2026-10-18T00:00:00.000Z"}' > "$user_data/setup_complete.json"
+            printf '%s\n' '{"provider":"ollama","base_url":"http://127.0.0.1:11555","api_key":"","chat_model":"test-model","embedding_model":"nomic-embed-text"}' > "$user_data/data/llm_config.json"
+            echo "seeded $user_data/setup_complete.json"
+          }
+
+          seed_clippy_setup "$HOME/Library/Application Support/Clippy Vision"
+          seed_clippy_setup "$HOME/Library/Application Support/clippy-vision"
+
+          echo "=== Starting stub LLM API on port 11555 ==="
+          python ../../scripts/ci_llm_stub.py > llm-stub.log 2>&1 &
+          STUB_PID=$!
+          sleep 1
+          TAGS_BODY="$(curl -sS -w '\n%{http_code}' http://127.0.0.1:11555/api/tags || true)"
+          echo "stub /api/tags: $TAGS_BODY"
+          echo "$TAGS_BODY" | tail -1 | grep -qx 200 || {
+            echo "ERROR: stub LLM server failed to start"
+            cat llm-stub.log || true
+            kill $STUB_PID 2>/dev/null || true
+            exit 1
+          }
+
+          ZIP=$(ls ClippyVision-macOS-${ARTIFACT_ARCH}-*.zip 2>/dev/null | head -1)
+          if [[ -z "$ZIP" ]]; then
+            echo "ERROR: no native-arch zip (ClippyVision-macOS-${ARTIFACT_ARCH}-*.zip)"
+            ls -la || true
+            kill $STUB_PID 2>/dev/null || true
+            exit 1
+          fi
+          echo "Extracting $ZIP"
+          rm -rf unpacked
+          mkdir unpacked
+          unzip -q "$ZIP" -d unpacked
+          APP=$(find unpacked -name 'Clippy Vision.app' -type d | head -1)
+          if [[ -z "$APP" ]]; then
+            echo "ERROR: Clippy Vision.app missing from zip"
+            find unpacked -maxdepth 3 -print || true
+            kill $STUB_PID 2>/dev/null || true
+            exit 1
+          fi
+          BIN="$APP/Contents/MacOS/Clippy Vision"
+          if [[ ! -x "$BIN" ]]; then
+            echo "ERROR: main binary missing at $BIN"
+            ls -la "$APP/Contents/MacOS" || true
+            kill $STUB_PID 2>/dev/null || true
+            exit 1
+          fi
+          xattr -cr "$APP" 2>/dev/null || true
+
+          LOG_FILE="launch-test.log"
+          STDERR_FILE="launch-test.stderr"
+
+          start_app() {
+            rm -f "$LOG_FILE" "$STDERR_FILE"
+            echo "Launching: $BIN"
+            "$BIN" > "$LOG_FILE" 2> "$STDERR_FILE" &
+            APP_PID=$!
+            echo "App PID: $APP_PID"
+          }
+
+          stop_app() {
+            kill $APP_PID 2>/dev/null || true
+            sleep 1
+            kill -9 $APP_PID 2>/dev/null || true
+            pkill -f "Clippy Vision" 2>/dev/null || true
+          }
+
+          dump_logs() {
+            echo "=== Application stdout ==="
+            cat "$LOG_FILE" 2>/dev/null || true
+            echo "=== Application stderr ==="
+            cat "$STDERR_FILE" 2>/dev/null || true
+          }
+
+          start_app
+
+          BACKEND_PORT=""
+          BACKEND_HTTP_OK=false
+          BACKEND_HTTP_BODY=""
+          USER_DATA_LOGGED=""
+          RELAUNCHED=false
+
+          for i in $(seq 1 90); do
+            if ! kill -0 $APP_PID 2>/dev/null; then
+              echo "ERROR: app exited after $i seconds"
+              dump_logs
+              kill $STUB_PID 2>/dev/null || true
+              exit 1
+            fi
+
+            if [ -z "$USER_DATA_LOGGED" ]; then
+              USER_DATA_LOGGED="$(grep -oE '\[paths\] USER_DATA=.*' "$LOG_FILE" "$STDERR_FILE" 2>/dev/null | head -1 | sed 's/.*USER_DATA=//' || true)"
+              if [ -n "$USER_DATA_LOGGED" ]; then
+                echo "OK: USER_DATA from app log: $USER_DATA_LOGGED at ${i}s"
+                if [ ! -f "$USER_DATA_LOGGED/setup_complete.json" ]; then
+                  if [ "$RELAUNCHED" = true ]; then
+                    echo "ERROR: SETUP_FLAG still missing at $USER_DATA_LOGGED/setup_complete.json"
+                    dump_logs
+                    kill $STUB_PID 2>/dev/null || true
+                    stop_app
+                    exit 1
+                  fi
+                  echo "SETUP_FLAG missing at logged USER_DATA; seeding and relaunching"
+                  seed_clippy_setup "$USER_DATA_LOGGED"
+                  stop_app
+                  RELAUNCHED=true
+                  BACKEND_PORT=""
+                  start_app
+                  continue
+                fi
+                echo "OK: SETUP_FLAG present at $USER_DATA_LOGGED/setup_complete.json"
+              fi
+            fi
+
+            if [ -z "$BACKEND_PORT" ]; then
+              PORT_LINE="$(grep -oE '\[api\] port=[0-9]+' "$LOG_FILE" "$STDERR_FILE" 2>/dev/null | head -1 || true)"
+              if [ -n "$PORT_LINE" ]; then
+                BACKEND_PORT="$(echo "$PORT_LINE" | grep -oE '[0-9]+')"
+                echo "OK: Backend port announced: $BACKEND_PORT at ${i}s"
+              fi
+            fi
+
+            if [ -n "$BACKEND_PORT" ] && [ "$BACKEND_HTTP_OK" = false ]; then
+              for host in 127.0.0.1 localhost; do
+                HTTP_RESPONSE="$(curl -sS -w '\n%{http_code}' "http://${host}:${BACKEND_PORT}/health" 2>/dev/null || true)"
+                HTTP_CODE="$(printf '%s\n' "$HTTP_RESPONSE" | tail -1)"
+                HTTP_BODY="$(printf '%s\n' "$HTTP_RESPONSE" | sed '$d')"
+                if [ "$HTTP_CODE" = "200" ]; then
+                  BACKEND_HTTP_OK=true
+                  BACKEND_HTTP_BODY="$HTTP_BODY"
+                  echo "OK: Backend HTTP 200 on ${host}:${BACKEND_PORT} at ${i}s"
+                  echo "  Response: $HTTP_BODY"
+                  break
+                fi
+              done
+            fi
+
+            if [ "$BACKEND_HTTP_OK" = true ]; then
+              break
+            fi
+            sleep 1
+          done
+
+          if [ -z "$BACKEND_PORT" ]; then
+            echo "ERROR: Backend port never announced in log"
+            dump_logs
+            kill $STUB_PID 2>/dev/null || true
+            stop_app
+            exit 1
+          fi
+          if [ "$BACKEND_HTTP_OK" = false ]; then
+            echo "ERROR: Backend HTTP health check never succeeded"
+            echo "  Port announced: $BACKEND_PORT"
+            echo "  USER_DATA: $USER_DATA_LOGGED"
+            dump_logs
+            kill $STUB_PID 2>/dev/null || true
+            stop_app
+            exit 1
+          fi
+
+          kill $STUB_PID 2>/dev/null || true
+          stop_app
+
+          echo ""
+          echo "Launch test completed successfully"
+          echo "  - Backend port: $BACKEND_PORT"
+          echo "  - Backend HTTP health check: PASSED (200 OK) $BACKEND_HTTP_BODY"
+
+      - name: Upload macOS launch test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-launch-test
+          path: |
+            electron-ui/dist/launch-test.log
+            electron-ui/dist/launch-test.stderr
+            electron-ui/dist/llm-stub.log
+          retention-days: 14
+
       - name: Upload macOS installers artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-installer
-          path: electron-ui/dist/*.dmg
+          path: |
+            electron-ui/dist/*.dmg
+            electron-ui/dist/*.zip
           retention-days: 14
 
       - name: Ensure release notes file exists
-        if: github.event.inputs.tag != '' && github.event_name != 'pull_request'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
         shell: bash
         run: |
           TAG="${{ github.event.inputs.tag }}"
@@ -487,14 +761,15 @@ jobs:
           echo "Using release notes: $NOTES"
 
       - name: Upload macOS installers to release
-        # Manual only: workflow_dispatch with a tag. Tag pushes never run this job.
-        if: github.event.inputs.tag != '' && github.event_name != 'pull_request'
+        # Manual only: workflow_dispatch with a tag. Tag pushes and PRs never create/update a release.
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag }}
           body_path: docs/release-notes/${{ github.event.inputs.tag }}.md
           files: |
             electron-ui/dist/*.dmg
+            electron-ui/dist/*.zip
           draft: true
           prerelease: false
         env:
