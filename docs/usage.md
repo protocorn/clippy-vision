@@ -130,15 +130,15 @@ The disk image is unsigned. Right-click Clippy Vision and choose **Open**, then 
 
 ### Homebrew / dependencies on macOS
 
-The setup wizard uses Homebrew when Homebrew is already installed to install Python and Ollama. If Homebrew is missing, the wizard shows a manual-install message with links to [python.org/downloads](https://www.python.org/downloads/) and [ollama.com/download](https://ollama.com/download). Install those yourself, then click **Retry**. `brew install ollama` is the same step the wizard tries when Homebrew is present.
+The setup wizard downloads a relocatable Python 3.12 runtime if Python 3.11+ is not already available, and uses Homebrew when Homebrew is already installed to install **Ollama**. If Homebrew is missing for Ollama, the wizard shows a manual-install message with a link to [ollama.com/download](https://ollama.com/download). Install Ollama yourself, then click **Retry**. `brew install ollama` is the same step the wizard tries when Homebrew is present. Python no longer requires Homebrew or python.org.
 
 ### Linux AppImage
 
-Linux support is **experimental and X11 only. Wayland is not supported.** The unsigned AppImage, Python 3.11+ (not bundled; the setup wizard parses `python --version` and rejects anything older), capture helpers, and known warnings are in [linux.md](linux.md). **Install Ollama first** (`curl -fsSL https://ollama.com/install.sh | sh`, or [ollama.com/download/linux](https://ollama.com/download/linux)). Python stays a manual install from [python.org/downloads](https://www.python.org/downloads/). If `libfuse2` is missing, run the AppImage with `--appimage-extract-and-run`.
+Linux support is **experimental and X11 only. Wayland is not supported.** The unsigned AppImage, first-run Python download, capture helpers, and known warnings are in [linux.md](linux.md). **Install Ollama first** (`curl -fsSL https://ollama.com/install.sh | sh`, or [ollama.com/download/linux](https://ollama.com/download/linux)). Python is downloaded into app data if 3.11+ is not on PATH. If `libfuse2` is missing, run the AppImage with `--appimage-extract-and-run`.
 
 ### Windows winget missing or PATH stale after install
 
-If `winget` is not available, the wizard does not dead-end: it shows [python.org/downloads](https://www.python.org/downloads/) and [ollama.com/download](https://ollama.com/download). After a successful winget install it re-reads PATH and probes known locations such as `%LOCALAPPDATA%\Programs\Ollama\ollama.exe` and `%LOCALAPPDATA%\Programs\Python\Python311\python.exe` before asking you to retry.
+Python no longer uses winget. The wizard downloads a relocatable CPython 3.12 into `%APPDATA%\Clippy Vision\python-runtime\` when no Python 3.11+ is found. If `winget` is not available for **Ollama**, the wizard shows [ollama.com/download](https://ollama.com/download). After a successful Ollama winget install it re-reads PATH and probes known locations such as `%LOCALAPPDATA%\Programs\Ollama\ollama.exe` before asking you to retry.
 
 ### Ollama not found after install
 
@@ -174,6 +174,8 @@ Linux packaged paths: [linux.md](linux.md#file-locations-packaged-linux).
 | Item | Windows | macOS |
 |------|---------|-------|
 | App data (DB, screenshots) | `%APPDATA%\Clippy Vision\data\` | `~/Library/Application Support/Clippy Vision/data/` |
+| App Python runtime | `%APPDATA%\Clippy Vision\python-runtime\` | `~/Library/Application Support/Clippy Vision/python-runtime/` |
+| App Python venv | `%APPDATA%\Clippy Vision\python-venv\` | `~/Library/Application Support/Clippy Vision/python-venv/` |
 | Setup flag | `%APPDATA%\Clippy Vision\setup_complete.json` | `~/Library/Application Support/Clippy Vision/setup_complete.json` |
 | API port | `%APPDATA%\Clippy Vision\api_process.json` | `~/Library/Application Support/Clippy Vision/api_process.json` |
 | Ollama models | `%USERPROFILE%\.ollama\models\` | `~/.ollama/models/` |
