@@ -467,15 +467,16 @@ def screenshot_processor_loop():
         # trips far more often and would have meant skipping the whole batch
         # — including accessibility-only event creation, which never touches
         # OCR at all. OCR itself already self-gates via can_run_ocr() inside
-        # core/ocr.py and degrades to an empty string instead of failing, so
-        # enrich_screenshot() still has accessibility text to fall back on
-        # when OCR specifically is skipped.
+        # core/ocr.py (logged, then queued for a later retry) and degrades to
+        # an empty string instead of failing, so enrich_screenshot() still
+        # has accessibility text to fall back on when OCR specifically is skipped.
         time.sleep(POLL_SECS * load_backoff_multiplier())
 
         all_unprocessed = _get_unprocessed_screenshots()
         depth = len(all_unprocessed)
         set_gauge("screenshot_queue.depth", depth)
         if not all_unprocessed:
+            _retry_skipped_ocr()
             continue
 
         if depth >= QUEUE_DEPTH_WARNING_THRESHOLD:
@@ -527,6 +528,18 @@ def screenshot_processor_loop():
                 except Exception as exc:
                     increment("processor.group_errors")
                     print(f"  [screenshot_processor] Group failed: {exc}")
+
+        _retry_skipped_ocr()
+
+
+def _retry_skipped_ocr() -> None:
+    """Fill frames whose OCR was skipped under CPU/memory pressure."""
+    try:
+        from core.ocr_retry import retry_skipped_ocr
+
+        retry_skipped_ocr()
+    except Exception as exc:
+        print(f"  [screenshot_processor] OCR retry failed: {exc}")
 
 
 def start_screenshot_processor() -> threading.Thread:

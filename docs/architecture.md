@@ -50,7 +50,7 @@ The last 3 events plus the current event are sent to the chat model you chose in
 
 Each captured frame records bounded text from the foreground accessibility API. Those walks run on a dedicated background worker (`core/uia_worker.py`), so a slow app does not delay the next capture. If the walk finishes after the capture timeout, the text is written beside the screenshot and copied onto the event that already points at that frame. A short first read is replaced when a longer walk of the same frame arrives.
 
-RapidOCR runs only when that accessibility text is empty or too thin. A background processor (`core/screenshot_processor.py`) groups visually identical screenshots using perceptual hashing and stores the resulting text with the nearest event; if none exists, it creates a `screenshot_analysis` event. After the JPEG is renamed to its processed name, the event stores that name.
+RapidOCR runs only when that accessibility text is empty or too thin. CPU or memory pressure can skip that OCR pass; the skip is logged with the reason (CPU, memory, or other) and the frame is retried later with backoff once the gate opens, at most a couple of frames per processor cycle. A background processor (`core/screenshot_processor.py`) groups visually identical screenshots using perceptual hashing and stores the resulting text with the nearest event; if none exists, it creates a `screenshot_analysis` event. After the JPEG is renamed to its processed name, the event stores that name.
 
 Image embeddings and event-level RAG are disabled by default. Screenshot expiry is checked about once an hour. The accessibility text file stays after the JPEG is deleted.
 
