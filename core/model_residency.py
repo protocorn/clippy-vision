@@ -132,6 +132,26 @@ def pressure_reason() -> str | None:
     return None
 
 
+def ocr_unavailable_reason(available: int | None = None) -> str | None:
+    """Why OCR should not start right now, or None if it can run.
+
+    Covers the RAM floor and the same commit/CPU pressure signals as
+    can_run_ocr(), so skip logs can say CPU, memory, or other instead of
+    returning empty text with no line at all.
+    """
+    free = _available() if available is None else available
+    if free < _OCR_FLOOR:
+        return (
+            f"memory: free RAM {free / _GB:.1f}GB is below the "
+            f"{_OCR_FLOOR / _GB:.1f}GB OCR floor"
+        )
+    if _commit_pressured():
+        return f"memory: commit/swap >= {_COMMIT_PRESSURE_PCT:.0f}%"
+    if _cpu_pressured():
+        return f"CPU: system usage >= {_CPU_PRESSURE_PCT:.0f}%"
+    return None
+
+
 def _ollama_loaded_models() -> set[str]:
     """Names currently resident in Ollama (/api/ps). Cached briefly."""
     global _ps_cache, _gpu_resident
@@ -154,15 +174,28 @@ def _ollama_loaded_models() -> set[str]:
     return names
 
 
+def _is_chat_model_name(name: str, model: str) -> bool:
+    """True when an /api/ps name is Clippy's chat model (or a tagged variant)."""
+    key = (name or "").casefold()
+    target = (model or "").casefold()
+    return bool(key and target) and (key == target or key.startswith(target))
+
+
 def text_model_loaded(model: str = TEXT_MODEL) -> bool:
     """True when the chat/summary model is already resident in Ollama."""
-    loaded = _ollama_loaded_models()
-    target = model.casefold()
-    for name in loaded:
-        key = name.casefold()
-        if key == target or key.startswith(target):
-            return True
-    return False
+    return any(_is_chat_model_name(name, model) for name in _ollama_loaded_models())
+
+
+def other_model_loaded(model: str = TEXT_MODEL) -> bool:
+    """True when Ollama is holding a model that is not Clippy's chat model.
+
+    A user-run 4b-instruct (or any other tag) sitting in /api/ps must block
+    periodic qwen3:8b re-warms — loading both at once is what drove free RAM
+    down to ~0.5 GB in QA's recall retest.
+    """
+    return any(
+        not _is_chat_model_name(name, model) for name in _ollama_loaded_models()
+    )
 
 
 def gpu_can_host_text() -> bool:
@@ -254,8 +287,7 @@ def can_run_ocr(available: int | None = None) -> bool:
     "fits" in RAM but runs 15-20x slower than normal because it's contending
     for cycles or the OS is paging.
     """
-    free = _available() if available is None else available
-    return free >= _OCR_FLOOR and not _under_pressure()
+    return ocr_unavailable_reason(available) is None
 
 
 def load_residency() -> dict:
@@ -334,11 +366,19 @@ def reap_orphaned_runners() -> int:
 
 
 def _warm(model: str, keep_alive: str | int = KEEP_ALIVE_PINNED, timeout: float = 90) -> None:
-    # Non-empty prompt: empty prompt hangs on some Ollama builds
+    # Non-empty prompt: empty prompt hangs on some Ollama builds.
+    # think=false is required: qwen3 defaults to thinking, and a missing flag
+    # made startup warm generate hundreds of tokens on CPU (~53s in QA).
     print(f"[residency] warm {model} (keep_alive={keep_alive!r})")
     _ollama_post(
         "/api/generate",
-        {"model": model, "prompt": "ping", "stream": False, "keep_alive": keep_alive},
+        {
+            "model": model,
+            "prompt": "ping",
+            "stream": False,
+            "keep_alive": keep_alive,
+            "think": False,
+        },
         timeout=timeout,
     )
     # Bust the /api/ps cache so text_model_loaded() sees the new resident model.
@@ -350,9 +390,12 @@ def ensure_text_model(*, force: bool = False) -> bool:
     """
     Best-effort: make the chat/summary model resident in Ollama.
 
-    Prefers trying a load over a hard free-RAM skip, which strands
-    summarizer/distil on machines that would have loaded the model fine.
-    Retries are rate-limited unless force=True.
+    Startup (force=True) still tries a load even below the free-RAM floor, so
+    summarizer/distil are not stranded forever on a machine that would have
+    loaded the model. Periodic re-warm (force=False, at most every 120s) does
+    not: it skips when free RAM is below the cold-load floor (CPU-only) or
+    when another Ollama model is already resident. Retries are rate-limited
+    unless force=True.
     """
     global _last_warm_attempt_mono
     if text_model_loaded(TEXT_MODEL):
@@ -360,6 +403,17 @@ def ensure_text_model(*, force: bool = False) -> bool:
     # Extreme commit pressure usually means Windows will page-fault hard.
     if _commit_pressured() and not force:
         return False
+
+    if not force:
+        if other_model_loaded(TEXT_MODEL):
+            print("[residency] skip re-warm — another model is loaded")
+            return False
+        if not gpu_can_host_text() and _available() < _TEXT_FLOOR:
+            print(
+                f"[residency] skip re-warm — free RAM below floor "
+                f"(free~{_available() / _GB:.1f}GB < {_TEXT_FLOOR / _GB:.1f}GB)"
+            )
+            return False
 
     now = time.monotonic()
     with _lock:

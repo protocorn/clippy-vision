@@ -17,6 +17,7 @@ const { createSetup }     = require('./lib/setup')
 const { createAppIcons }  = require('./lib/app-icons')
 
 const IS_PACKAGED = app.isPackaged
+// Test-build trigger for QA AppImage dry-run of combined #107+#108 (do not merge).
 if (!IS_PACKAGED) {
     // Installed Clippy and `npm start` share appId; without a separate userData
     // the installer instance steals the lock and `npm start` exits instantly.

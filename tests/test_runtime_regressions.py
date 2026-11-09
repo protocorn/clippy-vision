@@ -875,16 +875,137 @@ class RuntimeRegressionTests(unittest.TestCase):
             self.assertFalse(residency.can_cold_load_text())
 
     def test_ensure_text_model_tries_warm_below_floor(self):
-        """Startup/summarizer must attempt load instead of hard-skipping on free RAM."""
+        """Startup (force=True) must still attempt load instead of hard-skipping on free RAM."""
         from core import model_residency as residency
 
         with patch.object(residency, "text_model_loaded", side_effect=[False, True]), patch.object(
             residency, "_available", return_value=int(0.9 * residency._GB)
         ), patch.object(residency, "_commit_pressured", return_value=False), patch.object(
             residency, "gpu_can_host_text", return_value=False
-        ), patch.object(residency, "_warm") as warm:
+        ), patch.object(residency, "other_model_loaded", return_value=False), patch.object(
+            residency, "_warm"
+        ) as warm:
             self.assertTrue(residency.ensure_text_model(force=True))
             warm.assert_called_once()
+
+    def test_ensure_text_model_skips_rewarm_below_floor(self):
+        """Periodic re-warm must not load qwen3:8b when free RAM is under Clippy's floor."""
+        from core import model_residency as residency
+
+        residency._last_warm_attempt_mono = 0.0
+        with patch.object(residency, "text_model_loaded", return_value=False), patch.object(
+            residency, "_available", return_value=int(0.9 * residency._GB)
+        ), patch.object(residency, "_commit_pressured", return_value=False), patch.object(
+            residency, "gpu_can_host_text", return_value=False
+        ), patch.object(residency, "other_model_loaded", return_value=False), patch.object(
+            residency, "_warm"
+        ) as warm:
+            self.assertFalse(residency.ensure_text_model(force=False))
+            warm.assert_not_called()
+
+    def test_ensure_text_model_skips_rewarm_when_another_model_loaded(self):
+        """A resident 4b-instruct (or any other tag) must block periodic qwen3:8b re-warm."""
+        from core import model_residency as residency
+
+        residency._last_warm_attempt_mono = 0.0
+        with patch.object(residency, "text_model_loaded", return_value=False), patch.object(
+            residency, "_ollama_loaded_models", return_value={"qwen2.5:4b-instruct"}
+        ), patch.object(residency, "_available", return_value=int(8 * residency._GB)), patch.object(
+            residency, "_commit_pressured", return_value=False
+        ), patch.object(residency, "gpu_can_host_text", return_value=False), patch.object(
+            residency, "_warm"
+        ) as warm:
+            self.assertTrue(residency.other_model_loaded())
+            self.assertFalse(residency.ensure_text_model(force=False))
+            warm.assert_not_called()
+
+    def test_ensure_text_model_rewarm_when_idle_and_above_floor(self):
+        """Periodic re-warm still runs when nothing else is loaded and RAM is fine."""
+        from core import model_residency as residency
+
+        residency._last_warm_attempt_mono = 0.0
+        with patch.object(residency, "text_model_loaded", side_effect=[False, True]), patch.object(
+            residency, "_ollama_loaded_models", return_value=set()
+        ), patch.object(residency, "_available", return_value=int(8 * residency._GB)), patch.object(
+            residency, "_commit_pressured", return_value=False
+        ), patch.object(residency, "gpu_can_host_text", return_value=False), patch.object(
+            residency, "_warm"
+        ) as warm:
+            self.assertTrue(residency.ensure_text_model(force=False))
+            warm.assert_called_once()
+
+    def test_ensure_text_model_rewarm_below_floor_on_gpu(self):
+        """VRAM hosts the weights, so the system-RAM floor must not block re-warm."""
+        from core import model_residency as residency
+
+        residency._last_warm_attempt_mono = 0.0
+        with patch.object(residency, "text_model_loaded", side_effect=[False, True]), patch.object(
+            residency, "other_model_loaded", return_value=False
+        ), patch.object(residency, "_available", return_value=int(0.4 * residency._GB)), patch.object(
+            residency, "_commit_pressured", return_value=False
+        ), patch.object(residency, "gpu_can_host_text", return_value=True), patch.object(
+            residency, "_warm"
+        ) as warm:
+            self.assertTrue(residency.ensure_text_model(force=False))
+            warm.assert_called_once()
+
+    def test_ensure_text_model_skips_rewarm_other_model_even_on_gpu(self):
+        """Another resident model blocks re-warm on GPU too (VRAM contention)."""
+        from core import model_residency as residency
+
+        residency._last_warm_attempt_mono = 0.0
+        with patch.object(residency, "text_model_loaded", return_value=False), patch.object(
+            residency, "other_model_loaded", return_value=True
+        ), patch.object(residency, "_available", return_value=int(8 * residency._GB)), patch.object(
+            residency, "_commit_pressured", return_value=False
+        ), patch.object(residency, "gpu_can_host_text", return_value=True), patch.object(
+            residency, "_warm"
+        ) as warm:
+            self.assertFalse(residency.ensure_text_model(force=False))
+            warm.assert_not_called()
+
+    def test_startup_warm_still_tries_when_another_model_is_loaded(self):
+        """force=True is startup: pin Clippy's model even if a leftover tag is resident."""
+        from core import model_residency as residency
+
+        with patch.object(residency, "text_model_loaded", side_effect=[False, True]), patch.object(
+            residency, "other_model_loaded", return_value=True
+        ), patch.object(residency, "_available", return_value=int(8 * residency._GB)), patch.object(
+            residency, "_commit_pressured", return_value=False
+        ), patch.object(residency, "gpu_can_host_text", return_value=False), patch.object(
+            residency, "_warm"
+        ) as warm:
+            self.assertTrue(residency.ensure_text_model(force=True))
+            warm.assert_called_once()
+
+    def test_warm_sends_think_false(self):
+        """Startup/re-warm generate must disable thinking, matching gateway.chat calls."""
+        from core import model_residency as residency
+
+        with patch.object(residency, "_ollama_post") as post:
+            residency._warm("qwen3:8b")
+        post.assert_called_once()
+        path, body = post.call_args.args[:2]
+        self.assertEqual(path, "/api/generate")
+        self.assertIs(body["think"], False)
+        self.assertEqual(body["prompt"], "ping")
+        self.assertFalse(body["stream"])
+        self.assertEqual(body["keep_alive"], residency.KEEP_ALIVE_PINNED)
+
+    def test_other_model_loaded_ignores_chat_model_variants(self):
+        from core import model_residency as residency
+
+        with patch.object(residency, "_ollama_loaded_models", return_value={"qwen3:8b"}):
+            self.assertFalse(residency.other_model_loaded("qwen3:8b"))
+            self.assertTrue(residency.text_model_loaded("qwen3:8b"))
+        with patch.object(residency, "_ollama_loaded_models", return_value={"qwen3:8b-q4_K_M"}):
+            self.assertFalse(residency.other_model_loaded("qwen3:8b"))
+            self.assertTrue(residency.text_model_loaded("qwen3:8b"))
+        with patch.object(
+            residency, "_ollama_loaded_models", return_value={"qwen3:8b", "qwen2.5:4b-instruct"}
+        ):
+            self.assertTrue(residency.other_model_loaded("qwen3:8b"))
+            self.assertTrue(residency.text_model_loaded("qwen3:8b"))
 
     def test_ollama_bind_address_is_normalized_for_clients(self):
         """OLLAMA_HOST often holds a bind address; 0.0.0.0 is not connectable."""
@@ -1066,7 +1187,9 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertTrue(is_useful_accessibility_text(ui_text))
         remember_accessibility_text(path, ui_text)
 
-        with patch.object(residency, "can_run_ocr", return_value=False), patch(
+        with patch.object(
+            residency, "ocr_unavailable_reason", return_value="CPU: system usage >= 80%"
+        ), patch.object(residency, "can_run_ocr", return_value=False), patch(
             "core.screenshot_enrichment.get_capture_settings",
             return_value={"ocr_enabled": True, "image_embeddings_enabled": False},
         ):
