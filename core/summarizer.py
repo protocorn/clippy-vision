@@ -32,7 +32,7 @@ from core.accessibility_text import is_useful_accessibility_text, strip_ui_chrom
 from core.chat_model import get_chat_model
 from core.llm_gateway import Priority, gateway
 from core.local_embeddings import embed_text
-from core.model_residency import can_load_text, ensure_text_model
+from core.model_residency import background_text_decision
 
 MODEL = get_chat_model()
 INTERVAL_SEC = 60  # wake cadence; session length is controlled below
@@ -504,13 +504,12 @@ def summarizer_loop():
         tick_start = time.time()
         failed = False
         try:
-            if not can_load_text():
-                if ensure_text_model():
-                    print("  [SUMMARIZER] text model warmed — continuing")
-                else:
-                    print("  [SUMMARIZER] deferring — text model unavailable (warm failed or commit pressure)")
-                    time.sleep(INTERVAL_SEC)
-                    continue
+            decision = background_text_decision(caller="summarizer")
+            if not decision.allow:
+                if not decision.intended_skip:
+                    print(f"  [SUMMARIZER] deferring — {decision.skip_reason}")
+                time.sleep(INTERVAL_SEC)
+                continue
 
             events = get_unsummarized_events(time.time() - RAW_LOOKBACK_SECONDS)
             groups = _group_events_by_time_window(events)
