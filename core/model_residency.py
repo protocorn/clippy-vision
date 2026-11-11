@@ -415,7 +415,7 @@ def warm_for_startup() -> dict:
             return _persist(
                 "idle",
                 reason="ollama_unreachable",
-                error="Ollama server is not running",
+                error=f"Ollama server is not running at {base_url()}",
                 available_before_mb=_mb(before),
             )
 

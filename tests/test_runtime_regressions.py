@@ -886,6 +886,21 @@ class RuntimeRegressionTests(unittest.TestCase):
             self.assertTrue(residency.ensure_text_model(force=True))
             warm.assert_called_once()
 
+    def test_startup_warm_error_names_unreachable_ollama_address(self):
+        """A wrong Ollama address is hard to spot unless the error names it (#98)."""
+        from core import model_residency as residency
+
+        address = "http://192.168.1.20:11434"
+        with patch.object(residency, "reap_orphaned_runners", return_value=0), patch.object(
+            residency, "server_reachable", return_value=False
+        ), patch.object(residency, "wait_until_reachable", return_value=False), patch.object(
+            residency, "base_url", return_value=address
+        ):
+            payload = residency.warm_for_startup()
+
+        self.assertEqual(payload["reason"], "ollama_unreachable")
+        self.assertEqual(payload["error"], f"Ollama server is not running at {address}")
+
     def test_ollama_bind_address_is_normalized_for_clients(self):
         """OLLAMA_HOST often holds a bind address; 0.0.0.0 is not connectable."""
         from core import ollama_client
