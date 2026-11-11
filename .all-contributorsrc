@@ -134,6 +134,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "Buzepool",
+      "name": "Buzepool",
+      "avatar_url": "https://github.com/Buzepool.png",
+      "profile": "https://github.com/Buzepool",
+      "contributions": [
+        "code"
+      ]
     }
   ]
 }
