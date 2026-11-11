@@ -32,6 +32,21 @@ Open **Settings → Connect apps**.
 
 **Cursor**, **Claude Desktop**, and **VS Code** have a Connect button. It writes the config on this machine.
 
+#### Ollama address in MCP clients
+
+The Clippy MCP server runs as a child process of the connected app, so it only inherits `OLLAMA_HOST` if that variable is available in the MCP client's environment. For example, macOS apps launched from the Dock or Finder do not inherit shell variables exported in `~/.zshrc`, and Windows apps started before the variable was set may not see it.
+
+The Ollama address is resolved in the following order:
+
+1. `CLIPPY_OLLAMA_URL`, when explicitly set.
+2. A non-default Ollama address saved in Clippy Settings.
+3. `OLLAMA_HOST`, if available in the MCP client's environment.
+4. `http://127.0.0.1:11434`, the default address.
+
+**Recommended:** If you use a non-default Ollama address, save it in Clippy Settings. Clippy writes the address into the generated MCP client configurations, so the MCP server does not need to rely on `OLLAMA_HOST` being inherited.
+
+If you prefer to use `OLLAMA_HOST`, make sure the MCP client app is started from an environment where the variable is set. Exporting it in a terminal does not automatically make it available to a desktop app that is already running.
+
 Step-by-step client guides:
 
 - [Claude Desktop](mcp-clients/claude-desktop.md) — config location, restart, verifying the tools appear
