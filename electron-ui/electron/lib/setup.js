@@ -521,7 +521,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
             },
             'ollama-service': {
                 title: 'Ollama is not running',
-                detail: 'Start Ollama, then continue. Clippy uses it for chat and backend LLM jobs.',
+                detail: `Clippy could not reach Ollama at ${configuredOllamaBaseURL()}. Start Ollama, then continue. Clippy uses it for chat and backend LLM jobs.`,
             },
             models: {
                 title: `Local AI model ${model} is missing`,
