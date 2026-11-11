@@ -143,6 +143,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "BitsRevenge",
+      "name": "BitsRevenge",
+      "avatar_url": "https://github.com/BitsRevenge.png",
+      "profile": "https://github.com/BitsRevenge",
+      "contributions": [
+        "code"
+      ]
     }
   ]
 }
