@@ -114,6 +114,25 @@ _EXACT_NUMERIC_DATETIME_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Clock ranges and "around 6 PM". One trailing AM/PM applies to the whole
+# range ("5:50 to 6:10 PM" is 17:50–18:10, not 05:50). A missing marker is
+# resolved against `now` (most recent past interpretation).
+_CLOCK_RANGE_RE = re.compile(
+    r"\b(?:(?:between|from)\s+)?"
+    r"(?P<h1>\d{1,2})(?::(?P<m1>\d{2}))?(?:\s*(?P<ampm1>a\.?m\.?|p\.?m\.?))?"
+    r"\s*(?P<sep>to|and|[-–—])\s*"
+    r"(?P<h2>\d{1,2})(?::(?P<m2>\d{2}))?(?:\s*(?P<ampm2>a\.?m\.?|p\.?m\.?))?"
+    r"\b",
+    re.IGNORECASE,
+)
+_AROUND_TIME_RE = re.compile(
+    r"\b(?:around|about|approx(?:imately)?)\s+(?:at\s+)?"
+    r"(?P<h>\d{1,2})(?::(?P<m>\d{2}))?(?:\s*(?P<ampm>a\.?m\.?|p\.?m\.?))?"
+    r"(?!\s*(?:days?|weeks?|months?|hours?|minutes?|mins?|years?|seconds?))\b",
+    re.IGNORECASE,
+)
+_AROUND_PAD = timedelta(minutes=30)
+
 
 
 
@@ -398,6 +417,170 @@ def weekend_bounds(now: datetime, modifier: str | None, intent: str | None) -> t
 # ─────────────────────────────────────────────────────────────
 # Main entry point
 # ─────────────────────────────────────────────────────────────
+def _normalize_ampm(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = value.lower().replace(".", "")
+    if cleaned in ("am", "pm"):
+        return cleaned
+    return None
+
+
+def _to_24h(hour: int, minute: int, meridian: str | None) -> tuple[int, int]:
+    if meridian == "pm":
+        return (hour % 12) + 12, minute
+    if meridian == "am":
+        return hour % 12, minute
+    return hour, minute
+
+
+def _parse_clock_parts(hour_s: str, minute_s: str | None, ampm_s: str | None) -> tuple[int, int, str | None] | None:
+    hour = int(hour_s)
+    minute = int(minute_s or 0)
+    meridian = _normalize_ampm(ampm_s)
+    if not 0 <= minute <= 59:
+        return None
+    if meridian:
+        if not 1 <= hour <= 12:
+            return None
+    elif not 0 <= hour <= 23:
+        return None
+    return hour, minute, meridian
+
+
+def _clock_on_day(day: datetime, hour: int, minute: int, meridian: str | None) -> datetime:
+    hour24, minute24 = _to_24h(hour, minute, meridian)
+    return day.replace(hour=hour24, minute=minute24, second=0, microsecond=0)
+
+
+def _anchor_day(query_lower: str, now: datetime) -> datetime:
+    day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if re.search(r"\byesterday\b", query_lower):
+        return day - timedelta(days=1)
+    return day
+
+
+def _range_on_day(
+    day: datetime,
+    h1: int,
+    m1: int,
+    mer1: str | None,
+    h2: int,
+    m2: int,
+    mer2: str | None,
+) -> tuple[datetime, datetime]:
+    start = _clock_on_day(day, h1, m1, mer1)
+    end = _clock_on_day(day, h2, m2, mer2)
+    if start >= end and mer1 and mer1 == mer2:
+        # "11 to 1 PM" — trailing PM applies to 1, start stays AM.
+        flipped = "am" if mer1 == "pm" else "pm"
+        start = _clock_on_day(day, h1, m1, flipped)
+    if start >= end:
+        end = end + timedelta(days=1)
+    return start, end
+
+
+def _guess_untagged_range(
+    day: datetime,
+    h1: int,
+    m1: int,
+    h2: int,
+    m2: int,
+    now: datetime,
+) -> tuple[datetime, datetime] | None:
+    """Pick AM vs PM from the current time when the question has no marker."""
+    if h1 >= 13 or h2 >= 13:
+        return _range_on_day(day, h1, m1, None, h2, m2, None)
+    candidates: list[tuple[datetime, datetime]] = []
+    for mer in ("pm", "am"):
+        start, end = _range_on_day(day, h1, m1, mer, h2, m2, mer)
+        if start <= now:
+            candidates.append((start, end))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    return candidates[0]
+
+
+def _plausible_clock_range(match: re.Match[str]) -> bool:
+    has_minutes = match.group("m1") is not None or match.group("m2") is not None
+    has_ampm = bool(_normalize_ampm(match.group("ampm1")) or _normalize_ampm(match.group("ampm2")))
+    sep = (match.group("sep") or "").lower()
+    text = match.group(0).lower()
+    has_words = bool(re.search(r"\b(between|from|to|and)\b", text))
+    if sep in {"-", "–", "—"} and not has_minutes and not has_ampm:
+        return False
+    return has_minutes or has_ampm or has_words
+
+
+def _resolve_clock_range(query: str, now: datetime) -> tuple[str, datetime, datetime] | None:
+    match = _CLOCK_RANGE_RE.search(query)
+    if not match or not _plausible_clock_range(match):
+        return None
+    start_parts = _parse_clock_parts(match.group("h1"), match.group("m1"), match.group("ampm1"))
+    end_parts = _parse_clock_parts(match.group("h2"), match.group("m2"), match.group("ampm2"))
+    if start_parts is None or end_parts is None:
+        return None
+    h1, m1, mer1 = start_parts
+    h2, m2, mer2 = end_parts
+    if mer1 and not mer2:
+        mer2 = mer1
+    elif mer2 and not mer1:
+        mer1 = mer2
+    day = _anchor_day(query.lower(), now)
+    if mer1 is None and mer2 is None:
+        bounds = _guess_untagged_range(day, h1, m1, h2, m2, now)
+        if bounds is None:
+            return None
+        start, end = bounds
+    else:
+        start, end = _range_on_day(day, h1, m1, mer1, h2, m2, mer2)
+    return match.group(0).strip(), start, end
+
+
+def _guess_untagged_around(
+    day: datetime,
+    hour: int,
+    minute: int,
+    now: datetime,
+) -> tuple[datetime, datetime] | None:
+    if hour >= 13:
+        center = _clock_on_day(day, hour, minute, None)
+        return center - _AROUND_PAD, center + _AROUND_PAD
+    candidates: list[tuple[datetime, datetime, datetime]] = []
+    for mer in ("pm", "am"):
+        center = _clock_on_day(day, hour, minute, mer)
+        start, end = center - _AROUND_PAD, center + _AROUND_PAD
+        if start <= now:
+            candidates.append((start, end, center))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[2], reverse=True)
+    return candidates[0][0], candidates[0][1]
+
+
+def _resolve_around_time(query: str, now: datetime) -> tuple[str, datetime, datetime] | None:
+    match = _AROUND_TIME_RE.search(query)
+    if not match:
+        return None
+    if match.group("ampm") is None and match.group("m") is None:
+        return None
+    parts = _parse_clock_parts(match.group("h"), match.group("m"), match.group("ampm"))
+    if parts is None:
+        return None
+    hour, minute, meridian = parts
+    day = _anchor_day(query.lower(), now)
+    if meridian is None:
+        bounds = _guess_untagged_around(day, hour, minute, now)
+        if bounds is None:
+            return None
+        start, end = bounds
+    else:
+        center = _clock_on_day(day, hour, minute, meridian)
+        start, end = center - _AROUND_PAD, center + _AROUND_PAD
+    return match.group(0).strip(), start, end
+
+
 def _finalize(phrase: str, start: datetime, end: datetime, granularity: str, now: datetime) -> "TemporalRange | None":
     """Single choke point every branch routes through. This is a past/present
     activity assistant — it can never have data about the future, so a range
@@ -441,6 +624,16 @@ def resolve_temporal_range(query: str, now: datetime | None = None) -> TemporalR
     intent = _detect_intent_tense(normalized.lower())
     if intent == "future":
         return None
+
+    clock_range = _resolve_clock_range(normalized, now)
+    if clock_range:
+        phrase, start, end = clock_range
+        return _finalize(phrase, start, end, "clock", now)
+
+    around_time = _resolve_around_time(normalized, now)
+    if around_time:
+        phrase, start, end = around_time
+        return _finalize(phrase, start, end, "clock", now)
 
     exact_match = _EXACT_NUMERIC_DATETIME_RE.search(normalized)
     if exact_match and exact_match.group("hour") is not None:
