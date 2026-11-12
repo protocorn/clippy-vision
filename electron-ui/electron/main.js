@@ -15,6 +15,7 @@ const { createUpdates }   = require('./lib/updates')
 const { createWindows }   = require('./lib/windows')
 const { createSetup }     = require('./lib/setup')
 const { createAppIcons }  = require('./lib/app-icons')
+const { requestMacPermissions } = require('./lib/macos-permissions')
 
 const IS_PACKAGED = app.isPackaged
 if (!IS_PACKAGED) {
@@ -211,31 +212,16 @@ ipcMain.handle('open-provider-auth', (_event, provider) => llmConfig.openProvide
 
 setup.registerSetupIpc(ipcMain, hardware.getHardwareCheck)
 
-function requestMacPermissions() {
-    // Screen capture and password painting both need these prompts. Asking
-    // here is what makes a fresh Mac install able to see the same windows
-    // Windows sees without a settings scavenger hunt.
-    if (process.platform !== 'darwin') return
-    try {
-        if (!systemPreferences.isTrustedAccessibilityClient(false)) {
-            systemPreferences.isTrustedAccessibilityClient(true)
-            console.log('[permissions] macOS Accessibility prompt requested')
-        }
-    } catch (error) {
-        console.log('[permissions] Accessibility check failed:', error.message)
-    }
-    if (systemPreferences.getMediaAccessStatus('screen') === 'granted') return
-    desktopCapturer.getSources({ types: ['screen'] }).then(() => {
-        console.log('[permissions] macOS Screen Recording prompt requested')
-    }).catch((error) => {
-        console.log('[permissions] Screen Recording check failed:', error.message)
-    })
-}
-
 app.whenReady().then(async () => {
     // Windows groups the taskbar entry, tray icon, and notifications by this id.
     if (process.platform === 'win32') app.setAppUserModelId('com.clippyvision.app')
-    requestMacPermissions()
+    await requestMacPermissions({
+        platform: process.platform,
+        env: process.env,
+        systemPreferences,
+        desktopCapturer,
+        log: console.log,
+    })
 
     // Register the global shortcut once Electron owns the application session.
     globalShortcut.register('CommandOrControl+Shift+Space', () => api.toggleCapture())

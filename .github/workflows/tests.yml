@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
 
       - name: Run MCP config path tests
         working-directory: electron-ui
-        run: node --test electron/lib/mcp.test.js electron/lib/setup.test.js
+        run: node --test electron/lib/mcp.test.js electron/lib/setup.test.js electron/lib/macos-permissions.test.js electron/lib/macos-build.test.js
 
   electron-renderer-lint:
     name: Electron renderer lint
@@ -121,7 +121,7 @@ jobs:
           echo "### Test Markers" >> $GITHUB_STEP_SUMMARY
           echo "Tests are skipped based on pytest markers:" >> $GITHUB_STEP_SUMMARY
           echo "- \`@pytest.mark.windows\` - Windows UI Automation tests (skipped on Ubuntu)" >> $GITHUB_STEP_SUMMARY
-          echo "- \`@pytest.mark.macos\` - macOS AX/AppleScript tests (skipped on both)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`@pytest.mark.macos\` - macOS AX/AppleScript tests (skipped on Ubuntu/Windows; Electron path tests run on macos-latest)" >> $GITHUB_STEP_SUMMARY
           echo "- \`@pytest.mark.linux\` - Linux-specific tests (run on Ubuntu)" >> $GITHUB_STEP_SUMMARY
           echo "- \`@pytest.mark.requires_ollama\` - needs Ollama server (skipped)" >> $GITHUB_STEP_SUMMARY
           echo "- \`@pytest.mark.requires_gui\` - needs display/GUI (skipped)" >> $GITHUB_STEP_SUMMARY

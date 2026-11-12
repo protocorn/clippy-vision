@@ -2,7 +2,7 @@
 
 How to run Clippy Vision day to day: capture controls, privacy settings, accessibility behavior, and install troubleshooting.
 
-For connecting an agent, see [mcp.md](mcp.md). For how capture and memory work internally, see [architecture.md](architecture.md).
+For connecting an agent, see [mcp.md](mcp.md). For how capture and memory work internally, see [architecture.md](architecture.md). Unsigned macOS install (Gatekeeper, permissions): [macos.md](macos.md).
 
 ---
 
@@ -126,7 +126,13 @@ The installers are unsigned. Click **More info → Run anyway**.
 
 ### macOS says the app cannot be opened
 
-The disk image is unsigned. Right-click Clippy Vision and choose **Open**, then confirm. Grant Screen Recording and Accessibility when asked.
+The disk image is unsigned. **Right-click** Clippy Vision and choose **Open**, then confirm. A normal double-click is blocked by Gatekeeper. If it still refuses:
+
+```bash
+xattr -cr "/Applications/Clippy Vision.app"
+```
+
+Then right-click → **Open** again. Grant Screen Recording and Accessibility when asked. After Screen Recording is granted, fully quit and reopen Clippy Vision. Current unsigned 2.x packages: Actions artifact **macos-installer** (`ClippyVision-macOS-arm64-*.dmg` or `x64`). Step-by-step: [macos.md](macos.md).
 
 ### Homebrew / dependencies on macOS
 
