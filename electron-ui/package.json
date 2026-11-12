@@ -15,7 +15,7 @@
   },
   "main": "electron/main.js",
   "scripts": {
-    "test": "node --test electron/lib/mcp.test.js electron/lib/setup.test.js",
+    "test": "node --test electron/lib/mcp.test.js electron/lib/setup.test.js electron/lib/managed-python.test.js electron/lib/llm-config.test.js",
     "lint:renderer": "eslint src/js",
     "start": "electron .",
     "dist": "electron-builder --publish never",
