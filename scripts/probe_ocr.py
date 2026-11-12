@@ -145,10 +145,11 @@ def main() -> None:
                     print(f"OCR useful={ocr_useful} chars={len(ocr)}  elapsed={ms:.0f}ms")
                     if not ocr.strip():
                         try:
-                            from core.model_residency import can_run_ocr
+                            from core.model_residency import ocr_unavailable_reason
 
-                            if not can_run_ocr():
-                                print("NOTE: OCR returned empty — memory gate can_run_ocr() is False")
+                            reason = ocr_unavailable_reason()
+                            if reason:
+                                print(f"NOTE: OCR returned empty — skipped ({reason})")
                         except Exception:
                             pass
                     print(_preview(ocr, 500))
