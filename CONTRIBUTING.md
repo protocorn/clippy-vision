@@ -119,7 +119,7 @@ When a change alters setup, connect, privacy, or the timeline, update the matchi
 
 ### Lower-spec machines
 
-Current `main` uses accessibility text + OCR for capture and does not download a vision model in setup. Only the chat text model is required by default (`qwen3:8b`). If that is still heavy on your machine, set a smaller chat model in the setup wizard.
+Current `main` uses accessibility text + OCR for capture and does not download a vision model in setup. Only the chat text model is required by default (`qwen3:8b`). **16 GB of system RAM is recommended** for that default with default Ollama settings. **8 GB is not enough** for `qwen3:8b` over a long session (see the [README requirements](README.md#requirements)). Setting `LLAMA_ARG_CACHE_RAM=0` before `ollama serve` stops Ollama's prompt-cache memory growth; `ollama ps` does not count that cache (it can under-report by up to ~8 GiB). You can pick a smaller chat model in the setup wizard; we do not yet have a verified 8 GB option.
 
 ## Code Style
 
