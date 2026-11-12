@@ -275,7 +275,8 @@ CREATE TABLE IF NOT EXISTS summarizer_skips (
     window_start REAL NOT NULL,
     window_end   REAL NOT NULL,
     reason       TEXT,
-    created_at   REAL NOT NULL
+    created_at   REAL NOT NULL,
+    expires_at   REAL
 )
 """)
 conn.execute(
@@ -283,6 +284,18 @@ conn.execute(
     "ON summarizer_skips(window_start, window_end)"
 )
 conn.commit()
+_heal_skip_expiry = "expires_at" not in _table_columns("summarizer_skips")
+_ensure_column("summarizer_skips", "expires_at", "REAL")
+if _heal_skip_expiry:
+    # Legacy rows were permanent. Soft-expire model / empty-activity skips so
+    # reading windows that were dropped can re-enter the summarizer queue.
+    conn.execute(
+        """UPDATE summarizer_skips
+           SET expires_at = created_at
+           WHERE expires_at IS NULL
+             AND reason IN ('model skipped', 'not real activity')"""
+    )
+    conn.commit()
 
 
 
@@ -613,14 +626,24 @@ def has_recent_content_hash(content_hash: str, within_secs: float) -> bool:
     return row is not None
 
 
-def record_summarizer_skip(window_start: float, window_end: float, reason: str) -> None:
-    """Mark a span as reviewed and not worth a summary, so it leaves the queue."""
+def record_summarizer_skip(
+    window_start: float,
+    window_end: float,
+    reason: str,
+    expires_at: float | None = None,
+) -> None:
+    """Mark a span as reviewed so it leaves the summarizer queue.
+
+    Permanent skips (``expires_at`` is None) stay out forever. Soft skips
+    re-enter the queue after ``expires_at`` so a bad model skip can be retried.
+    """
     if window_end < window_start:
         window_end = window_start
     conn.execute(
-        """INSERT INTO summarizer_skips (window_start, window_end, reason, created_at)
-           VALUES (?, ?, ?, ?)""",
-        (window_start, window_end, reason, time.time()),
+        """INSERT INTO summarizer_skips
+           (window_start, window_end, reason, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (window_start, window_end, reason, time.time(), expires_at),
     )
     conn.commit()
 
@@ -754,6 +777,7 @@ def get_summaries(since: float) -> list[dict]:
 
 def get_unsummarized_events(since: float) -> list[dict]:
     placeholders = ",".join("?" for _ in SUMMARIZER_EVENT_TYPES)
+    now = time.time()
     rows = conn.execute(
         f"""SELECT event_id, session_id, timestamp, event_type,
                   process_name, current_window_title,
@@ -772,9 +796,10 @@ def get_unsummarized_events(since: float) -> list[dict]:
                SELECT 1 FROM summarizer_skips k
                WHERE events.timestamp >= k.window_start
                  AND events.timestamp <= k.window_end
+                 AND (k.expires_at IS NULL OR k.expires_at > ?)
            )
            ORDER BY timestamp ASC""",
-        (since, *SUMMARIZER_EVENT_TYPES),
+        (since, *SUMMARIZER_EVENT_TYPES, now),
     ).fetchall()
     return [
         {

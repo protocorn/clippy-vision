@@ -125,6 +125,36 @@ class SummarizerDedupTests(unittest.TestCase):
             [],
         )
 
+    def test_expired_skip_returns_to_the_summarizer_queue(self):
+        base = 7_100_000.0
+        self._insert_event("wiki", self.capture_sid, base)
+        record_summarizer_skip(
+            base,
+            base,
+            f"{self.prefix}-model skipped",
+            expires_at=time.time() - 1,
+        )
+        unsummarized = get_unsummarized_events(base - 1)
+        self.assertEqual(
+            [event["event_id"] for event in unsummarized if event["event_id"].startswith(self.prefix)],
+            [f"{self.prefix}-wiki"],
+        )
+
+    def test_unexpired_soft_skip_still_hides_the_event(self):
+        base = 7_200_000.0
+        self._insert_event("docs", self.capture_sid, base)
+        record_summarizer_skip(
+            base,
+            base,
+            f"{self.prefix}-model skipped",
+            expires_at=time.time() + 600,
+        )
+        unsummarized = get_unsummarized_events(base - 1)
+        self.assertEqual(
+            [event["event_id"] for event in unsummarized if event["event_id"].startswith(self.prefix)],
+            [],
+        )
+
     def test_group_events_by_time_window_merges_process_session_ids(self):
         base = 3_000_000.0
         events = [
