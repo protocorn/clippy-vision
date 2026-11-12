@@ -65,7 +65,7 @@ If `libfuse2` is missing, you can still run the AppImage without FUSE:
 
 Python is **not** inside the AppImage. Install Ollama and Python 3.11+ first (see Prerequisites), then run the AppImage so the first-run wizard can find them.
 
-Packaged Linux `userData` is `~/.config/Clippy Vision` (Electron `productName`; confirmed in the release workflow). First-run setup writes `setup_complete.json` there. Until that file exists, the backend does not start.
+Packaged Linux `userData` is `~/.config/Clippy Vision` (Electron `productName`; confirmed in the release workflow). First-run setup writes `setup_complete.json` there. Until that file exists, the backend does not start. On AppImage, Connect apps copies the MCP Python sources into a versioned folder there (`mcp-runtime-<content-hash>/`) so Cursor / Claude Desktop / VS Code are not pointed at `/tmp/.mount_*`, which changes every launch. The copy stamp is app version plus a content hash, so a new mount path does not recopy. Stale mount paths in those configs are rewritten on startup. The `clippy-mcp` helper in `userData` is for manual launches; Connect apps spawn `python` + `mcp_server.py` directly.
 
 ---
 
@@ -101,7 +101,7 @@ None of these are bundled. Clippy looks them up with `shutil.which` and degrades
 | Tool | What Clippy uses it for | Without it | Debian/Ubuntu package |
 |------|-------------------------|------------|------------------------|
 | `xdotool` | Window title (`getactivewindow getwindowname`), PID → process name via `psutil`, focused-window geometry for screenshot crop | Title empty, process name `"unknown"`, no focused-window crop. One-time warning: `[platform_support] xdotool not found; window metadata will be limited` | `xdotool` (installed in the AppImage launch job) |
-| `xprintidle` (then `xdotool get_idle_time`) | Idle seconds | Idle detection returns `None`. One-time warning: `[platform_support] Linux idle detection unavailable (xprintidle or xdotool not found)` | `xprintidle` is the usual package for that binary — **not installed in this repo’s CI** |
+| `xprintidle`, then XScreenSaver (`libXss`) | Idle seconds | Idle detection returns `None`. One-time warning: `[platform_support] Linux idle detection unavailable (install xprintidle, or libxss1 for XScreenSaver). Capture will not slow down while you are away.` | `xprintidle` and/or `libxss1` — **not installed in this repo’s CI** |
 | `wl-paste` | Clipboard (tried first) | Falls through to `xclip`, then `xsel` | `wl-clipboard` (provides `wl-paste`; listed in [v2.1.0 notes](release-notes/v2.1.0.md)) |
 | `xclip` | Clipboard if `wl-paste` is absent | Falls through to `xsel` | `xclip` |
 | `xsel` | Clipboard if the others are absent | Clipboard capture returns nothing (no dedicated warning) | `xsel` |
@@ -226,7 +226,7 @@ That snippet is the macOS check from `docs/usage.md` with the Linux `userData` p
 | Wizard: “Python is missing” / python.org link | No usable 3.11+ interpreter | Install Python 3.11+ from [python.org/downloads](https://www.python.org/downloads/). Set `CLIPPY_PYTHON` if it is not `python3` on PATH. The wizard will not `apt-get install` Python. |
 | Wizard: “Ollama is not installed” / install from ollama.com | `ollama` not on PATH | Install with `curl -fsSL https://ollama.com/install.sh \| sh`, or click **Install** in the wizard (needs sudo). See [https://ollama.com/download/linux](https://ollama.com/download/linux) and [usage.md](usage.md#ollama-not-found-after-install). |
 | `[platform_support] xdotool not found; window metadata will be limited` | No `xdotool` | Install `xdotool`. Titles and focused-window crop stay limited until it is on PATH. |
-| `[platform_support] Linux idle detection unavailable (xprintidle or xdotool not found)` | Neither idle helper found | Install `xprintidle` and/or `xdotool`. |
+| `[platform_support] Linux idle detection unavailable (install xprintidle, or libxss1 for XScreenSaver)…` | No `xprintidle` and no working XScreenSaver extension | Install `xprintidle` (or `libxss1`). `xdotool` is not used for idle time. |
 | `[capture] Linux Wayland screenshots are not supported yet…` | Session is Wayland (or no `DISPLAY`) | **Wayland is not supported.** Log in to an X11 session. Do not rely on `grim`. |
 | `[capture] screenshot grab returned a blank frame; skipping` | Grab was empty/all-black | Typical for XWayland-only grabs. Blank frames are not stored. |
 | `[accessibility_text] pyatspi not available; install python3-pyatspi…` | `import pyatspi` failed | `apt install python3-pyatspi`. Venv: `--system-site-packages` or `python3-gi`. |
