@@ -44,6 +44,13 @@ _win_cache_lock = threading.Lock()
 _win_cache_at = 0.0
 _win_cache: WindowMetadata | None = None
 
+# History/AT-SPI URL lookup is cheap when cached and relatively expensive
+# when Chrome's SQLite file has to be copied. Same short snapshot as Windows.
+_LINUX_CACHE_TTL_SECONDS = 0.75
+_linux_cache_lock = threading.Lock()
+_linux_cache_at = 0.0
+_linux_cache: WindowMetadata | None = None
+
 
 def platform_label() -> str:
     if IS_MACOS:
@@ -345,21 +352,45 @@ def _mac_metadata() -> tuple[WindowMetadata | None, tuple[int, int, int, int] | 
 _linux_xdotool_warned = False
 
 
+def _linux_browser_url(process_name: str, title: str) -> str | None:
+    """Read the active tab URL the way Windows reads the address bar.
+
+    AT-SPI first (same control names as UIA), then the window title plus
+    Chrome/Chromium/Firefox session or history data. Missing tools or
+    profiles return None.
+    """
+    try:
+        from core.linux_browser_url import resolve_active_url
+
+        return resolve_active_url(process_name, title)
+    except Exception:
+        return None
+
+
 def _linux_metadata() -> WindowMetadata | None:
     """Best-effort Linux window metadata via xdotool and psutil."""
-    global _linux_xdotool_warned
+    global _linux_xdotool_warned, _linux_cache_at, _linux_cache
+
+    now = time.monotonic()
+    with _linux_cache_lock:
+        if _linux_cache is not None and now - _linux_cache_at < _LINUX_CACHE_TTL_SECONDS:
+            return _linux_cache
     
     # If xdotool is not available, warn once and return empty metadata
     if not shutil.which("xdotool"):
         if not _linux_xdotool_warned:
             _linux_xdotool_warned = True
             print("[platform_support] xdotool not found; window metadata will be limited", file=sys.stderr)
-        return WindowMetadata(
+        result = WindowMetadata(
             timestamp=time.time(),
             current_window_title="",
             active_url=None,
             process_name="unknown",
         )
+        with _linux_cache_lock:
+            _linux_cache = result
+            _linux_cache_at = now
+        return result
     
     title = _run_command(["xdotool", "getactivewindow", "getwindowname"])
     process_name = "unknown"
@@ -374,13 +405,18 @@ def _linux_metadata() -> WindowMetadata | None:
                 process_name = psutil.Process(pid).name()
             except (ValueError, psutil.NoSuchProcess, psutil.AccessDenied):
                 process_name = "unknown"
-    
-    return WindowMetadata(
+
+    active_url = _linux_browser_url(process_name, title or "") if title else None
+    result = WindowMetadata(
         timestamp=time.time(),
         current_window_title=title or "",
-        active_url=None,
+        active_url=active_url,
         process_name=process_name,
     )
+    with _linux_cache_lock:
+        _linux_cache = result
+        _linux_cache_at = now
+    return result
 
 
 def get_window_metadata() -> WindowMetadata | None:
@@ -400,7 +436,8 @@ def get_window_metadata() -> WindowMetadata | None:
             return _mac_cache[0]
 
     # Linux support is intentionally best-effort: xdotool is optional and the
-    # rest of capture should continue even when a desktop lacks it.
+    # rest of capture should continue even when a desktop lacks it. Browser
+    # URLs come from AT-SPI or on-disk history when those are available.
     return _linux_metadata()
 
 

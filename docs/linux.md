@@ -100,13 +100,13 @@ None of these are bundled. Clippy looks them up with `shutil.which` and degrades
 
 | Tool | What Clippy uses it for | Without it | Debian/Ubuntu package |
 |------|-------------------------|------------|------------------------|
-| `xdotool` | Window title (`getactivewindow getwindowname`), PID → process name via `psutil`, focused-window geometry for screenshot crop | Title empty, process name `"unknown"`, no focused-window crop. One-time warning: `[platform_support] xdotool not found; window metadata will be limited` | `xdotool` (installed in the AppImage launch job) |
+| `xdotool` | Window title (`getactivewindow getwindowname`), PID → process name via `psutil`, focused-window geometry for screenshot crop. The title is also used to recover the active tab URL from Chrome/Chromium/Firefox history when the address bar is not exposed. | Title empty, process name `"unknown"`, no focused-window crop, no history-based URL. One-time warning: `[platform_support] xdotool not found; window metadata will be limited` | `xdotool` (installed in the AppImage launch job) |
 | `xprintidle` (then `xdotool get_idle_time`) | Idle seconds | Idle detection returns `None`. One-time warning: `[platform_support] Linux idle detection unavailable (xprintidle or xdotool not found)` | `xprintidle` is the usual package for that binary — **not installed in this repo’s CI** |
 | `wl-paste` | Clipboard (tried first) | Falls through to `xclip`, then `xsel` | `wl-clipboard` (provides `wl-paste`; listed in [v2.1.0 notes](release-notes/v2.1.0.md)) |
 | `xclip` | Clipboard if `wl-paste` is absent | Falls through to `xsel` | `xclip` |
 | `xsel` | Clipboard if the others are absent | Clipboard capture returns nothing (no dedicated warning) | `xsel` |
 | `grim` | Code may call `grim -` if the session is detected as Wayland | **Wayland is not supported.** Do not treat `grim` as a supported workaround. Log in to X11. | `grim` — present in code; **unsupported** as a user path |
-| `python3-pyatspi` | AT-SPI accessible text | Accessibility text is empty. One-time warning tells you to install `python3-pyatspi` | `python3-pyatspi` (`requirements.txt` comment: `apt install python3-pyatspi`). **CI-only** (mocked unit tests). Not tried on a real desktop. |
+| `python3-pyatspi` | AT-SPI accessible text, and the Chrome/Firefox address bar when the browser exposes it (same control names as Windows UI Automation) | Accessibility text is empty. Address-bar URL capture falls back to the window title plus the browser's History / `places.sqlite` files. One-time warning tells you to install `python3-pyatspi` | `python3-pyatspi` (`requirements.txt` comment: `apt install python3-pyatspi`). **CI-only** (mocked unit tests). Not tried on a real desktop. |
 
 `xclip`, `xsel`, `wl-clipboard`, `grim`, and `xprintidle` are **not** installed by the pytest or AppImage jobs except where the table says otherwise. Exact `apt-get` lines for a personal desktop are **not verified yet**.
 

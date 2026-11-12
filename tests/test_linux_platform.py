@@ -130,6 +130,7 @@ class TestLinuxMetadata(unittest.TestCase):
             assert metadata is not None
             assert metadata["current_window_title"] == "Firefox"
             assert metadata["process_name"] == "firefox"
+            # Bare browser name, no page title — URL lookup degrades to None.
             assert metadata["active_url"] is None
 
     @pytest.mark.linux
