@@ -50,6 +50,7 @@ If you prefer to use `OLLAMA_HOST`, make sure the MCP client app is started from
 Step-by-step client guides:
 
 - [Claude Desktop](mcp-clients/claude-desktop.md) — config location, restart, verifying the tools appear
+- [Cursor](mcp-clients/cursor.md) — one-click connection, global and project-specific configuration, and MCP tool verification
 - [VS Code](mcp-clients/vscode.md) — one-click connection, user configuration, and Copilot Chat tool verification
 - [LM Studio](mcp-clients/lm-studio.md) — local model setup, MCP configuration, and tool-call verification
 
