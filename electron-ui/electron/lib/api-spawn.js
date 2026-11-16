@@ -4,7 +4,7 @@ const fs        = require('fs')
 const http      = require('http')
 const net       = require('net')
 
-function createApiSpawn({ paths, llmConfig, state }) {
+function createApiSpawn({ paths, llmConfig, state, spawnProcess = spawn }) {
     const {
         ROOT,
         DATA_DIR,
@@ -47,7 +47,7 @@ function createApiSpawn({ paths, llmConfig, state }) {
     // same paths whether Electron was launched from Finder, a shell, or a DMG.
     function spawnHidden(cmd, args, opts = {}) {
         const { env: envExtra, ...rest } = opts
-        return spawn(cmd, args, {
+        return spawnProcess(cmd, args, {
             windowsHide: true,
             ...rest,
             env: buildPythonEnv(envExtra),
@@ -62,7 +62,7 @@ function createApiSpawn({ paths, llmConfig, state }) {
             let out = '', err = ''
             proc.stdout.on('data', d => { out += d.toString() })
             proc.stderr.on('data', d => { err += d.toString() })
-            proc.on('exit', code => resolve({ code: code === null ? 1 : code, stdout: out.trim(), stderr: err.trim() }))
+            proc.on('close', code => resolve({ code: code === null ? 1 : code, stdout: out.trim(), stderr: err.trim() }))
             proc.on('error', e => resolve({ code: 1, stdout: '', stderr: e.message }))
         })
     }
