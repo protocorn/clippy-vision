@@ -202,10 +202,18 @@ test('win32 without winget shows a python.org link', () => {
     assert.equal(installCommandToRun(plan), null)
 })
 
-test('darwin Ollama known paths include Homebrew prefixes', () => {
+test('darwin Ollama known paths include Homebrew prefixes and the official app bundle', () => {
     const paths = knownOllamaInstallPaths({ platform: 'darwin', home: '/Users/ada' })
     assert.ok(paths.includes('/opt/homebrew/bin/ollama'))
     assert.ok(paths.includes('/usr/local/bin/ollama'))
+    assert.ok(paths.includes('/Applications/Ollama.app/Contents/Resources/ollama'))
+})
+
+test('darwin Python known paths include python.org framework installs', () => {
+    const paths = knownPythonInstallPaths({ platform: 'darwin', home: '/Users/ada' })
+    assert.ok(paths.includes('/opt/homebrew/bin/python3'))
+    assert.ok(paths.includes('/Library/Frameworks/Python.framework/Versions/3.12/bin/python3'))
+    assert.ok(paths.includes('/Library/Frameworks/Python.framework/Versions/3.11/bin/python3'))
 })
 
 test('linux Ollama known paths include /usr/local/bin/ollama', () => {

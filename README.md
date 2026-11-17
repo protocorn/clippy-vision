@@ -23,7 +23,7 @@ Ask in a connected MCP client, for example:
 
 ## Download
 
-**Windows is tested for 2.0.** macOS validation is pending, so macOS 2.0 installers are not included yet. macOS downloads below are the previous release (**v1.3.1**). Linux is **experimental and X11 only**; an unsigned x86_64 AppImage is built in CI (see [docs/linux.md](docs/linux.md)). The README describes current `main`; some installer features differ from 1.3.1.
+**Windows is tested for 2.0.** Unsigned **macOS 2.x** Apple Silicon and Intel builds (`dmg` and `zip`) are produced in CI on GitHub-hosted macOS runners; they are not notarized. Published GitHub Release macOS downloads below remain the previous release (**v1.3.1**) until a maintainer attaches a current draft ([issue #55](https://github.com/protocorn/clippy-vision/issues/55)). Linux is **experimental and X11 only**; an unsigned x86_64 AppImage is built in CI (see [docs/linux.md](docs/linux.md)). The README describes current `main`; some installer features differ from 1.3.1. Install notes for the unsigned Mac app: [docs/macos.md](docs/macos.md).
 
 <p align="center">
   <a href="https://github.com/protocorn/clippy-vision/releases/download/v2.0.0/ClippyVision-Windows-Setup-2.0.0.exe"><img src="https://img.shields.io/badge/Download-Windows%20v2.0.0-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows v2.0.0" /></a>
@@ -43,7 +43,7 @@ Ask in a connected MCP client, for example:
   <a href="https://github.com/protocorn/clippy-vision/releases/latest"><img src="https://img.shields.io/github/release-date/protocorn/clippy-vision?style=flat-square&label=latest%20release" alt="Latest release date" /></a>
 </p>
 
-The installers are unsigned: on Windows choose **More info → Run anyway**, and on macOS right-click → **Open** the first time. First run needs internet for dependencies and for the chat model you pick in setup (for example `qwen3:8b` is ~4.7 GB).
+The installers are unsigned: on Windows choose **More info → Run anyway**. On macOS, Gatekeeper blocks a normal double-click; **right-click Clippy Vision → Open** the first time (then confirm Open). If it still refuses, run `xattr -cr "/Applications/Clippy Vision.app"` and right-click → Open again. Grant **Screen Recording** and **Accessibility** when asked; after Screen Recording, fully quit and reopen the app. Current unsigned 2.x Mac packages come from the Actions **macos-installer** artifact (`ClippyVision-macOS-arm64-*.dmg` / `x64`). Step-by-step: [docs/macos.md](docs/macos.md). First run needs internet for dependencies and for the chat model you pick in setup (for example `qwen3:8b` is ~4.7 GB).
 
 **Trying Clippy?** [Share feedback (5 min)](https://docs.google.com/forms/d/e/1FAIpQLScqsgeWGLdUS_Ba0Me0LPQH8QRrwnIgGiGGHwLElVuqIpfcxQ/viewform).
 
@@ -57,7 +57,7 @@ The installers are unsigned: on Windows choose **More info → Run anyway**, and
 | Free disk | 8 GB | 10 GB+ |
 | **Python runtime** | System Python 3.11+ on PATH (not bundled). Windows auto-install uses 3.11; CI uses 3.12 | **Python 3.12** |
 
-**Python is not bundled** in the Windows installer or Linux AppImage. `requirements.txt` does not pin a Python version. The packaged app runs `CLIPPY_PYTHON` if set, otherwise `python3` (Linux/macOS) or `python` (Windows) from PATH (`electron-ui/electron/lib/paths.js`). CI unit tests and the release dry-run install Python 3.12. The setup wizard parses `python --version` and requires **Python 3.11+**.
+**Python is not bundled** in the Windows installer, macOS dmg/zip, or Linux AppImage. `requirements.txt` does not pin a Python version. The packaged app runs `CLIPPY_PYTHON` if set, otherwise `python3` (Linux/macOS) or `python` (Windows) from PATH (`electron-ui/electron/lib/paths.js`). CI unit tests and the release dry-run install Python 3.12. The setup wizard parses `python --version` and requires **Python 3.11+**.
 
 **When Python is missing, the setup wizard (`electron-ui/electron/lib/setup.js`) does this:**
 - It parses `--version` on that interpreter and requires Python 3.11+. Preflight text says "Clippy needs Python 3.11+ on PATH." It then re-resolves known install locations before declaring failure.
@@ -74,6 +74,8 @@ $env:CLIPPY_PYTHON = "C:\path\to\python.exe"
 ```bash
 export CLIPPY_PYTHON=/path/to/venv/bin/python3
 ```
+
+On macOS, screenshots use `mss`. Window titles use AppleScript; password painting uses Accessibility. CI builds unsigned arm64 and x64 dmg/zip and launch-tests the runner-native zip with permissions skipped. **CI does not prove Screen Recording, Accessibility, or a real Mac desktop.** Install, Gatekeeper, and permission steps: [docs/macos.md](docs/macos.md).
 
 Linux support is **experimental and X11 only. Wayland is not supported.** On X11, screenshots use `mss` (optional crop via `xdotool`). Window titles use `xdotool`, clipboard uses `wl-paste`/`xclip`/`xsel`. AT-SPI accessibility text is implemented; it is covered by CI unit tests, not a real desktop. An unsigned Linux AppImage is built in CI. Install and run steps: [docs/linux.md](docs/linux.md).
 
@@ -125,6 +127,7 @@ Full guide (retention defaults and detailed behavior): [docs/usage.md](docs/usag
 | Guide | Contents |
 |-------|----------|
 | [docs/usage.md](docs/usage.md) | Capture controls, privacy, accessibility, install troubleshooting |
+| [docs/macos.md](docs/macos.md) | Unsigned macOS install (Gatekeeper, Screen Recording / Accessibility, Python, Ollama, CI limits) |
 | [docs/linux.md](docs/linux.md) | Experimental Linux install and run (X11 only; AppImage, Python, capture tools) |
 | [docs/mcp.md](docs/mcp.md) | Supported clients, Copy JSON, tool reference, access permissions |
 | [docs/mcp-clients/claude-desktop.md](docs/mcp-clients/claude-desktop.md) | Step-by-step Claude Desktop setup: config location, restart, verification |
