@@ -2,10 +2,11 @@ import json
 import math
 import re
 import time
+from datetime import datetime
 from difflib import get_close_matches
 
 from agent.helpers.keywords import keywords_from_query
-from agent.helpers.time_resolver import resolve_temporal_range
+from agent.helpers.time_resolver import TemporalRange, resolve_temporal_range
 from core.chat_model import get_chat_model
 from core.llm_gateway import Priority, gateway
 from core.local_embeddings import embed_text, embed_texts
@@ -86,6 +87,7 @@ Rules:
 - SELECT summary, active_task, entities, datetime(window_start,'unixepoch','localtime') as time
 - ALWAYS include: AND summary IS NOT NULL AND summary != '' — to skip unprocessed sessions.
 - Always add a time-window WHERE clause based on the question.
+- Clock times and ranges ("around 6 PM", "5:50 to 6:10 PM"): if the user message includes a Resolved time window, copy those Unix timestamp literals into the WHERE clause. Never add hours to start of day. Never emit empty parentheses.
 - For count/how-many questions, search by topic first: WHERE summary LIKE '%<topic>%' OR active_task LIKE '%<topic>%' OR entities LIKE '%<topic>%', then use COUNT(*).
 - ORDER BY window_start ASC. LIMIT 20.
 - Output only valid SQLite SELECT SQL in JSON.
@@ -142,6 +144,7 @@ Rules:
   Only filter by event_type when the question explicitly asks for a specific event kind (e.g. "what did I paste",
   "what URLs did I visit"). Invented event_type values will return zero rows — always use LIKE on text columns instead.
 - Prefer interesting=1 rows unless the question requires all events.
+- Clock times and ranges ("around 6 PM", "5:50 to 6:10 PM"): if the user message includes a Resolved time window, copy those Unix timestamp literals into the WHERE clause. Never add hours to start of day. Never emit empty parentheses.
 - For URL, browser, or app-switch questions (e.g. "what sites did I visit", "what did I open", "what link") —
   do NOT filter by interesting — include all events so brief context switches are not missed.
 - LIMIT 20.
@@ -323,6 +326,69 @@ def _sanitize_for_fts(keyword: str) -> str:
     return f'"{clean}"' if clean else ""
 
 
+def _resolved_time_hint(question: str, time_column: str) -> str:
+    """Give the SQL model already-resolved timestamps so it does not invent AM/PM math."""
+    temporal = resolve_temporal_range(question)
+    if temporal is None:
+        return ""
+    start = datetime.fromtimestamp(temporal.start_ts)
+    end = datetime.fromtimestamp(temporal.end_ts)
+    return (
+        "\n\nResolved time window (use these Unix timestamps verbatim; "
+        "do not recompute AM/PM or add hours to start of day):\n"
+        f"  {time_column} >= {int(temporal.start_ts)}  "
+        f"# {start.strftime('%Y-%m-%d %H:%M')} local\n"
+        f"  {time_column} < {int(temporal.end_ts)}  "
+        f"# {end.strftime('%Y-%m-%d %H:%M')} local"
+    )
+
+
+def _format_event_tuple(row) -> str:
+    (
+        ts, event_type, process_name, window_title, active_url,
+        summary, payload, ocr, activity,
+    ) = row
+    parts = [
+        f"time: {time.strftime('%Y-%m-%d %H:%M', time.localtime(ts))}",
+        f"event_type: {event_type}",
+    ]
+    if process_name:
+        parts.append(f"process_name: {process_name}")
+    if window_title:
+        parts.append(f"current_window_title: {window_title}")
+    if active_url:
+        parts.append(f"active_url: {active_url}")
+    if summary:
+        parts.append(f"summary: {summary}")
+    if payload:
+        parts.append(f"payload: {_format_field_value('payload', payload)}")
+    if activity:
+        parts.append(f"vision_activity: {activity}")
+    if ocr:
+        parts.append(f"vision_ocr_text: {_format_field_value('vision_ocr_text', ocr)}")
+    return "\n".join(parts)
+
+
+def _direct_event_time_search(temporal: TemporalRange) -> tuple[list, int] | None:
+    """Deterministic event listing for clock ranges the LLM used to treat as AM."""
+    if temporal.granularity not in {"clock", "instant"}:
+        return None
+    sql = """
+        SELECT timestamp, event_type, process_name, current_window_title,
+               active_url, summary, payload, vision_ocr_text, vision_activity
+        FROM events
+        WHERE timestamp >= ? AND timestamp < ?
+        ORDER BY timestamp ASC
+        LIMIT 40
+    """
+    try:
+        rows = conn.execute(sql, (temporal.start_ts, temporal.end_ts)).fetchall()
+    except Exception as exc:
+        print(f"[clock:events] unavailable: {exc}")
+        return None
+    return [_format_event_tuple(row) for row in rows[:MAX_RESULT_ROWS]], len(rows)
+
+
 def _fts_event_search(question: str) -> tuple[list, int] | None:
     """Deterministic keyword path over events_fts — no LLM SQL required.
 
@@ -375,31 +441,58 @@ def _fts_event_search(question: str) -> tuple[list, int] | None:
     if not rows:
         return [], 0
 
-    result_text = []
-    for row in rows[:MAX_RESULT_ROWS]:
-        (
-            ts, event_type, process_name, window_title, active_url,
-            summary, payload, ocr, activity,
-        ) = row
-        parts = [
-            f"time: {time.strftime('%Y-%m-%d %H:%M', time.localtime(ts))}",
-            f"event_type: {event_type}",
-        ]
-        if process_name:
-            parts.append(f"process_name: {process_name}")
-        if window_title:
-            parts.append(f"current_window_title: {window_title}")
-        if active_url:
-            parts.append(f"active_url: {active_url}")
-        if summary:
-            parts.append(f"summary: {summary}")
-        if payload:
-            parts.append(f"payload: {_format_field_value('payload', payload)}")
-        if activity:
-            parts.append(f"vision_activity: {activity}")
-        if ocr:
-            parts.append(f"vision_ocr_text: {_format_field_value('vision_ocr_text', ocr)}")
-        result_text.append("\n".join(parts))
+    result_text = [_format_event_tuple(row) for row in rows[:MAX_RESULT_ROWS]]
+    return result_text, len(rows)
+
+
+def _format_session_tuple(ws, summary, active_task, entities) -> str:
+    ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(ws))
+    parts = [f"time: {ts}", f"summary: {summary}"]
+    if active_task:
+        parts.append(f"active_task: {active_task}")
+    if entities:
+        parts.append(f"entities: {entities}")
+    return "\n".join(parts)
+
+
+def _fts_session_search(question: str) -> tuple[list, int] | None:
+    """Keyword / time-window path over sessions_fts — used when SQL fails or is empty."""
+    keywords = keywords_from_query(question)
+    tokens = [_sanitize_for_fts(kw) for kw in keywords[:8]]
+    tokens = [t for t in tokens if t]
+    temporal = resolve_temporal_range(question)
+    if not tokens and temporal is None:
+        return None
+
+    where = ["s.summary IS NOT NULL", "s.summary != ''"]
+    params: list = []
+    if tokens:
+        where.append("sessions_fts MATCH ?")
+        params.append(" OR ".join(tokens))
+    if temporal is not None:
+        where.append("s.window_start >= ? AND s.window_start < ?")
+        params.extend([temporal.start_ts, temporal.end_ts])
+
+    if tokens:
+        from_sql = "FROM sessions_fts JOIN sessions s ON sessions_fts.rowid = s.rowid"
+        order_sql = "sessions_fts.rank, s.window_start DESC"
+    else:
+        from_sql = "FROM sessions s"
+        order_sql = "s.window_start DESC"
+
+    sql = f"""
+        SELECT s.window_start, s.summary, s.active_task, s.entities
+        {from_sql}
+        WHERE {' AND '.join(where)}
+        ORDER BY {order_sql}
+        LIMIT 40
+    """
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    except Exception as exc:
+        print(f"[fts:sessions] unavailable: {exc}")
+        return None
+    result_text = [_format_session_tuple(*row) for row in rows[:MAX_RESULT_ROWS]]
     return result_text, len(rows)
 
 
@@ -523,15 +616,10 @@ def _semantic_sessions(question: str, date_sql_filter: str, limit: int = MAX_RES
     scored.sort(key=lambda x: x[0], reverse=True)
     top = scored[:limit]
 
-    result_text = []
-    for score, summary_id, ws, summary, active_task, entities in top:
-        ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(ws))
-        parts = [f"time: {ts}", f"summary: {summary}"]
-        if active_task:
-            parts.append(f"active_task: {active_task}")
-        if entities:
-            parts.append(f"entities: {entities}")
-        result_text.append("\n".join(parts))
+    result_text = [
+        _format_session_tuple(ws, summary, active_task, entities)
+        for _score, _summary_id, ws, summary, active_task, entities in top
+    ]
 
     return result_text, total
 
@@ -612,38 +700,49 @@ def search_sessions(question: str) -> str:
 
     now_ts  = int(time.time())
     now_str = time.strftime("%A %B %d, %Y at %H:%M (local time)")
-    user_content = f"Current timestamp: {now_ts} ({now_str})\n\nQuestion: {question}"
+    user_content = (
+        f"Current timestamp: {now_ts} ({now_str})\n\nQuestion: {question}"
+        + _resolved_time_hint(question, "window_start")
+    )
 
     sql = _generate_sql(_SESSIONS_PROMPT, user_content)
+    rows: list = []
+    total = 0
+    structured_failed = False
     if not sql:
-        return (
-            "search_sessions: could not generate a SQL query.\n"
-            "→ Try search_events for granular event-level detail."
-        )
-    print(f"[sql:sessions] {sql}")
-    if not _is_safe(sql):
-        return "search_sessions: unsafe query blocked."
-
-
-    # Fix 3: use semantic re-ranking when we can extract a date filter
-    where_fragment = _extract_where_fragment(sql)
-    if where_fragment:
-        try:
-            rows, total = _semantic_sessions(question, where_fragment)
-        except Exception:
-
-            # Fall back to plain SQL on any embedding failure
-            try:
-                rows, total = _run_sql(sql)
-            except Exception as e:
-                return f"search_sessions: SQL error — {e}\n→ Try search_events instead."
+        structured_failed = True
     else:
+        print(f"[sql:sessions] {sql}")
+        if not _is_safe(sql):
+            return "search_sessions: unsafe query blocked."
+
+        # Fix 3: use semantic re-ranking when we can extract a date filter
+        where_fragment = _extract_where_fragment(sql)
         try:
-            rows, total = _run_sql(sql)
+            if where_fragment:
+                try:
+                    rows, total = _semantic_sessions(question, where_fragment)
+                except Exception:
+                    # Fall back to plain SQL on any embedding failure
+                    rows, total = _run_sql(sql)
+            else:
+                rows, total = _run_sql(sql)
         except Exception as e:
-            return f"search_sessions: SQL error — {e}\n→ Try search_events instead."
+            print(f"[sql:sessions] error: {e}")
+            structured_failed = True
+            rows, total = [], 0
+
+    if structured_failed or not _rows_are_useful(rows):
+        fts = _fts_session_search(question)
+        if fts is not None and _rows_are_useful(fts[0]):
+            rows, total = fts
 
     if not _rows_are_useful(rows):
+        if structured_failed and not sql:
+            return (
+                "search_sessions: could not generate a SQL query.\n"
+                "→ Try search_events for granular event-level detail."
+            )
         return (
             "search_sessions: no matching session summaries found.\n"
             "Sessions store broad topic summaries — if you need specific "
@@ -710,9 +809,31 @@ def search_events(question: str) -> str:
     except Exception as exc:
         print(f"[fts] event search unavailable; using SQL fallback: {exc}")
 
+    try:
+        temporal = resolve_temporal_range(question)
+        if temporal is not None:
+            direct = _direct_event_time_search(temporal)
+            if direct is not None:
+                rows, total = direct
+                if rows and _rows_are_useful(rows):
+                    shown = len(rows)
+                    if total > shown:
+                        header = (
+                            f"search_events results (showing {shown} most relevant of {total} total"
+                            f" — refine your query or broaden the time window to see more):"
+                        )
+                    else:
+                        header = f"search_events results ({shown} events matched):"
+                    return _truncate_result(header + "\n\n" + "\n---\n".join(rows))
+    except Exception as exc:
+        print(f"[clock] event time-window search unavailable; using SQL fallback: {exc}")
+
     now_ts  = int(time.time())
     now_str = time.strftime("%A %B %d, %Y at %H:%M (local time)")
-    user_content = f"Current timestamp: {now_ts} ({now_str})\n\nQuestion: {question}"
+    user_content = (
+        f"Current timestamp: {now_ts} ({now_str})\n\nQuestion: {question}"
+        + _resolved_time_hint(question, "timestamp")
+    )
 
     outcome = _execute_event_sql(question, user_content)
     if isinstance(outcome, str):
