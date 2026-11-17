@@ -16,6 +16,7 @@ from core.ollama_client import (
     base_url,
     describe_http_error,
 )
+from core.ollama_options import apply_inference_options
 
 OLLAMA_URL = f"{base_url()}/api/chat"
 
@@ -63,6 +64,35 @@ class Job:
         self.waiting_for_background = False
         self.cancel_requested = threading.Event()
         self.response = None
+
+
+def _chat_payload(
+    messages,
+    model,
+    *,
+    tools=None,
+    format=None,
+    options=None,
+    think=None,
+    keep_alive=None,
+    stream=False,
+) -> dict:
+    """Build an Ollama /api/chat body with an explicit ``num_ctx``."""
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": stream,
+        "keep_alive": keep_alive_for(model) if keep_alive is None else keep_alive,
+    }
+    if tools is not None:
+        payload["tools"] = tools
+    if format is not None:
+        payload["format"] = format
+    if options is not None:
+        payload["options"] = options
+    if think is not None:
+        payload["think"] = think
+    return apply_inference_options(payload)
 
 
 class LLMGateway:
@@ -271,21 +301,10 @@ class LLMGateway:
                 time.sleep(_BG_INTER_JOB_SLEEP)
 
     def chat(self, messages, model, *, priority=Priority.FOREGROUND, tools=None, format=None, options=None, think=None, timeout=180, keep_alive=None) -> dict | None:
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": False,
-            "keep_alive": keep_alive_for(model) if keep_alive is None else keep_alive,
-        }
-        if tools is not None:
-            payload["tools"] = tools
-        if format is not None:
-            payload["format"] = format
-        if options is not None:
-            payload["options"] = options
-        if think is not None:
-            payload["think"] = think
-
+        payload = _chat_payload(
+            messages, model, tools=tools, format=format, options=options,
+            think=think, keep_alive=keep_alive, stream=False,
+        )
         job = Job(OLLAMA_URL, payload, timeout)
         self._enqueue(job, priority)
 
@@ -296,20 +315,10 @@ class LLMGateway:
 
     def chat_stream(self, messages, model, *, priority=Priority.FOREGROUND, tools=None, format=None, options=None, think=None, timeout=180, keep_alive=None):
         """Yield Ollama NDJSON stream chunks for one chat call (thinking + content deltas)."""
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": True,
-            "keep_alive": keep_alive_for(model) if keep_alive is None else keep_alive,
-        }
-        if tools is not None:
-            payload["tools"] = tools
-        if format is not None:
-            payload["format"] = format
-        if options is not None:
-            payload["options"] = options
-        if think is not None:
-            payload["think"] = think
+        payload = _chat_payload(
+            messages, model, tools=tools, format=format, options=options,
+            think=think, keep_alive=keep_alive, stream=True,
+        )
 
         job = Job(OLLAMA_URL, payload, timeout, stream=True)
         self._enqueue(job, priority)

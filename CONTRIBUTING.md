@@ -119,7 +119,7 @@ When a change alters setup, connect, privacy, or the timeline, update the matchi
 
 ### Lower-spec machines
 
-Current `main` uses accessibility text + OCR for capture and does not download a vision model in setup. Only the chat text model is required by default (`qwen3:8b`). If that is still heavy on your machine, set a smaller chat model in the setup wizard.
+Current `main` uses accessibility text + OCR for capture and does not download a vision model in setup. Only the chat text model is required by default (`qwen3:8b`). Clippy asks Ollama for an 8192-token context, which adds about 1 GB of KV cache on the 8b model versus Ollama’s 2048 default. If that is still heavy on your machine, set a smaller chat model (`llama3.2:3b`) in the setup wizard.
 
 ## Code Style
 
