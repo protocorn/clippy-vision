@@ -104,5 +104,7 @@ Screenshots default to 1 day; high-signal frames (interesting flag, interest sco
 
 | Model | Size | Purpose |
 |-------|------|---------|
-| The Ollama model you pick (suggested `qwen3:8b`) | about 4.7 GB for `qwen3:8b` | Classification, session summaries, and long-term memory |
+| The Ollama model you pick (suggested `qwen3:8b`) | about 4.7 GB download for `qwen3:8b` | Classification, session summaries, and long-term memory |
 | `all-MiniLM-L6-v2` | about 90 MB, downloaded from Hugging Face on first run | Optional local semantic retrieval. It is not bundled in the installer |
+
+The 4.7 GB figure is the `qwen3:8b` download, not runtime RAM. **16 GB of system RAM is recommended** for that default with default Ollama settings; **8 GB is not enough** over a long session. Setting `LLAMA_ARG_CACHE_RAM=0` before `ollama serve` stops Ollama's prompt-cache memory growth; `ollama ps` does not count that cache (it can under-report by up to ~8 GiB). Measured runtime numbers: [README requirements](../README.md#requirements).
