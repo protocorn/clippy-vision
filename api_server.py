@@ -43,6 +43,7 @@ from core.platform_support import lower_process_priority, platform_label
 from core.privacy_settings import list_privacy_targets, set_privacy_enabled
 from core.rag import start_event_indexer, stop_event_indexer
 from core.screenshot_search import search_screenshots
+from core.first_answer import get_first_answer_prompt
 from core.storage import (
     clear_data,
     export_data,
@@ -345,6 +346,11 @@ def screenshot_file(filename: str):
         raise HTTPException(status_code=404, detail="Screenshot not found.")
     return FileResponse(candidate, media_type="image/jpeg")
 
+
+
+@app.get("/timeline/first-answer")
+def timeline_first_answer():
+    return get_first_answer_prompt()
 
 
 @app.get("/timeline/sessions")

@@ -106,6 +106,8 @@ On macOS, Screen Recording and Accessibility permissions are required for screen
 
 There is no in-app chat. Connect an MCP client under **Settings → Connect apps**, then ask in that app. The agent chooses which Clippy tool to call.
 
+After capture has a first session summary, or about 30 minutes of recorded activity, the session timeline shows one small suggested question. Copy it into Cursor, Claude, or VS Code. If no app is connected yet, the card links to **Connect apps**. Dismiss hides it for good. The wording is built on this computer from the latest task or app name; it is not sent anywhere.
+
 See [mcp.md](mcp.md) for supported clients, Copy JSON instructions, and the tool list.
 
 ---

@@ -16,6 +16,7 @@ import {
   addWatchAppFromInput, saveRetention, saveModelSetting, clearAllData,
 } from './settings.js'
 import { openTimeline, loadTimelineSessions, closeTimelineDetail } from './timeline.js'
+import { wireFirstAnswerPrompt } from './first-answer.js'
 import { captureRuntimeLabel, setCaptureUI } from './capture-ui.js'
 
 const WAIT_COPY = [
@@ -177,6 +178,7 @@ function wireUi() {
       timelineHint.hidden = true
     }
   } catch (_) { /* ignore */ }
+  wireFirstAnswerPrompt()
   on(timelineDetailBack, 'click', closeTimelineDetail)
 }
 

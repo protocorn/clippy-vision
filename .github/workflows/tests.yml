@@ -25,7 +25,7 @@ jobs:
 
       - name: Run MCP config path tests
         working-directory: electron-ui
-        run: node --test electron/lib/mcp.test.js electron/lib/setup.test.js
+        run: node --test electron/lib/mcp.test.js electron/lib/setup.test.js electron/lib/first-answer-prompt.test.js
 
   electron-renderer-lint:
     name: Electron renderer lint
