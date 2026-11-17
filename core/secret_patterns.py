@@ -372,9 +372,13 @@ def paint_secret_text(img: Image.Image, screen_text: str = "") -> int:
         increment("ocr.skipped_accessibility_paint")
         return 0
     from core.app_settings import get_capture_settings
-    from core.model_residency import can_run_ocr
+    from core.model_residency import can_run_ocr, ocr_unavailable_reason
 
-    if not get_capture_settings().get("ocr_enabled", True) or not can_run_ocr():
+    if not get_capture_settings().get("ocr_enabled", True):
+        return 0
+    if not can_run_ocr():
+        reason = ocr_unavailable_reason() or "pressure gate"
+        print(f"[ocr] skipped secret paint — {reason}")
         return 0
     from core.ocr import ocr_line_boxes
 
