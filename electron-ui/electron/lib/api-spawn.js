@@ -202,6 +202,7 @@ function createApiSpawn({ paths, llmConfig, state }) {
         const proc = spawnHidden(pythonCommand(), [API_SCRIPT], {
             cwd: ROOT,
             env: {
+                PYTHONUNBUFFERED: '1',
                 CLIPPY_API_PORT: String(state.apiPort),
                 CLIPPY_CHAT_MODEL: String(readLLMConfig().chat_model || '').trim(),
             },
