@@ -114,6 +114,8 @@ api_process.json
 desktop_settings.json
 release_check.json
 data/
+python-venv/
+python-runtime/
 
 
 # ============================================================
