@@ -741,7 +741,7 @@
 
   <div class="screen active" id="screen-hardware">
     <div class="screen-scroll">
-    <p class="tagline">Choose where Clippy should run AI. You can change this later in Settings.</p>
+    <p class="tagline">Clippy downloads qwen3:8b for session summaries. Pick llama3.2:3b only on low-memory machines — it is less accurate. You can change it later in Settings.</p>
 
     <div id="hw-loading" class="hw-loading">Checking your system…</div>
 
@@ -811,8 +811,11 @@
             </div>
             <div class="model-suggest-label">Suggestions — click one, or type any Ollama model tag</div>
             <div class="model-chips" id="model-chips" role="group" aria-label="Suggested local AI models"></div>
+            <p class="note" id="model-accuracy-note" hidden>
+              llama3.2:3b is for low-memory machines. It is less accurate than the default qwen3:8b on session summaries.
+            </p>
             <label id="llm-cli-command-field" hidden>CLI command/path<input id="llm-cli-command" placeholder="Detected from PATH" /></label>
-            <div class="provider-help">This one local model writes session summaries and long-term memory. Questions are asked from a connected app, not inside Clippy. Pick any Ollama tag. You can change it later in Settings. Size and speed depend on what you choose.</div>
+            <div class="provider-help">Setup downloads <strong>qwen3:8b</strong> (~5 GB) automatically for session summaries. <strong>llama3.2:3b</strong> is a low-memory option (~2 GB) that is less accurate. Pick another tag if you want, or change it later in Settings.</div>
             <label id="llm-api-key-field">API key <span style="font-weight:400;text-transform:none;letter-spacing:normal">optional</span><input id="llm-api-key" type="password" placeholder="Leave blank if your local server needs no key" autocomplete="off" /></label>
             <button type="button" class="secondary" id="llm-connect-btn" hidden>Connect account in Terminal</button>
           </div>
@@ -821,7 +824,7 @@
       </div>
 
       <p class="note" id="hardware-note">
-        Choose any local AI model above. Next you will review each download and accept it before anything is installed.
+        qwen3:8b (~5 GB) and, if needed, a checksum-verified CPython 3.12 from python-build-standalone (~25–30 MB) download automatically. llama3.2:3b is a low-memory option that is less accurate. Next you will review each download and accept it before anything is installed.
       </p>
 
       <label class="override" id="override-row">
@@ -869,8 +872,8 @@
         <div class="step-icon">○</div>
         <div class="step-body">
           <div class="step-label">Python</div>
-          <div class="step-sub">Checking for Python 3.11+</div>
-          <div class="step-bar-wrap"><div class="step-bar indeterminate"></div></div>
+          <div class="step-sub">Checking for Python 3.11+ (downloads a runtime if needed)</div>
+          <div class="step-bar-wrap"><div class="step-bar" id="bar-python"></div></div>
         </div>
       </div>
 
@@ -940,10 +943,12 @@
   <script>
     const STEPS = ['python', 'ollama', 'ollama-service', 'packages', 'models', 'warmup']
     const STEP_TOTAL = STEPS.length
+    const DEFAULT_CHAT_MODEL = 'qwen3:8b'
+    const LOW_MEMORY_CHAT_MODEL = 'llama3.2:3b'
     const MODEL_SUGGESTIONS = [
-      { id: 'qwen3:8b', label: 'qwen3:8b', hint: 'balanced' },
-      { id: 'qwen3:4b', label: 'qwen3:4b', hint: 'lighter' },
-      { id: 'llama3.2:3b', label: 'llama3.2:3b', hint: 'small' },
+      { id: 'qwen3:8b', label: 'qwen3:8b', hint: 'default · ~5 GB' },
+      { id: 'llama3.2:3b', label: 'llama3.2:3b', hint: 'low memory · less accurate · ~2 GB' },
+      { id: 'qwen3:4b', label: 'qwen3:4b', hint: 'lighter · ~2.5 GB' },
       { id: 'gemma3:4b', label: 'gemma3:4b', hint: 'small' },
       { id: 'mistral:7b', label: 'mistral:7b', hint: 'classic' },
     ]
@@ -993,6 +998,13 @@
         })
         wrap.appendChild(btn)
       }
+      updateLowMemoryWarning(selected)
+    }
+
+    function updateLowMemoryWarning(model) {
+      const el = $('model-accuracy-note')
+      if (!el) return
+      el.hidden = String(model || '').trim() !== LOW_MEMORY_CHAT_MODEL
     }
 
     function updateModelsStepSub(model) {
@@ -1036,8 +1048,8 @@
       // Hosted and subscription modes remain a comment-only future extension.
       $('hardware-summary').textContent = check.level === 'ready' ? 'Ready' : check.level === 'warn' ? 'Review' : 'Blocked'
       $('hardware-note').textContent = check.mode === 'external'
-        ? 'Your local API supplies the AI model. Next you will review the remaining downloads (packages and capture stack) before anything installs.'
-        : 'Disk use depends on the local AI model you choose. Capture uses accessibility + OCR and does not download a vision model. Next: review and accept each download.'
+        ? 'Your local API supplies the AI model. Next you will review remaining downloads (Python runtime if needed, packages, capture stack) before anything installs.'
+        : 'Setup downloads qwen3:8b (~5 GB) for summaries and, if Python 3.11+ is missing, a checksum-verified CPython 3.12 from python-build-standalone (~25–30 MB). llama3.2:3b is a low-memory option that is less accurate. Capture uses accessibility + OCR and does not download a vision model. Next: review and accept each download. Change the model later in Settings.'
 
       const verdict = $('verdict')
       const continueBtn = $('btn-continue')
@@ -1087,15 +1099,22 @@
       const safeModel = escapeHtml(model)
       const items = [
         {
+          id: 'python-runtime',
+          title: 'Python runtime (CPython 3.12)',
+          why: 'Clippy downloads a relocatable CPython 3.12 from python-build-standalone (~25–30 MB, checksum-verified) so you do not need to install Python yourself. This download is skipped if Python 3.11+ is already on this machine.',
+          meta: 'One-time GitHub download (astral-sh/python-build-standalone) · SHA-256 verified · ~25–30 MB · skipped when Python 3.11+ is present',
+          required: true,
+        },
+        {
           id: 'packages',
           title: 'Python packages',
-          why: 'Needed for the local API, screen capture, OCR, and privacy helpers. Installed into your Python environment from requirements.txt.',
+          why: 'Needed for the local API, screen capture, OCR, and privacy helpers. Installed into Clippy’s app-managed Python environment from requirements.txt.',
           meta: 'One-time pip install · size varies by what is already present',
           required: true,
         },
       ]
       if (mode !== 'external') {
-        items.unshift({
+        items.splice(1, 0, {
           id: 'ollama',
           title: 'Ollama (local model runtime)',
           why: 'Runs the local AI model you chose entirely on this machine. Clippy installs Ollama only if it is missing; if you already have it, this step just verifies it.',
@@ -1112,7 +1131,9 @@
         items.push({
           id: 'chat-model',
           title: `Local AI model: ${safeModel}`,
-          why: `This is Clippy’s main local model. It classifies events, summarizes sessions, and distills memory. You ask questions from Cursor, Claude, or VS Code after setup. Clippy pulls only the model you selected. Size depends on the tag (for example qwen3:8b is around 4–5 GB).`,
+          why: model === LOW_MEMORY_CHAT_MODEL
+            ? 'llama3.2:3b is a low-memory option (~2 GB). It is less accurate than the default qwen3:8b for session summaries. Clippy downloads it automatically. You can change it later in Settings.'
+            : `Clippy downloads this model automatically and uses it for session summaries and long-term memory. The default (qwen3:8b, about 5 GB) is the more accurate choice. llama3.2:3b is a low-memory option that is less accurate. You can change it later in Settings.`,
           meta: `ollama pull ${safeModel} · skipped if already on this machine`,
           required: true,
         })
@@ -1207,7 +1228,7 @@
       $('llm-cli-command-field').hidden = true
       $('llm-connect-btn').hidden = true
       $('llm-base-url').value = config.base_url || 'http://127.0.0.1:11434'
-      const chatModel = (config.chat_model || '').trim() || 'qwen3:8b'
+      const chatModel = (config.chat_model || '').trim() || DEFAULT_CHAT_MODEL
       $('llm-chat-model').value = chatModel
       renderModelChips(chatModel)
       updateModelsStepSub(chatModel)
@@ -1216,7 +1237,7 @@
       $('llm-api-key').placeholder = config.api_key_set ? 'Saved key is set · leave blank to keep it' : 'Leave blank if your local server needs no key'
       const managed = isManagedOllamaUrl($('llm-base-url').value)
       $('provider-help').textContent = managed
-        ? 'Clippy can install and manage Ollama locally. Type any model tag or pick a suggestion. This model writes summaries and memory. Change it later in Settings.'
+        ? 'Clippy can install and manage Ollama locally. Setup downloads qwen3:8b automatically unless you pick another tag. llama3.2:3b is a low-memory option that is less accurate. Change it later in Settings.'
         : 'Clippy will use this existing local API for summaries and memory, and skip managed Ollama installs and model pulls.'
     }
 
@@ -1243,7 +1264,7 @@
       // another local runtime later has one clear configuration entry point.
       $('llm-provider').value = 'ollama'
       $('llm-base-url').value = 'http://127.0.0.1:11434'
-      if (!$('llm-chat-model').value.trim()) $('llm-chat-model').value = 'qwen3:8b'
+      if (!$('llm-chat-model').value.trim()) $('llm-chat-model').value = DEFAULT_CHAT_MODEL
       renderModelChips($('llm-chat-model').value.trim())
       $('provider-help').textContent = 'Ollama runs the local AI model you choose; capture uses accessibility text and local OCR.'
       try {
@@ -1258,6 +1279,7 @@
       const value = $('llm-chat-model').value.trim()
       renderModelChips(value)
       updateModelsStepSub(value)
+      updateLowMemoryWarning(value)
     })
 
     $('llm-connect-btn').addEventListener('click', async () => {
@@ -1280,6 +1302,7 @@
     $('btn-continue').addEventListener('click', async () => {
       const btn = $('btn-continue')
       if (btn.disabled) return
+      if (!$('llm-chat-model').value.trim()) $('llm-chat-model').value = DEFAULT_CHAT_MODEL
       const chatModel = $('llm-chat-model').value.trim()
       if (!chatModel) {
         alert('Choose or type a local AI model before continuing.')
@@ -1427,6 +1450,7 @@
     function setStepBar(key, percent) {
       const bar = key === 'packages' ? document.getElementById('bar-packages')
                 : key === 'models'   ? document.getElementById('bar-models')
+                : key === 'python'   ? document.getElementById('bar-python')
                 : null
       if (!bar) return
       if (percent < 0) {
