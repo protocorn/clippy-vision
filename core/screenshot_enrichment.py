@@ -11,7 +11,12 @@ from core.accessibility_text import (
 )
 from core.app_settings import get_capture_settings
 from core.image_embeddings import embed_image
-from core.ocr import extract_text
+from core.ocr import (
+    clear_last_gate_reason,
+    extract_text,
+    last_gate_reason,
+    set_ocr_log_label,
+)
 from core.ocr_crop import crop_screenshot_for_ocr
 from core.performance_metrics import increment, timed
 from core.uia_worker import read_persisted_accessibility_text
@@ -136,20 +141,25 @@ def extract_screenshot_ocr(path: Path) -> str:
     crop is a small slice and its text is present but not actually useful.
     A near-full crop, or a crop that produced no text, is not run again.
     """
-    with tempfile.TemporaryDirectory(prefix="clippy_ocr_crop_") as tmp:
-        cropped_path = Path(tmp) / "content.jpg"
-        with timed("ocr.crop_prepare"):
-            crop = crop_screenshot_for_ocr(path, cropped_path)
-        if crop:
-            with timed("ocr.crop_inference"):
-                cropped_text = extract_text(cropped_path)
-            useful = is_useful_accessibility_text(cropped_text)
-            if useful or _crop_covers_frame(crop) or not str(cropped_text or "").strip():
-                increment("ocr.crop_accepted" if useful else "ocr.skipped_second_pass")
-                return cropped_text
-    increment("ocr.full_fallback")
-    with timed("ocr.full_inference"):
-        return extract_text(path)
+    clear_last_gate_reason()
+    set_ocr_log_label(path.name)
+    try:
+        with tempfile.TemporaryDirectory(prefix="clippy_ocr_crop_") as tmp:
+            cropped_path = Path(tmp) / "content.jpg"
+            with timed("ocr.crop_prepare"):
+                crop = crop_screenshot_for_ocr(path, cropped_path)
+            if crop:
+                with timed("ocr.crop_inference"):
+                    cropped_text = extract_text(cropped_path)
+                useful = is_useful_accessibility_text(cropped_text)
+                if useful or _crop_covers_frame(crop) or not str(cropped_text or "").strip():
+                    increment("ocr.crop_accepted" if useful else "ocr.skipped_second_pass")
+                    return cropped_text
+        increment("ocr.full_fallback")
+        with timed("ocr.full_inference"):
+            return extract_text(path)
+    finally:
+        set_ocr_log_label(None)
 
 
 def enrich_screenshot(
@@ -183,6 +193,11 @@ def enrich_screenshot(
         if settings["ocr_enabled"] and a11y_useful:
             increment("ocr.skipped_accessibility")
         ocr_text = extract_screenshot_ocr(path) if should_run_ocr else ""
+        ocr_gated = bool(should_run_ocr and last_gate_reason())
+        if ocr_gated:
+            from core.ocr_retry import schedule_ocr_retry
+
+            schedule_ocr_retry(path, last_gate_reason())
         captured_text = choose_screen_text(accessibility_text, ocr_text)
         # CLIP/image embeddings: gated by image_embeddings_enabled (default off;
         # parked pending contributor keep/remove decision — see image_embeddings.py).
@@ -194,7 +209,9 @@ def enrich_screenshot(
             stat.st_mtime_ns,
             stat.st_size,
             *result,
-            bool(settings["ocr_enabled"]),
+            # A pressure skip is not a completed OCR pass — retry must be
+            # allowed to run once the gate opens instead of serving "".
+            bool(settings["ocr_enabled"]) and not ocr_gated,
             bool(should_embed_image),
         )
         while len(_cache) > _cache_limit:
