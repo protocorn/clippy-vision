@@ -33,6 +33,39 @@ class SummarizerScreenTextTests(unittest.TestCase):
             "vision_ocr_text": screen,
         }))
 
+    def test_clippy_own_windows_never_reach_a_summary(self):
+        screen = "\n".join(
+            f"Settings option {index}: keep screenshots for seven days" for index in range(40)
+        )
+        clippy = {
+            "event_type": "context_change",
+            "process_name": "Clippy Vision.exe",
+            "window_title": "Settings",
+            "summary": "Switched to Clippy Vision.exe",
+            "vision_ocr_text": screen,
+            "timestamp": 100.0,
+        }
+        clippy_by_title = dict(clippy, process_name="", window_title="Clippy Vision")
+        user = dict(
+            clippy,
+            process_name="Cursor.exe",
+            window_title="retrieval.py - Cursor",
+            summary="Switched to Cursor.exe",
+            vision_ocr_text="\n".join(
+                f"def search_sessions_{index}(question): return fts(question)" for index in range(40)
+            ),
+            timestamp=101.0,
+        )
+
+        self.assertFalse(is_contentful_for_summary(clippy))
+        self.assertFalse(is_contentful_for_summary(clippy_by_title))
+        self.assertTrue(is_contentful_for_summary(user))
+
+        prompt = _build_prompt([clippy, clippy_by_title, user])
+        self.assertIn("retrieval.py - Cursor", prompt)
+        self.assertNotIn("Settings", prompt)
+        self.assertNotIn("Clippy Vision", prompt)
+
     def test_old_empty_screenshot_does_not_hold_the_queue(self):
         self.assertFalse(_awaiting_screen_text({
             "event_type": "screenshot_analysis",

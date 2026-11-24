@@ -33,6 +33,7 @@ from core.chat_model import get_chat_model
 from core.llm_gateway import Priority, gateway
 from core.local_embeddings import embed_text
 from core.model_residency import can_load_text, ensure_text_model
+from core.privacy_settings import is_clippy_window
 
 MODEL = get_chat_model()
 INTERVAL_SEC = 60  # wake cadence; session length is controlled below
@@ -106,6 +107,11 @@ class SkipWindow:
 
 def _window_title(event: dict) -> str:
     return " ".join(str(event.get("window_title") or "").split()).strip()
+
+
+def _is_clippy_event(event: dict) -> bool:
+    """Clippy's own windows (Settings, timeline) are not the user's activity."""
+    return is_clippy_window(str(event.get("process_name") or ""), _window_title(event))
 
 
 def _title_is_informative(title: str) -> bool:
@@ -191,6 +197,10 @@ def is_contentful_for_summary(event: dict) -> bool:
     """
     et = str(event.get("event_type") or "").strip()
     if et in {"typing_burst", "deviation", "mouse_burst"}:
+        return False
+    if _is_clippy_event(event):
+        # Capture already blacks out Clippy's windows; the event itself must not
+        # reach a summary either, or Settings shows up as user activity.
         return False
 
     screen = event.get("vision_ocr_text") or ""
