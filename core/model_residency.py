@@ -45,6 +45,10 @@ VisionPolicy = Literal["idle"]
 _GB = 1024**3
 _OCR_FLOOR = 0.5 * _GB
 _LIGHT_FLOOR = 1.0 * _GB
+# Distress gate for a CPU-only cold load, not a model+KV size estimate.
+# num_ctx=8192 adds ~1 GB of KV cache on qwen3:8b vs Ollama's 2048 default;
+# Ollama still reports OOM itself. Raising this floor would skip loads that
+# previously succeeded and that ensure_text_model already retries below it.
 _TEXT_FLOOR = 1.5 * _GB
 # Windows reports commit charge beyond physical RAM as swap. Near-exhaustion is
 # what raises "paging file is too small" (os error 1455) and ONNX bad_alloc,
