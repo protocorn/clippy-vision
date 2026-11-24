@@ -144,6 +144,28 @@ If `winget` is not available, the wizard does not dead-end: it shows [python.org
 
 Open a new terminal and run `ollama --version`. If not found, re-run setup or install it from [ollama.com](https://ollama.com/download). On Linux the wizard can run the official installer only after you click **Install** and confirm it needs sudo.
 
+### Ollama memory grows after every question
+
+This is Ollama's prompt cache, not a leak in Clippy. Ollama's model runner (`llama-server`) keeps earlier prompts in system RAM so it can reuse them, and by default that cache can grow to 8 GiB. It shows up as roughly 0.5–0.7 GB more RAM after each question. `ollama ps` does not count this cache, so the memory looks unaccounted for.
+
+The limit is the `LLAMA_ARG_CACHE_RAM` environment variable, in MiB. `0` turns the cache off. A small value such as `1024` caps it at 1 GiB. In testing, `qwen3:4b-instruct` stayed flat at about 4.1 GB over six prompts with the cache off, and answer times did not change. The trade-off: sending the exact same prompt twice is slower without the cache. Clippy's prompts are almost always new, so this rarely matters.
+
+The variable has to be set before `ollama serve` starts. It cannot be sent with a chat request, so Clippy cannot apply it for you. Set it for the way you run Ollama:
+
+- **Windows:** run `setx LLAMA_ARG_CACHE_RAM 0` in PowerShell, or add it under **Edit environment variables for your account** in the Start menu.
+- **macOS (Ollama app):** run `launchctl setenv LLAMA_ARG_CACHE_RAM 0`. This lasts until the next restart of your Mac.
+- **Linux (systemd service):** run `sudo systemctl edit ollama.service` and add:
+
+  ```ini
+  [Service]
+  Environment="LLAMA_ARG_CACHE_RAM=0"
+  ```
+
+  Then run `sudo systemctl daemon-reload && sudo systemctl restart ollama`.
+- **`ollama serve` in a terminal (macOS or Linux):** start it with `LLAMA_ARG_CACHE_RAM=0 ollama serve`.
+
+Then quit Clippy and Ollama (including the Ollama tray or menu bar icon) and open them again. Clippy reuses an Ollama server that is already running, so the old server keeps the old cache limit until it restarts.
+
 ### Reset setup / reinstall
 
 Delete `setup_complete.json` from the app data folder below. The setup wizard runs again on the next launch.
