@@ -611,8 +611,13 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         if (merged) process.env.PATH = merged
     }
 
-    async function verifyWithKnownPaths(command, extraCandidates, args = ['--version']) {
-        let result = await runCommand(command, args)
+    async function verifyWithKnownPaths(command, extraCandidates, args = ['--version'], onAttempt = null) {
+        const run = async (executable) => {
+            const result = await runCommand(executable, args)
+            if (onAttempt) onAttempt(executable, args, result)
+            return result
+        }
+        let result = await run(command)
         if (result.code === 0) return result
         for (const candidate of extraCandidates || []) {
             if (!candidate) continue
@@ -620,7 +625,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
                 if (!fs.existsSync(candidate)) continue
             } catch (_) { continue }
             addDirToPath(path.dirname(candidate))
-            result = await runCommand(candidate, args)
+            result = await run(candidate)
             if (result.code === 0) return result
         }
         return result
@@ -653,7 +658,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         if (process.platform === 'win32') await refreshWindowsPathFromRegistry()
         const extra = runtimePythonPaths()
         extra.forEach((candidate) => addDirToPath(path.dirname(candidate)))
-        return verifyWithKnownPaths(systemPythonCommand(), extra)
+        return verifyWithKnownPaths(systemPythonCommand(), extra, ['--version'], logPythonAttempt)
     }
 
     function acceptPythonVersion(raw) {
@@ -669,17 +674,32 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         return false
     }
 
+    function logPythonFailure(result) {
+        log(
+            `Python detection: exit=${result.code}, ` +
+            `stderr=${JSON.stringify(result.stderr || '')}`,
+            'err'
+        )
+    }
+
+    function logPythonAttempt(command, args, result) {
+        log(`> ${[command, ...args].join(' ')}`, 'dim')
+        if (result.code !== 0 || !String(result.stdout || result.stderr || '').trim()) {
+            logPythonFailure(result)
+        }
+    }
+
     async function stepCheckPython() {
         // Windows installs a missing Python with winget. macOS uses Homebrew
         // when Homebrew is already installed. Linux stays a manual install.
         stepUpdate('python', 'running', 'Checking for Python 3.11+...')
-        log('> python --version', 'dim')
 
-        const found = await verifyWithKnownPaths(systemPythonCommand(), runtimePythonPaths())
+        const found = await verifyWithKnownPaths(systemPythonCommand(), runtimePythonPaths(), ['--version'], logPythonAttempt)
         const version = found.stdout || found.stderr
 
         if (found.code === 0 && version) {
             if (acceptPythonVersion(version)) return
+            logPythonFailure(found)
             throw new Error('python-version-required')
         }
 
@@ -709,6 +729,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
                 const verifiedVersion = verify.stdout || verify.stderr
                 if (verify.code === 0 && verifiedVersion) {
                     if (acceptPythonVersion(verifiedVersion)) return
+                    logPythonFailure(verify)
                     throw new Error('python-version-required')
                 }
             }
@@ -747,6 +768,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
 
         const verifiedVersion = verify.stdout || verify.stderr || 'Python installed.'
         if (acceptPythonVersion(verifiedVersion)) return
+        logPythonFailure(verify)
         throw new Error('python-version-required')
     }
 
